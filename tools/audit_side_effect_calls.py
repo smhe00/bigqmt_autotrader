@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail CI if production side-effect or evidence-write calls escape OMS boundaries."""
+"""Fail CI if production side-effect, risk-bypass or evidence-write calls escape OMS boundaries."""
 
 from __future__ import annotations
 
@@ -12,13 +12,22 @@ SRC = ROOT / "src" / "bigqmt_autotrader"
 
 ALLOWED_ATTRIBUTE_CALLS = {
     "submit_limit_order": {
-        ("oms/service.py", "submit_intent"),
+        ("oms/service.py", "_submit_decided_intent"),
     },
     "cancel_order": {
         ("oms/service.py", "cancel_order"),
     },
     "merge_broker_fact_in_tx": {
         ("oms/evidence.py", "ingest"),
+    },
+    "_submit_decided_intent": {
+        ("oms/service.py", "submit_intent"),
+    },
+}
+
+ALLOWED_DIRECT_CALLS = {
+    "evaluate_risk": {
+        ("oms/service.py", "submit_intent"),
     },
 }
 
@@ -34,6 +43,7 @@ class CallVisitor(ast.NodeVisitor):
         self.relative_path = relative_path
         self.function_stack: list[str] = []
         self.attribute_calls: list[tuple[str, str, int]] = []
+        self.direct_calls: list[tuple[str, str, int]] = []
         self.constructor_calls: list[tuple[str, str, int]] = []
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -50,6 +60,8 @@ class CallVisitor(ast.NodeVisitor):
         enclosing = self.function_stack[-1] if self.function_stack else "<module>"
         if isinstance(node.func, ast.Attribute) and node.func.attr in ALLOWED_ATTRIBUTE_CALLS:
             self.attribute_calls.append((node.func.attr, enclosing, node.lineno))
+        if isinstance(node.func, ast.Name) and node.func.id in ALLOWED_DIRECT_CALLS:
+            self.direct_calls.append((node.func.id, enclosing, node.lineno))
         if isinstance(node.func, ast.Name) and node.func.id in ALLOWED_CONSTRUCTORS:
             self.constructor_calls.append((node.func.id, enclosing, node.lineno))
         self.generic_visit(node)
@@ -74,12 +86,9 @@ def _audit_calls(
 
 
 def main() -> None:
-    observed_attributes: dict[str, set[tuple[str, str]]] = {
-        name: set() for name in ALLOWED_ATTRIBUTE_CALLS
-    }
-    observed_constructors: dict[str, set[tuple[str, str]]] = {
-        name: set() for name in ALLOWED_CONSTRUCTORS
-    }
+    observed_attributes = {name: set() for name in ALLOWED_ATTRIBUTE_CALLS}
+    observed_direct = {name: set() for name in ALLOWED_DIRECT_CALLS}
+    observed_constructors = {name: set() for name in ALLOWED_CONSTRUCTORS}
     violations: list[str] = []
 
     for path in sorted(SRC.rglob("*.py")):
@@ -94,7 +103,15 @@ def main() -> None:
             visitor.attribute_calls,
             relative,
             violations,
-            label="call",
+            label="attribute call",
+        )
+        _audit_calls(
+            observed_direct,
+            ALLOWED_DIRECT_CALLS,
+            visitor.direct_calls,
+            relative,
+            violations,
+            label="direct call",
         )
         _audit_calls(
             observed_constructors,
@@ -107,6 +124,7 @@ def main() -> None:
 
     for allowed, observed in (
         (ALLOWED_ATTRIBUTE_CALLS, observed_attributes),
+        (ALLOWED_DIRECT_CALLS, observed_direct),
         (ALLOWED_CONSTRUCTORS, observed_constructors),
     ):
         for name, expected_locations in allowed.items():
@@ -120,12 +138,14 @@ def main() -> None:
         raise SystemExit("SIDE-EFFECT SURFACE AUDIT FAILED\n" + "\n".join(violations))
 
     print("SIDE-EFFECT SURFACE AUDIT PASS")
-    for name, locations in observed_attributes.items():
-        rendered = ", ".join(f"{path}:{fn}()" for path, fn in sorted(locations))
-        print(f"  call {name}: {rendered}")
-    for name, locations in observed_constructors.items():
-        rendered = ", ".join(f"{path}:{fn}()" for path, fn in sorted(locations))
-        print(f"  constructor {name}: {rendered}")
+    for group, observed in (
+        ("attribute call", observed_attributes),
+        ("direct call", observed_direct),
+        ("constructor", observed_constructors),
+    ):
+        for name, locations in observed.items():
+            rendered = ", ".join(f"{path}:{fn}()" for path, fn in sorted(locations))
+            print(f"  {group} {name}: {rendered}")
 
 
 if __name__ == "__main__":
