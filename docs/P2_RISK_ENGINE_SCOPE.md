@@ -32,9 +32,9 @@ The runtime-mode vocabulary is:
 - `LIVE_CANARY`
 - `LIVE_ARMED`
 
-P2's default policy permits execution eligibility only in **`SIMULATION`**. The live mode names exist so later phase contracts do not need incompatible enums; they are **not enabled by P2** and are not authorization for live trading.
+In P2, `RiskPolicy.permitted_execution_modes` is structurally constrained to **exactly `{SIMULATION}`**. Construction of a P2 policy fails if it attempts to authorize `SHADOW`, `LIVE_CANARY`, `LIVE_ARMED`, or any mixed execution-mode set.
 
-Any later policy that permits `LIVE_CANARY` or `LIVE_ARMED` requires its own phase gate and a real adapter gate.
+The live mode names remain in the vocabulary so later phase contracts do not require incompatible enums; they are **not enabled by P2** and are not authorization for live trading. Any later capability that permits `LIVE_CANARY` or `LIVE_ARMED` requires an explicit contract/code/formal-gate change in a later phase; it cannot be opened by configuration alone.
 
 ## 3. Immutable inputs
 
@@ -67,7 +67,7 @@ The snapshot supplies facts; it never grants authority. It includes:
 - reconciliation/leader/database state;
 - account fingerprint, cash, gross exposure and account-data timestamp;
 - daily PnL, turnover, order count and cancel count;
-- strategy heartbeat, current strategy exposure/turnover/position count;
+- strategy heartbeat, current strategy exposure, current strategy exposure for the requested security, turnover and position count;
 - security market facts: tick, price limits, reference price, market-data timestamp, lot size, sellable quantity and current security exposure;
 - currently blocked/ambiguous symbols and account-wide ambiguity flag.
 
@@ -159,7 +159,13 @@ Rules:
 
 `rule_version` identifies the policy contract; policy version mutation without changing `rule_version` is a release-process violation.
 
-## 7. P2 non-goals
+## 7. OMS authority boundary
+
+The public OMS submit API accepts `(OrderIntent, RiskSnapshot, RiskPolicy)`. It evaluates risk internally, persists the resulting `RiskDecision`, and only an accepted decision may proceed to durable submit reservation.
+
+Production callers cannot pass a preconstructed accepted `RiskDecision` through the public submit API. The old decision-injection path is retained only as a private P1 mechanics hook used by tests. Static CI audits the production source so this private path is reachable only from the public OMS risk-evaluation path.
+
+## 8. P2 non-goals
 
 P2 does not implement:
 
@@ -173,7 +179,7 @@ P2 does not implement:
 
 Market-specific values are supplied as risk snapshot facts and validated, not guessed.
 
-## 8. Required verification
+## 9. Required verification
 
 P2 cannot PASS without:
 
@@ -184,10 +190,12 @@ P2 cannot PASS without:
 - BUY cash and SELL sellable-quantity tests;
 - ambiguity-block tests;
 - canonical snapshot-hash stability tests;
-- integration test proving a rejected decision causes zero simulated broker calls;
+- integration test proving a rejected public OMS submission causes zero simulated broker calls;
+- integration test proving the public OMS path owns risk evaluation and persists its decision before execution eligibility;
+- P2 policy construction rejecting non-simulation execution authority;
 - finite formal model of level precedence/fail-close behavior added to mandatory CI;
 - P1 formal/fault gates remaining green.
 
-## 9. Exit criterion
+## 10. Exit criterion
 
-P2 may PASS when the engine is deterministic and fail-closed for every implemented rule, the formal precedence model has no counterexample, rejected decisions cannot reach the simulated broker side-effect surface, and no real QMT capability has been added.
+P2 may PASS when the engine is deterministic and fail-closed for every implemented rule, the formal precedence model has no counterexample, rejected decisions cannot reach the simulated broker side-effect surface, the public OMS submit path owns risk evaluation, and no real QMT capability has been added.
