@@ -111,8 +111,6 @@ class OfflineOms:
     def recover(self) -> None:
         self.assert_leader()
         for row in self.repository.list_recovery_candidates():
-            # Keep a long reconciliation pass from silently running past its
-            # lease. Heartbeat refuses to resurrect an already-expired lease.
             self.heartbeat()
 
             account = row["account_fingerprint"]
@@ -132,10 +130,6 @@ class OfflineOms:
                 )
                 status = OrderStatus.UNKNOWN
 
-            # Execution state and cancel-attempt state are orthogonal. A partial
-            # fill callback may have replaced CANCEL_PENDING in the aggregate
-            # order state while the cancel outcome was still unresolved. Restore
-            # the pending-cancel marker before entering UNKNOWN/reconciliation.
             if cancel_unresolved and status in {
                 OrderStatus.ACKNOWLEDGED,
                 OrderStatus.PARTIALLY_FILLED,
@@ -188,6 +182,7 @@ class OfflineOms:
 
             self.assert_leader()
             evidence = self.driver.query_by_client_order_id(account, client_order_id)
+            self.assert_leader()
             if evidence is None:
                 self.repository.transition_order(
                     account,
@@ -209,10 +204,10 @@ class OfflineOms:
                     cancel_outcome_resolved=True if cancel_unresolved else None,
                 )
 
-        self.assert_leader()
-        self.repository.mark_session_reconciled(self.session_id)
-        self._reconciled = True
         self.heartbeat()
+        self.repository.mark_session_reconciled(self.session_id)
+        self.assert_leader()
+        self._reconciled = True
 
     def submit_intent(self, intent: OrderIntent, decision: RiskDecision) -> SubmitResult:
         self.assert_leader()
@@ -226,18 +221,12 @@ class OfflineOms:
         if status is OrderStatus.RISK_REJECTED:
             return SubmitResult(status=status)
 
-        # This commit happens before the simulated side effect. Once reserved,
-        # this client order identity is never automatically submitted again.
         self.repository.prepare_submit(intent.account_fingerprint, intent.client_order_id)
-
-        # Re-check the fencing token after the durable reservation and as close
-        # as possible to the external side effect. If ownership was lost, the
-        # order remains SUBMITTING and the new leader must reconcile it; the old
-        # leader never calls the broker.
         self.assert_leader()
         try:
             ack = self.driver.submit_limit_order(intent)
         except SubmitOutcomeUnknown as exc:
+            self.assert_leader()
             self.repository.transition_order(
                 intent.account_fingerprint,
                 intent.client_order_id,
@@ -247,6 +236,7 @@ class OfflineOms:
             )
             return SubmitResult(status=OrderStatus.UNKNOWN)
         except BaseException as exc:
+            self.assert_leader()
             self.repository.transition_order(
                 intent.account_fingerprint,
                 intent.client_order_id,
@@ -256,6 +246,7 @@ class OfflineOms:
             )
             return SubmitResult(status=OrderStatus.UNKNOWN)
 
+        self.assert_leader()
         self.repository.transition_order(
             intent.account_fingerprint,
             intent.client_order_id,
@@ -272,13 +263,11 @@ class OfflineOms:
             raise OmsNotReconciled("startup reconciliation must complete before cancellation")
 
         self.repository.prepare_cancel(account_fingerprint, client_order_id)
-
-        # Same fencing rule as submit: a lost leader leaves the durable cancel
-        # reservation unresolved for the successor to reconcile, never recancel.
         self.assert_leader()
         try:
             ack = self.driver.cancel_order(account_fingerprint, client_order_id)
         except CancelOutcomeUnknown as exc:
+            self.assert_leader()
             self.repository.transition_order(
                 account_fingerprint,
                 client_order_id,
@@ -288,6 +277,7 @@ class OfflineOms:
             )
             return CancelResult(status=OrderStatus.UNKNOWN)
         except BaseException as exc:
+            self.assert_leader()
             self.repository.transition_order(
                 account_fingerprint,
                 client_order_id,
@@ -297,6 +287,7 @@ class OfflineOms:
             )
             return CancelResult(status=OrderStatus.UNKNOWN)
 
+        self.assert_leader()
         self.repository.transition_order(
             account_fingerprint,
             client_order_id,
