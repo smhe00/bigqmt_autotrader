@@ -66,6 +66,15 @@ def _fail_event(conn, trigger_name, event_type):
     )
 
 
+def _submit_ok(repo, driver, oms):
+    submitted = oms.submit_intent(_intent(), _decision())
+    assert submitted.status is OrderStatus.ACKNOWLEDGED
+    row = repo.get_order_row("account-A", "cid-db-fault")
+    assert row["broker_order_id"] is not None
+    assert driver.submit_call_count("account-A", "cid-db-fault") == 1
+    return row["broker_order_id"]
+
+
 def test_read_only_database_fails_before_any_broker_submit(tmp_path):
     conn, _, driver, oms = _stack(tmp_path)
     conn.execute("PRAGMA query_only=ON")
@@ -73,6 +82,32 @@ def test_read_only_database_fails_before_any_broker_submit(tmp_path):
     with pytest.raises(sqlite3.OperationalError):
         oms.submit_intent(_intent(), _decision())
 
+    assert driver.submit_call_count("account-A", "cid-db-fault") == 0
+
+
+def test_risk_persistence_failure_leaves_created_orphan_and_never_calls_broker(tmp_path):
+    conn, repo, driver, oms = _stack(tmp_path)
+    conn.execute(
+        """
+        CREATE TRIGGER fail_risk_insert
+        BEFORE INSERT ON risk_decisions
+        BEGIN
+            SELECT RAISE(ABORT, 'injected risk persistence failure');
+        END
+        """
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        oms.submit_intent(_intent(), _decision())
+
+    assert repo.get_status("account-A", "cid-db-fault") is OrderStatus.CREATED
+    assert driver.submit_call_count("account-A", "cid-db-fault") == 0
+
+    conn.execute("DROP TRIGGER fail_risk_insert")
+    oms.close()
+    restarted = OfflineOms(repo, driver)
+    restarted.recover()
+    assert repo.get_status("account-A", "cid-db-fault") is OrderStatus.ABORTED
     assert driver.submit_call_count("account-A", "cid-db-fault") == 0
 
 
@@ -110,10 +145,23 @@ def test_submit_ack_persistence_failure_recovers_broker_fact_without_resubmit(tm
     assert driver.submit_call_count("account-A", "cid-db-fault") == 1
 
 
+def test_cancel_reservation_transaction_failure_rolls_back_and_never_calls_broker(tmp_path):
+    conn, repo, driver, oms = _stack(tmp_path)
+    _submit_ok(repo, driver, oms)
+    _fail_event(conn, "fail_cancel_reserved", "CANCEL_RESERVED")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        oms.cancel_order("account-A", "cid-db-fault")
+
+    row = repo.get_order_row("account-A", "cid-db-fault")
+    assert row["status"] == OrderStatus.ACKNOWLEDGED.value
+    assert row["cancel_call_started"] == 0
+    assert driver.cancel_call_count("account-A", "cid-db-fault") == 0
+
+
 def test_cancel_ack_persistence_failure_recovers_without_second_cancel(tmp_path):
     conn, repo, driver, oms = _stack(tmp_path)
-    submitted = oms.submit_intent(_intent(), _decision())
-    assert submitted.status is OrderStatus.ACKNOWLEDGED
+    _submit_ok(repo, driver, oms)
     _fail_event(conn, "fail_cancel_ack", "CANCEL_ACK")
 
     with pytest.raises(sqlite3.IntegrityError):
@@ -132,3 +180,74 @@ def test_cancel_ack_persistence_failure_recovers_without_second_cancel(tmp_path)
 
     assert repo.get_status("account-A", "cid-db-fault") is OrderStatus.CANCELLED
     assert driver.cancel_call_count("account-A", "cid-db-fault") == 1
+
+
+def test_evidence_key_failure_rolls_back_aggregate_event_and_journal(tmp_path):
+    conn, repo, _, oms = _stack(tmp_path)
+    broker_order_id = _submit_ok(repo, oms.driver, oms)
+    conn.execute(
+        """
+        CREATE TRIGGER fail_evidence_key
+        BEFORE INSERT ON broker_evidence_keys
+        BEGIN
+            SELECT RAISE(ABORT, 'injected evidence key failure');
+        END
+        """
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        oms.ingest_broker_evidence(
+            source="QMT_CALLBACK",
+            source_event_id="evt-key-fail",
+            account_fingerprint="account-A",
+            client_order_id="cid-db-fault",
+            evidence_type="ORDER_STATUS",
+            broker_order_id=broker_order_id,
+            requested_status=OrderStatus.PARTIALLY_FILLED,
+            filled_quantity=50,
+        )
+
+    row = repo.get_order_row("account-A", "cid-db-fault")
+    assert row["status"] == OrderStatus.ACKNOWLEDGED.value
+    assert row["filled_quantity"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM broker_evidence_keys").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM broker_evidence_observations").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM order_events WHERE event_type='BROKER_EVIDENCE_ORDER_STATUS'"
+    ).fetchone()[0] == 0
+
+
+def test_evidence_observation_failure_rolls_back_aggregate_key_and_event(tmp_path):
+    conn, repo, _, oms = _stack(tmp_path)
+    broker_order_id = _submit_ok(repo, oms.driver, oms)
+    conn.execute(
+        """
+        CREATE TRIGGER fail_evidence_observation
+        BEFORE INSERT ON broker_evidence_observations
+        WHEN NEW.classification='NEW'
+        BEGIN
+            SELECT RAISE(ABORT, 'injected evidence observation failure');
+        END
+        """
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        oms.ingest_broker_evidence(
+            source="QMT_CALLBACK",
+            source_event_id="evt-observation-fail",
+            account_fingerprint="account-A",
+            client_order_id="cid-db-fault",
+            evidence_type="ORDER_STATUS",
+            broker_order_id=broker_order_id,
+            requested_status=OrderStatus.PARTIALLY_FILLED,
+            filled_quantity=50,
+        )
+
+    row = repo.get_order_row("account-A", "cid-db-fault")
+    assert row["status"] == OrderStatus.ACKNOWLEDGED.value
+    assert row["filled_quantity"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM broker_evidence_keys").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM broker_evidence_observations").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM order_events WHERE event_type='BROKER_EVIDENCE_ORDER_STATUS'"
+    ).fetchone()[0] == 0
