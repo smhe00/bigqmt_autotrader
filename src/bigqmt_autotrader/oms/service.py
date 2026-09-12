@@ -41,9 +41,9 @@ class OfflineOms:
     """P1 single-machine OMS against a simulated driver only.
 
     Construction acquires the SQLite-backed OMS leader lease. The surrounding
-    service loop must heartbeat before the lease expires. Every recovery,
-    broker-side-effect and callback/evidence write path verifies the fencing
-    token and fails closed if ownership was lost.
+    service loop must heartbeat before the lease expires. Every repository write,
+    recovery operation, broker side effect and callback/evidence write is fenced
+    by the current lease token.
     """
 
     def __init__(
@@ -71,6 +71,10 @@ class OfflineOms:
             lease_seconds=self._leader_lease_seconds,
             now=self._now(),
         )
+        # Every repository write now checks this exact lease after acquiring
+        # SQLite's BEGIN IMMEDIATE writer lock. This closes the race between a
+        # service-level assertion and the durable write transaction.
+        self.repository.bind_write_guard(self.assert_leader)
         try:
             self.repository.start_session(self.session_id)
         except BaseException:
