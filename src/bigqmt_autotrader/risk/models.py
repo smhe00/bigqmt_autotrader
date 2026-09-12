@@ -116,6 +116,10 @@ class RiskPolicy:
             raise ValueError("permitted_execution_modes must be a non-empty frozenset")
         if not all(isinstance(mode, RuntimeMode) for mode in self.permitted_execution_modes):
             raise TypeError("permitted_execution_modes must contain RuntimeMode values")
+        if self.permitted_execution_modes != frozenset({RuntimeMode.SIMULATION}):
+            raise ValueError(
+                "P2 policy may permit SIMULATION only; live modes require a later phase gate"
+            )
         _require_bool("require_qmt_healthy", self.require_qmt_healthy)
         _require_positive_int("account_max_age_seconds", self.account_max_age_seconds)
         _require_positive_int("strategy_max_age_seconds", self.strategy_max_age_seconds)
