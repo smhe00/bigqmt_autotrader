@@ -145,6 +145,62 @@ SubmitRejected ==
                    cancelCalls, cancelResolved, brokerCancelled,
                    abandonedCancelReservation>>
 
+\* Explicit hard-crash window: durable SUBMITTING exists, the broker call has
+\* happened, but no ACK/UNKNOWN result has been committed yet.
+SubmitCallAcceptedBeforePersist ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase = "SUBMITTING"
+    /\ reservation
+    /\ submitCalls = 0
+    /\ phase' = phase
+    /\ submitCalls' = 1
+    /\ brokerExists' = TRUE
+    /\ UNCHANGED <<reservation, crashed, sessionReconciled,
+                   abandonedReservation, unknownGate, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
+
+SubmitCallNotAcceptedBeforePersist ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase = "SUBMITTING"
+    /\ reservation
+    /\ submitCalls = 0
+    /\ phase' = phase
+    /\ submitCalls' = 1
+    /\ brokerExists' = FALSE
+    /\ UNCHANGED <<reservation, crashed, sessionReconciled,
+                   abandonedReservation, unknownGate, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
+
+PersistSubmitAckAfterSideEffect ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase = "SUBMITTING"
+    /\ reservation
+    /\ submitCalls = 1
+    /\ brokerExists
+    /\ phase' = "ACKNOWLEDGED"
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelReservation, cancelCalls, cancelResolved,
+                   brokerCancelled, abandonedCancelReservation>>
+
+PersistSubmitUnknownAfterSideEffect ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase = "SUBMITTING"
+    /\ reservation
+    /\ submitCalls = 1
+    /\ phase' = "UNKNOWN"
+    /\ unknownGate' = TRUE
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
+
 CancelRequest ==
     /\ ~crashed
     /\ sessionReconciled
@@ -203,7 +259,9 @@ CancelNotAcceptedResponseLost ==
                    sessionReconciled, abandonedReservation, cancelReservation,
                    cancelResolved, abandonedCancelReservation>>
 
-CancelSideEffectBeforePersist ==
+\* Same hard-crash window for cancel. The original broker order still exists;
+\* brokerCancelled records whether the cancel side effect actually took effect.
+CancelCallAcceptedBeforePersist ==
     /\ ~crashed
     /\ sessionReconciled
     /\ phase \in {"CANCEL_PENDING", "PARTIALLY_FILLED"}
@@ -213,6 +271,20 @@ CancelSideEffectBeforePersist ==
     /\ phase' = phase
     /\ cancelCalls' = 1
     /\ brokerCancelled' = TRUE
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelReservation, cancelResolved, abandonedCancelReservation>>
+
+CancelCallNotAcceptedBeforePersist ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase \in {"CANCEL_PENDING", "PARTIALLY_FILLED"}
+    /\ cancelReservation
+    /\ cancelCalls = 0
+    /\ ~cancelResolved
+    /\ phase' = phase
+    /\ cancelCalls' = 1
+    /\ brokerCancelled' = FALSE
     /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
                    sessionReconciled, abandonedReservation, unknownGate,
                    cancelReservation, cancelResolved, abandonedCancelReservation>>
@@ -238,7 +310,6 @@ PersistCancelUnknownAfterSideEffect ==
     /\ phase \in {"CANCEL_PENDING", "PARTIALLY_FILLED"}
     /\ cancelReservation
     /\ cancelCalls = 1
-    /\ brokerCancelled
     /\ ~cancelResolved
     /\ phase' = "UNKNOWN"
     /\ unknownGate' = TRUE
@@ -342,11 +413,14 @@ Next ==
     RiskAccept \/ RiskReject \/ ReserveSubmit \/
     SubmitAcceptedAck \/ SubmitAcceptedResponseLost \/
     SubmitNotAcceptedResponseLost \/ SubmitRejected \/
+    SubmitCallAcceptedBeforePersist \/ SubmitCallNotAcceptedBeforePersist \/
+    PersistSubmitAckAfterSideEffect \/ PersistSubmitUnknownAfterSideEffect \/
     CancelRequest \/ CancelAcceptedAck \/ CancelAcceptedResponseLost \/
-    CancelNotAcceptedResponseLost \/ CancelSideEffectBeforePersist \/
-    PersistCancelAckAfterSideEffect \/ PersistCancelUnknownAfterSideEffect \/
-    PartialFill \/ Fill \/ Crash \/ Restart \/ BeginReconcile \/
-    ReconcileFound \/ ReconcileNotFound \/ RecoverNoCandidate \/ Stutter
+    CancelNotAcceptedResponseLost \/ CancelCallAcceptedBeforePersist \/
+    CancelCallNotAcceptedBeforePersist \/ PersistCancelAckAfterSideEffect \/
+    PersistCancelUnknownAfterSideEffect \/ PartialFill \/ Fill \/ Crash \/
+    Restart \/ BeginReconcile \/ ReconcileFound \/ ReconcileNotFound \/
+    RecoverNoCandidate \/ Stutter
 
 Spec ==
     /\ Init
