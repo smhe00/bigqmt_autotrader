@@ -67,3 +67,7 @@ jobs:
         run: |
           cd formal
           java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config PreSubmitRecovery.cfg PreSubmitRecovery.tla
+      - name: TLC - risk precedence and fail-close
+        run: |
+          cd formal
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config RiskPrecedence.cfg RiskPrecedence.tla
