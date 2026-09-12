@@ -1,3 +1,4 @@
+from .codes import RiskReasonCode, SystemErrorCode
 from .idempotency import ClientOrderIdRegistry, DuplicateClientOrderId
 from .models import Order, OrderIntent, RiskDecision, Trade
 from .state_machine import InvalidTransition, TransitionDisposition, TransitionOutcome, transition
@@ -12,7 +13,9 @@ __all__ = [
     "OrderStatus",
     "OrderType",
     "RiskDecision",
+    "RiskReasonCode",
     "Side",
+    "SystemErrorCode",
     "Trade",
     "TransitionDisposition",
     "TransitionOutcome",

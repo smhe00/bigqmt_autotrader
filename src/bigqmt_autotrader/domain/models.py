@@ -5,12 +5,18 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
+from .codes import RiskReasonCode
 from .states import OrderStatus, OrderType, Side
 
 
 def _require_nonempty(name: str, value: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
+
+
+def _require_positive_int(name: str, value: int) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
 
 
 def _require_decimal(name: str, value: Decimal) -> None:
@@ -54,8 +60,7 @@ class OrderIntent:
             _require_nonempty(name, getattr(self, name))
         if self.order_type is not OrderType.LIMIT:
             raise ValueError("P0 contract permits LIMIT orders only")
-        if not isinstance(self.quantity, int) or isinstance(self.quantity, bool) or self.quantity <= 0:
-            raise ValueError("quantity must be a positive integer")
+        _require_positive_int("quantity", self.quantity)
         _require_decimal("limit_price", self.limit_price)
         _require_aware("created_at", self.created_at)
         _require_aware("expires_at", self.expires_at)
@@ -83,9 +88,10 @@ class Order:
         _require_nonempty("client_order_id", self.client_order_id)
         _require_nonempty("account_fingerprint", self.account_fingerprint)
         _require_nonempty("symbol", self.symbol)
+        _require_positive_int("quantity", self.quantity)
         _require_decimal("limit_price", self.limit_price)
-        if self.quantity <= 0:
-            raise ValueError("quantity must be positive")
+        if not isinstance(self.filled_quantity, int) or isinstance(self.filled_quantity, bool):
+            raise ValueError("filled_quantity must be an integer")
         if self.filled_quantity < 0 or self.filled_quantity > self.quantity:
             raise ValueError("filled_quantity must be in [0, quantity]")
 
@@ -104,8 +110,7 @@ class Trade:
     def __post_init__(self) -> None:
         for name in ("trade_id", "client_order_id", "account_fingerprint", "symbol"):
             _require_nonempty(name, getattr(self, name))
-        if self.quantity <= 0:
-            raise ValueError("quantity must be positive")
+        _require_positive_int("quantity", self.quantity)
         _require_decimal("price", self.price)
         _require_aware("traded_at", self.traded_at)
 
@@ -113,12 +118,16 @@ class Trade:
 @dataclass(frozen=True)
 class RiskDecision:
     accepted: bool
-    reason_code: str
+    reason_code: RiskReasonCode
     rule_version: str
     snapshot_hash: str
     decided_at: datetime
 
     def __post_init__(self) -> None:
-        for name in ("reason_code", "rule_version", "snapshot_hash"):
+        if not isinstance(self.accepted, bool):
+            raise TypeError("accepted must be bool")
+        if not isinstance(self.reason_code, RiskReasonCode):
+            raise TypeError("reason_code must be RiskReasonCode")
+        for name in ("rule_version", "snapshot_hash"):
             _require_nonempty(name, getattr(self, name))
         _require_aware("decided_at", self.decided_at)
