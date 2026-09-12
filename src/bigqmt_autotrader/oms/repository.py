@@ -29,6 +29,18 @@ class CancelAlreadyStarted(RuntimeError):
     pass
 
 
+class BrokerFactConflict(RuntimeError):
+    pass
+
+
+class BrokerOrderIdMismatch(BrokerFactConflict):
+    pass
+
+
+class InvalidFilledQuantity(BrokerFactConflict):
+    pass
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -236,30 +248,66 @@ class OmsRepository:
         filled_quantity: int | None = None,
         cancel_outcome_resolved: bool | None = None,
     ):
-        current = self._get_status_in_tx(account_fingerprint, client_order_id)
-        outcome = transition(current, target)
+        context = self._get_order_context_in_tx(account_fingerprint, client_order_id)
+        current = OrderStatus(context["status"])
+        current_broker_order_id = context["broker_order_id"]
+        current_filled = int(context["filled_quantity"])
+        order_quantity = int(context["quantity"])
+
+        if broker_order_id is not None:
+            if current_broker_order_id not in (None, broker_order_id):
+                raise BrokerOrderIdMismatch(
+                    f"broker order identity changed for {client_order_id}: "
+                    f"{current_broker_order_id!r} -> {broker_order_id!r}"
+                )
+
+        effective_filled = current_filled
+        normalized_target = target
+        if filled_quantity is not None:
+            if isinstance(filled_quantity, bool) or not isinstance(filled_quantity, int):
+                raise TypeError("filled_quantity must be an integer")
+            if filled_quantity < 0 or filled_quantity > order_quantity:
+                raise InvalidFilledQuantity(
+                    f"filled_quantity {filled_quantity} is outside [0, {order_quantity}]"
+                )
+            effective_filled = max(current_filled, filled_quantity)
+            normalized_target = self._normalize_broker_status(
+                target,
+                effective_filled=effective_filled,
+                order_quantity=order_quantity,
+            )
+
+        outcome = transition(current, normalized_target)
 
         fields: list[str] = []
         values: list[Any] = []
         if outcome.changed:
             fields.extend(["status=?", "updated_at=?"])
             values.extend([outcome.current.value, _utc_now()])
-        if broker_order_id is not None:
+        if broker_order_id is not None and current_broker_order_id is None:
             fields.append("broker_order_id=?")
             values.append(broker_order_id)
-        if filled_quantity is not None:
+        if effective_filled != current_filled:
             fields.append("filled_quantity=?")
-            values.append(filled_quantity)
+            values.append(effective_filled)
         if cancel_outcome_resolved is not None:
             fields.append("cancel_outcome_resolved=?")
             values.append(int(cancel_outcome_resolved))
         if fields:
             values.extend([account_fingerprint, client_order_id])
             self.conn.execute(
-                "UPDATE broker_orders SET " + ", ".join(fields) +
-                " WHERE account_fingerprint=? AND client_order_id=?",
+                "UPDATE broker_orders SET " + ", ".join(fields)
+                + " WHERE account_fingerprint=? AND client_order_id=?",
                 tuple(values),
             )
+
+        event_evidence = dict(evidence)
+        if filled_quantity is not None:
+            event_evidence.setdefault("reported_filled_quantity", filled_quantity)
+            event_evidence.setdefault("effective_filled_quantity", effective_filled)
+        if normalized_target is not target:
+            event_evidence.setdefault("reported_status", target.value)
+            event_evidence.setdefault("normalized_status", normalized_target.value)
 
         self._insert_event(
             account_fingerprint,
@@ -268,9 +316,36 @@ class OmsRepository:
             from_status=current,
             to_status=outcome.current,
             disposition=outcome.disposition,
-            evidence=evidence,
+            evidence=event_evidence,
         )
         return outcome
+
+    @staticmethod
+    def _normalize_broker_status(
+        target: OrderStatus,
+        *,
+        effective_filled: int,
+        order_quantity: int,
+    ) -> OrderStatus:
+        if target is OrderStatus.FILLED and effective_filled != order_quantity:
+            raise InvalidFilledQuantity(
+                "FILLED broker status requires filled_quantity equal to order quantity"
+            )
+        if target is OrderStatus.REJECTED and effective_filled != 0:
+            raise InvalidFilledQuantity(
+                "REJECTED broker status cannot coexist with a positive filled quantity"
+            )
+
+        if target in {OrderStatus.ACKNOWLEDGED, OrderStatus.PARTIALLY_FILLED}:
+            if effective_filled == order_quantity:
+                return OrderStatus.FILLED
+            if effective_filled > 0:
+                return OrderStatus.PARTIALLY_FILLED
+            if target is OrderStatus.PARTIALLY_FILLED:
+                raise InvalidFilledQuantity(
+                    "PARTIALLY_FILLED broker status requires a positive filled quantity"
+                )
+        return target
 
     def get_status(self, account_fingerprint: str, client_order_id: str) -> OrderStatus:
         row = self.conn.execute(
@@ -325,6 +400,24 @@ class OmsRepository:
         if row is None:
             raise OrderNotFound(client_order_id)
         return OrderStatus(row["status"])
+
+    def _get_order_context_in_tx(
+        self, account_fingerprint: str, client_order_id: str
+    ) -> sqlite3.Row:
+        row = self.conn.execute(
+            """
+            SELECT b.status, b.broker_order_id, b.filled_quantity, i.quantity
+            FROM broker_orders b
+            JOIN order_intents i
+              ON i.account_fingerprint=b.account_fingerprint
+             AND i.client_order_id=b.client_order_id
+            WHERE b.account_fingerprint=? AND b.client_order_id=?
+            """,
+            (account_fingerprint, client_order_id),
+        ).fetchone()
+        if row is None:
+            raise OrderNotFound(client_order_id)
+        return row
 
     def _insert_event(
         self,
