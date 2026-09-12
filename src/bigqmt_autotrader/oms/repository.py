@@ -236,6 +236,38 @@ class OmsRepository:
                 cancel_outcome_resolved=cancel_outcome_resolved,
             )
 
+    def merge_broker_fact_in_tx(
+        self,
+        account_fingerprint: str,
+        client_order_id: str,
+        target: OrderStatus,
+        *,
+        event_type: str,
+        evidence: dict[str, Any] | None = None,
+        broker_order_id: str | None = None,
+        filled_quantity: int | None = None,
+        cancel_outcome_resolved: bool | None = None,
+    ):
+        """Merge one broker fact inside a caller-owned write transaction.
+
+        Evidence ingestion uses this method so callback replay and active-query
+        reconciliation share the exact same broker-id, fill-quantity and status
+        normalization rules. The surrounding transaction is also where the OMS
+        leader fencing token is checked, making journal+aggregate updates atomic.
+        """
+        if not self.conn.in_transaction:
+            raise RuntimeError("merge_broker_fact_in_tx requires an active transaction")
+        return self._transition_in_tx(
+            account_fingerprint,
+            client_order_id,
+            target,
+            event_type=event_type,
+            evidence=evidence or {},
+            broker_order_id=broker_order_id,
+            filled_quantity=filled_quantity,
+            cancel_outcome_resolved=cancel_outcome_resolved,
+        )
+
     def _transition_in_tx(
         self,
         account_fingerprint: str,
