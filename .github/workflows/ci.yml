@@ -32,7 +32,7 @@ jobs:
         run: python -m pip install -e .
       - name: Exhaustive Python/spec conformance
         run: python tools/verify_fsm_exhaustive.py
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -48,8 +48,8 @@ jobs:
       - name: TLC - finite order state machine
         run: |
           cd formal
-          java -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config OrderFSM.cfg OrderFSM.tla
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config OrderFSM.cfg OrderFSM.tla
       - name: TLC - submit/recovery protocol
         run: |
           cd formal
-          java -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config SubmitProtocol.cfg SubmitProtocol.tla
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config SubmitProtocol.cfg SubmitProtocol.tla
