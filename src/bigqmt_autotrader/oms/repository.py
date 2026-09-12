@@ -367,6 +367,8 @@ class OmsRepository:
 
     def list_recovery_candidates(self) -> Iterable[sqlite3.Row]:
         status_values = (
+            OrderStatus.CREATED.value,
+            OrderStatus.RISK_ACCEPTED.value,
             OrderStatus.SUBMITTING.value,
             OrderStatus.CANCEL_PENDING.value,
             OrderStatus.UNKNOWN.value,
@@ -375,7 +377,7 @@ class OmsRepository:
         return self.conn.execute(
             """
             SELECT * FROM broker_orders
-            WHERE status IN (?, ?, ?, ?)
+            WHERE status IN (?, ?, ?, ?, ?, ?)
                OR (cancel_call_started=1 AND cancel_outcome_resolved=0)
             ORDER BY rowid
             """,
