@@ -1,112 +1,126 @@
-# Formal Verification Gate for the Order State Machine
+# Formal Verification Gate
 
 Date: 2026-09-12
 
-Status: **MANDATORY GATE — required before P1 can PASS**
+Status: **MANDATORY PERMANENT GATE**
 
-## 1. Verification objective
+## 1. Objective
 
-The order lifecycle is safety-critical. Unit tests are necessary but insufficient. The project therefore treats the designed order state machine and its submit/recovery protocol as formally specified finite-state systems and requires exhaustive model checking in CI.
+Order execution and recovery are safety-critical. Unit and fault tests remain necessary, but finite safety protocols are also exhaustively model-checked in CI. A safety-relevant implementation change must update the corresponding model or conformance contract and keep the gate green.
 
-The gate has two independent layers:
+The gate combines:
 
-1. **TLA+ / TLC model checking** of the abstract design.
-2. **Exhaustive implementation-conformance checking** of every `(current_status, requested_status)` pair against the frozen formal contract.
+1. **TLA+ / TLC exhaustive model checking** of finite abstractions.
+2. **Independent exhaustive Python/FSM conformance** over every state/request pair.
+3. **Static write-surface auditing** of broker side effects and internal evidence aggregation entry points.
+4. Runtime transaction/fault/replay tests for boundaries outside the formal abstractions.
 
-A change to order states, allowed transitions, stale-event handling, UNKNOWN recovery, cancel semantics, submit idempotency, or terminal behavior MUST update and pass both layers.
+## 2. Meaning and boundary of “complete”
 
-## 2. Scope and meaning of “complete”
+For each finite TLA+ abstraction, TLC explores the complete reachable abstract state graph configured by the model rather than sampling scenarios. The Python FSM checker independently enumerates all `14 x 14 = 196` state/request combinations.
 
-Within the finite abstraction defined by the TLA+ models, TLC explores the entire reachable state space rather than a sample of scenarios. The Python conformance checker separately enumerates all `13 x 13 = 169` state/request combinations.
+This establishes exhaustive properties of the encoded abstractions and a complete finite conformance check of `transition()`. It does **not** prove CPython, SQLite, Windows, QMT, the filesystem, networking, or broker infrastructure. Those layers remain subject to fault injection, replay, integration and operational gates.
 
-This is a complete verification of the **abstract state-machine model and its refinement relation to the Python transition function**. It is not a mathematical proof of CPython, SQLite, Windows, QMT, the broker gateway, the operating system, or the network stack. Those components require separate fault testing and integration gates.
-
-Safety properties are required unconditionally in the model. Liveness properties are proved under explicit fairness assumptions: a crashed process is eventually restarted and an enabled reconciliation action that remains/repeatedly becomes possible is eventually executed.
+Safety invariants are unconditional within their models. Liveness properties are stated only under the explicit fairness assumptions encoded in the corresponding specification.
 
 ## 3. Formal models
 
 ### `formal/OrderFSM.tla`
 
-Models the 13-state order lifecycle and verifies:
+Models the 14-state lifecycle, including `ABORTED`, and checks:
 
 - state type correctness;
-- total and mutually exclusive classification of every state/request pair as `APPLIED`, `DUPLICATE`, `STALE`, or `ILLEGAL`;
-- terminal-state absorption;
-- no applied exit from a terminal state;
-- `UNKNOWN` has exactly one applied exit: `RECONCILING`;
-- ambiguity states cannot return to `CREATED`, `RISK_ACCEPTED`, or `SUBMITTING`;
-- duplicate/stale evidence cannot downgrade aggregate state.
+- total/exclusive classification of every state/request pair;
+- terminal absorption and no applied terminal exits;
+- `UNKNOWN` exits only to `RECONCILING`;
+- ambiguity cannot return to pre-submit execution opportunity;
+- only `CREATED` or `RISK_ACCEPTED` may enter `ABORTED`.
+
+The Python conformance checker verifies the same finite relation independently for all **196** pairs.
 
 ### `formal/SubmitProtocol.tla`
 
-Models the submit/restart/reconciliation protocol around the state machine and verifies:
+Models durable reservation, submit/cancel side effects, response loss, hard crash before result persistence, restart, reconciliation, partial fill and fill. It checks, among other properties:
 
-- at most one submit side-effect call per durable order identity;
-- a submit side effect cannot occur before the durable reservation;
-- a broker order cannot exist unless the submit reservation and one submit call exist;
-- known broker lifecycle states imply broker existence;
-- a crashed session is never considered reconciled;
-- an UNKNOWN epoch cannot bypass `RECONCILING`;
-- a reservation abandoned by crash before submit is never automatically resubmitted;
-- a reserved/post-submit lifecycle never returns to pre-submit risk states;
-- under strong fairness, UNKNOWN eventually starts reconciliation;
-- under strong fairness, RECONCILING eventually converges to broker evidence or `MANUAL_REVIEW` in the abstract recovery model.
+- at most one submit call per durable identity;
+- at most one cancel call per cancel reservation;
+- submit/cancel side effects require their durable reservations;
+- broker existence/cancellation is causally consistent with side effects;
+- crashed sessions are not considered reconciled;
+- ambiguity passes through `RECONCILING`;
+- abandoned reservations do not authorize automatic re-submit/re-cancel;
+- post-submit lifecycle cannot return to pre-submit risk states;
+- under explicit strong fairness, UNKNOWN begins reconciliation and reconciliation settles.
 
-The second model includes crash/restart interleavings, response loss before broker acceptance, response loss after broker acceptance, broker rejection, cancellation ambiguity, partial fill, fill, and reconciliation.
+The hard-crash model includes both accepted and not-accepted broker-call outcomes while the durable phase remains `SUBMITTING`/`CANCEL_PENDING` because result persistence has not yet happened.
 
-## 4. Implementation conformance
+### `formal/LeaderLease.tla`
 
-`tools/verify_fsm_exhaustive.py` intentionally defines an independent copy of the frozen formal transition relation. It does **not** import the implementation's private `_ALLOWED` or `_STALE` tables.
+Models two OMS contenders, lease expiry and fencing epochs. It checks:
 
-For all 169 state/request pairs it asserts that `transition()` exactly matches the formal classification and result:
+- at most one valid executor;
+- no execution authority without a live owner;
+- the live owner has the current fencing epoch;
+- the other session is fenced;
+- an expired lease cannot authorize execution.
 
-- `APPLIED` must change to the requested state;
-- `DUPLICATE` must stutter with `DUPLICATE_IGNORED`;
-- `STALE` must stutter with `STALE_IGNORED`;
-- `ILLEGAL` must raise `InvalidTransition`.
+Implementation tests additionally place the fence check **inside `BEGIN IMMEDIATE` write transactions**, closing the race between a service-level assertion and a durable write.
 
-It additionally proves by exhaustive graph traversal that:
+### `formal/EvidenceReplay.tla`
 
-- every declared state is reachable from `CREATED` through applied transitions;
-- no terminal state has an applied exit;
-- UNKNOWN's only applied target is RECONCILING;
-- neither UNKNOWN nor RECONCILING has any transitive path back to pre-submit states.
+Models duplicate and out-of-order broker evidence. It checks that:
 
-This checker is deliberately redundant with the TLA+ relation. Redundancy is the drift detector: changing implementation or specification alone must break CI.
+- a logical evidence identity affects aggregate state at most once;
+- aggregate lifecycle facts do not regress;
+- filled quantity is monotonic;
+- terminal fill cannot be downgraded by replay.
+
+### `formal/PreSubmitRecovery.tla`
+
+Models restart while a durable order is still pre-side-effect. It checks that:
+
+- `CREATED`/`RISK_ACCEPTED` without a submit reservation terminate as `ABORTED` after restart;
+- an aborted order cannot later generate a submit side effect;
+- recovery does not silently convert a stale pre-submit intent into executable authority.
+
+## 4. Implementation conformance and static audit
+
+`tools/verify_fsm_exhaustive.py` defines an independent copy of the frozen formal relation rather than importing the implementation's private transition tables. It exhaustively checks all **196** state/request pairs and graph invariants.
+
+`tools/audit_side_effect_calls.py` fails CI if production write surfaces escape the intended OMS boundary. At the P1 gate it requires:
+
+- `submit_limit_order()` only in `OfflineOms.submit_intent()`;
+- `cancel_order()` only in `OfflineOms.cancel_order()`;
+- `merge_broker_fact_in_tx()` only in evidence ingestion;
+- `EvidenceJournal(...)` construction only inside `OfflineOms`.
+
+This is a structural drift detector, not a substitute for runtime fencing.
 
 ## 5. Toolchain and reproducibility
 
-CI pins the stable TLA+ tools artifact:
+CI pins:
 
-- `tla2tools.jar`: v1.7.4
+- `tla2tools.jar`: **v1.7.4**
 - SHA-256: `936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88`
-- Java: Temurin 17 in CI
+- Java: Temurin 17
 
-The JAR hash is verified before TLC runs. The binary is downloaded during CI and is not committed to the repository.
+The JAR hash is checked before TLC executes.
 
 ## 6. Gate criteria
 
-P1 may not be declared PASS unless all of the following are green on the exact candidate commit:
+A safety-critical phase candidate cannot PASS unless the exact candidate commit has:
 
-- normal Python unit/state-machine/fault tests;
-- exhaustive 169-pair implementation-conformance checker;
-- TLC `OrderFSM` model check with all configured invariants;
-- TLC `SubmitProtocol` model check with all configured invariants and temporal properties;
-- no unresolved TLC counterexample;
-- no waiver for a safety invariant;
-- formal models and implementation reviewed for semantic equivalence after any state-machine change.
+- Python tests green on supported CI Python versions;
+- exhaustive FSM implementation/formal conformance green;
+- static side-effect/write-surface audit green;
+- every configured TLC model green with no unresolved counterexample;
+- no safety-invariant waiver;
+- transaction/fault/replay tests green for implementation boundaries not represented directly by TLC.
 
-A TLC counterexample is a design defect until demonstrated otherwise. The default response is to fix the model/design/implementation, not to weaken the invariant.
+A TLC counterexample is treated as a design/model/implementation defect until resolved. The default response is to correct the defect, not weaken the invariant.
 
-## 7. Future extension
+## 7. P1 result and future extension
 
-Before opening real Big QMT trading capability, the formal model must be extended to cover at minimum:
+P1 satisfies this gate. Exact evidence is recorded in `docs/P1_GATE_RESULT_20260912.md` and `docs/FORMAL_VERIFICATION_RESULT_20260912.md`.
 
-- cancel-call at-most-once semantics and cancel-response loss;
-- leader/lease ownership and two-OMS contention;
-- callback/event deduplication identity;
-- external/manual broker orders and reconciliation;
-- symbol/account-level UNKNOWN blocking;
-- trading-session unlock/lease expiry.
-
-Those extensions belong to later P1/P4 gates and do not authorize live trading.
+Later phases must extend the models before capability expansion where appropriate. In particular, real Big QMT integration must preserve the P1 durable-identity, fencing, ambiguity, replay, and fail-close contracts; adding a real broker adapter does not waive them and does not itself authorize live trading.
