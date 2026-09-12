@@ -14,6 +14,15 @@ class CancelOutcomeUnknown(RuntimeError):
     pass
 
 
+class SimulatedProcessCrash(BaseException):
+    """Test-only hard process-loss sentinel.
+
+    It intentionally inherits directly from BaseException so normal OMS
+    exception handling must not convert a simulated process death into a
+    recoverable in-process error. Tests catch it at the process boundary.
+    """
+
+
 class DuplicateBrokerSubmit(RuntimeError):
     pass
 
@@ -26,12 +35,16 @@ class SubmitFailureMode(str, Enum):
     NONE = "NONE"
     TIMEOUT_BEFORE_ACCEPT = "TIMEOUT_BEFORE_ACCEPT"
     TIMEOUT_AFTER_ACCEPT = "TIMEOUT_AFTER_ACCEPT"
+    CRASH_BEFORE_ACCEPT = "CRASH_BEFORE_ACCEPT"
+    CRASH_AFTER_ACCEPT = "CRASH_AFTER_ACCEPT"
 
 
 class CancelFailureMode(str, Enum):
     NONE = "NONE"
     TIMEOUT_BEFORE_ACCEPT = "TIMEOUT_BEFORE_ACCEPT"
     TIMEOUT_AFTER_ACCEPT = "TIMEOUT_AFTER_ACCEPT"
+    CRASH_BEFORE_ACCEPT = "CRASH_BEFORE_ACCEPT"
+    CRASH_AFTER_ACCEPT = "CRASH_AFTER_ACCEPT"
 
 
 @dataclass(frozen=True)
@@ -68,6 +81,8 @@ class SimulatedDriver:
         self._next_submit_failure = SubmitFailureMode.NONE
         if mode is SubmitFailureMode.TIMEOUT_BEFORE_ACCEPT:
             raise SubmitOutcomeUnknown("simulated timeout before broker acceptance")
+        if mode is SubmitFailureMode.CRASH_BEFORE_ACCEPT:
+            raise SimulatedProcessCrash("simulated process crash before broker acceptance")
 
         self._sequence += 1
         evidence = SimulatedOrderEvidence(
@@ -78,6 +93,8 @@ class SimulatedDriver:
 
         if mode is SubmitFailureMode.TIMEOUT_AFTER_ACCEPT:
             raise SubmitOutcomeUnknown("simulated response loss after broker acceptance")
+        if mode is SubmitFailureMode.CRASH_AFTER_ACCEPT:
+            raise SimulatedProcessCrash("simulated process crash after broker acceptance")
         return evidence
 
     def cancel_order(self, account_fingerprint: str, client_order_id: str) -> SimulatedOrderEvidence:
@@ -91,6 +108,8 @@ class SimulatedDriver:
         self._next_cancel_failure = CancelFailureMode.NONE
         if mode is CancelFailureMode.TIMEOUT_BEFORE_ACCEPT:
             raise CancelOutcomeUnknown("simulated timeout before cancel acceptance")
+        if mode is CancelFailureMode.CRASH_BEFORE_ACCEPT:
+            raise SimulatedProcessCrash("simulated process crash before cancel acceptance")
 
         evidence = SimulatedOrderEvidence(
             broker_order_id=current.broker_order_id,
@@ -101,6 +120,8 @@ class SimulatedDriver:
 
         if mode is CancelFailureMode.TIMEOUT_AFTER_ACCEPT:
             raise CancelOutcomeUnknown("simulated response loss after cancel acceptance")
+        if mode is CancelFailureMode.CRASH_AFTER_ACCEPT:
+            raise SimulatedProcessCrash("simulated process crash after cancel acceptance")
         return evidence
 
     def query_by_client_order_id(
