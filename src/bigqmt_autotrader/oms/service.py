@@ -77,9 +77,6 @@ class OfflineOms:
             self._leader.release(self._leader_lease)
             raise
 
-        # EvidenceJournal itself owns the write transaction. Its guard executes
-        # after BEGIN IMMEDIATE, so the leader token is checked while the SQLite
-        # writer slot is held and cannot race with a successor takeover commit.
         self._evidence_journal = EvidenceJournal(
             repository,
             write_guard=self.assert_leader,
@@ -135,11 +132,6 @@ class OfflineOms:
         payload: Mapping[str, Any] | None = None,
         observed_at: datetime | None = None,
     ) -> EvidenceIngestResult:
-        """Ingest callback/query evidence under the current leader fence.
-
-        The journal performs the actual fence check inside its write transaction;
-        this wrapper is the only production write surface exposed by OfflineOms.
-        """
         return self._evidence_journal.ingest(
             source=source,
             source_event_id=source_event_id,
@@ -154,7 +146,6 @@ class OfflineOms:
         )
 
     def list_broker_evidence(self, account_fingerprint: str, client_order_id: str):
-        """Read-only audit view; reads do not require leader ownership."""
         return self._evidence_journal.list_observations(account_fingerprint, client_order_id)
 
     def recover(self) -> None:
@@ -310,7 +301,7 @@ class OfflineOms:
                 evidence={"error": str(exc)},
             )
             return SubmitResult(status=OrderStatus.UNKNOWN)
-        except BaseException as exc:
+        except Exception as exc:
             self.assert_leader()
             self.repository.transition_order(
                 intent.account_fingerprint,
@@ -351,7 +342,7 @@ class OfflineOms:
                 evidence={"error": str(exc)},
             )
             return CancelResult(status=OrderStatus.UNKNOWN)
-        except BaseException as exc:
+        except Exception as exc:
             self.assert_leader()
             self.repository.transition_order(
                 account_fingerprint,
