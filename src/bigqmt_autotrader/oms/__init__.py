@@ -6,6 +6,12 @@ from .db import (
     current_schema_version,
     initialize_database,
 )
+from .evidence import (
+    BrokerEvidenceConflict,
+    EvidenceIngestResult,
+    EvidenceJournal,
+    evidence_fingerprint,
+)
 from .leader import LeaderCoordinator, LeaderLease, OmsLeaderLost, OmsLeaderUnavailable
 from .repository import (
     CancelAlreadyStarted,
@@ -16,8 +22,11 @@ from .repository import (
 from .service import CancelResult, OfflineOms, OmsNotReconciled, SubmitResult
 
 __all__ = [
+    "BrokerEvidenceConflict",
     "CancelAlreadyStarted",
     "CancelResult",
+    "EvidenceIngestResult",
+    "EvidenceJournal",
     "FutureSchemaVersion",
     "LeaderCoordinator",
     "LeaderLease",
@@ -33,5 +42,6 @@ __all__ = [
     "SubmitResult",
     "connect_database",
     "current_schema_version",
+    "evidence_fingerprint",
     "initialize_database",
 ]
