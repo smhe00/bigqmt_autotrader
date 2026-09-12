@@ -5,6 +5,7 @@ from .simulated import (
     DuplicateBrokerSubmit,
     SimulatedDriver,
     SimulatedOrderEvidence,
+    SimulatedProcessCrash,
     SubmitFailureMode,
     SubmitOutcomeUnknown,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "DuplicateBrokerSubmit",
     "SimulatedDriver",
     "SimulatedOrderEvidence",
+    "SimulatedProcessCrash",
     "SubmitFailureMode",
     "SubmitOutcomeUnknown",
 ]
