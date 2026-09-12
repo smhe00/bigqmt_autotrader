@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus, RiskDecision
@@ -12,6 +12,7 @@ from bigqmt_autotrader.drivers.simulated import (
     SubmitOutcomeUnknown,
 )
 
+from .evidence import EvidenceIngestResult, EvidenceJournal
 from .leader import LeaderCoordinator, LeaderLease
 from .repository import OmsRepository
 
@@ -40,9 +41,9 @@ class OfflineOms:
     """P1 single-machine OMS against a simulated driver only.
 
     Construction acquires the SQLite-backed OMS leader lease. The surrounding
-    service loop must heartbeat before the lease expires. Every recovery and
-    broker side-effect path verifies the fencing token and fails closed if
-    ownership was lost.
+    service loop must heartbeat before the lease expires. Every recovery,
+    broker-side-effect and callback/evidence write path verifies the fencing
+    token and fails closed if ownership was lost.
     """
 
     def __init__(
@@ -75,6 +76,14 @@ class OfflineOms:
         except BaseException:
             self._leader.release(self._leader_lease)
             raise
+
+        # EvidenceJournal itself owns the write transaction. Its guard executes
+        # after BEGIN IMMEDIATE, so the leader token is checked while the SQLite
+        # writer slot is held and cannot race with a successor takeover commit.
+        self._evidence_journal = EvidenceJournal(
+            repository,
+            write_guard=self.assert_leader,
+        )
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -111,6 +120,42 @@ class OfflineOms:
         self._leader.release(self._leader_lease)
         self._closed = True
         self._reconciled = False
+
+    def ingest_broker_evidence(
+        self,
+        *,
+        source: str,
+        source_event_id: str | None,
+        account_fingerprint: str,
+        client_order_id: str,
+        evidence_type: str,
+        requested_status: OrderStatus,
+        filled_quantity: int,
+        broker_order_id: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+        observed_at: datetime | None = None,
+    ) -> EvidenceIngestResult:
+        """Ingest callback/query evidence under the current leader fence.
+
+        The journal performs the actual fence check inside its write transaction;
+        this wrapper is the only production write surface exposed by OfflineOms.
+        """
+        return self._evidence_journal.ingest(
+            source=source,
+            source_event_id=source_event_id,
+            account_fingerprint=account_fingerprint,
+            client_order_id=client_order_id,
+            evidence_type=evidence_type,
+            requested_status=requested_status,
+            filled_quantity=filled_quantity,
+            broker_order_id=broker_order_id,
+            payload=payload,
+            observed_at=observed_at,
+        )
+
+    def list_broker_evidence(self, account_fingerprint: str, client_order_id: str):
+        """Read-only audit view; reads do not require leader ownership."""
+        return self._evidence_journal.list_observations(account_fingerprint, client_order_id)
 
     def recover(self) -> None:
         self.assert_leader()
