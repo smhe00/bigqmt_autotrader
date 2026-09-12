@@ -14,6 +14,7 @@ class OrderStatus(str, Enum):
     CREATED = "CREATED"
     RISK_REJECTED = "RISK_REJECTED"
     RISK_ACCEPTED = "RISK_ACCEPTED"
+    ABORTED = "ABORTED"
     SUBMITTING = "SUBMITTING"
     ACKNOWLEDGED = "ACKNOWLEDGED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
@@ -29,6 +30,7 @@ class OrderStatus(str, Enum):
 TERMINAL_STATUSES = frozenset(
     {
         OrderStatus.RISK_REJECTED,
+        OrderStatus.ABORTED,
         OrderStatus.FILLED,
         OrderStatus.CANCELLED,
         OrderStatus.REJECTED,
