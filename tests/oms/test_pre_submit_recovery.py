@@ -15,6 +15,7 @@ from bigqmt_autotrader.oms import (
     OfflineOms,
     OmsRepository,
     RecoveryInvariantViolation,
+    SubmitAlreadyStarted,
     connect_database,
     initialize_database,
 )
@@ -119,6 +120,7 @@ def test_aborted_order_cannot_be_prepared_for_submit(tmp_path):
     restarted = OfflineOms(repo, driver)
     restarted.recover()
 
-    with pytest.raises(ValueError, match="illegal order transition"):
+    with pytest.raises(SubmitAlreadyStarted):
         repo.prepare_submit("account-A", "cid-pre-submit")
+    assert repo.get_status("account-A", "cid-pre-submit") is OrderStatus.ABORTED
     assert driver.submit_call_count("account-A", "cid-pre-submit") == 0
