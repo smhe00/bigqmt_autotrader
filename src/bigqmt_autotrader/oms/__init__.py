@@ -9,7 +9,6 @@ from .db import (
 from .evidence import (
     BrokerEvidenceConflict,
     EvidenceIngestResult,
-    EvidenceJournal,
     evidence_fingerprint,
 )
 from .leader import LeaderCoordinator, LeaderLease, OmsLeaderLost, OmsLeaderUnavailable
@@ -37,7 +36,6 @@ __all__ = [
     "CancelAlreadyStarted",
     "CancelResult",
     "EvidenceIngestResult",
-    "EvidenceJournal",
     "FutureSchemaVersion",
     "InvalidFilledQuantity",
     "LeaderCoordinator",
