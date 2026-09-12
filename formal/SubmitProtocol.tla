@@ -19,6 +19,8 @@ Phases == {
 
 RecoveryCandidates == {"SUBMITTING", "UNKNOWN", "RECONCILING"}
 BrokerKnownPhases == {"ACKNOWLEDGED", "PARTIALLY_FILLED", "FILLED", "CANCEL_PENDING", "CANCELLED"}
+CancelActivePhases == {"ACKNOWLEDGED", "PARTIALLY_FILLED", "CANCEL_PENDING"}
+CancelTerminalPhases == {"FILLED", "CANCELLED", "REJECTED"}
 
 VARIABLES phase,
           reservation,
@@ -27,10 +29,17 @@ VARIABLES phase,
           crashed,
           sessionReconciled,
           abandonedReservation,
-          unknownGate
+          unknownGate,
+          cancelReservation,
+          cancelCalls,
+          cancelResolved,
+          brokerCancelled,
+          abandonedCancelReservation
 
 vars == <<phase, reservation, submitCalls, brokerExists, crashed,
-          sessionReconciled, abandonedReservation, unknownGate>>
+          sessionReconciled, abandonedReservation, unknownGate,
+          cancelReservation, cancelCalls, cancelResolved,
+          brokerCancelled, abandonedCancelReservation>>
 
 Init ==
     /\ phase = "CREATED"
@@ -41,6 +50,11 @@ Init ==
     /\ sessionReconciled = TRUE
     /\ abandonedReservation = FALSE
     /\ unknownGate = FALSE
+    /\ cancelReservation = FALSE
+    /\ cancelCalls = 0
+    /\ cancelResolved = FALSE
+    /\ brokerCancelled = FALSE
+    /\ abandonedCancelReservation = FALSE
 
 RiskAccept ==
     /\ ~crashed
@@ -48,7 +62,9 @@ RiskAccept ==
     /\ phase = "CREATED"
     /\ phase' = "RISK_ACCEPTED"
     /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   sessionReconciled, abandonedReservation, unknownGate>>
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelReservation, cancelCalls, cancelResolved,
+                   brokerCancelled, abandonedCancelReservation>>
 
 RiskReject ==
     /\ ~crashed
@@ -56,7 +72,9 @@ RiskReject ==
     /\ phase = "CREATED"
     /\ phase' = "RISK_REJECTED"
     /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   sessionReconciled, abandonedReservation, unknownGate>>
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelReservation, cancelCalls, cancelResolved,
+                   brokerCancelled, abandonedCancelReservation>>
 
 ReserveSubmit ==
     /\ ~crashed
@@ -67,7 +85,9 @@ ReserveSubmit ==
     /\ phase' = "SUBMITTING"
     /\ reservation' = TRUE
     /\ UNCHANGED <<submitCalls, brokerExists, crashed, sessionReconciled,
-                   abandonedReservation, unknownGate>>
+                   abandonedReservation, unknownGate, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
 
 SubmitAcceptedAck ==
     /\ ~crashed
@@ -79,7 +99,9 @@ SubmitAcceptedAck ==
     /\ submitCalls' = 1
     /\ brokerExists' = TRUE
     /\ UNCHANGED <<reservation, crashed, sessionReconciled,
-                   abandonedReservation, unknownGate>>
+                   abandonedReservation, unknownGate, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
 
 SubmitAcceptedResponseLost ==
     /\ ~crashed
@@ -91,7 +113,9 @@ SubmitAcceptedResponseLost ==
     /\ submitCalls' = 1
     /\ brokerExists' = TRUE
     /\ unknownGate' = TRUE
-    /\ UNCHANGED <<reservation, crashed, sessionReconciled, abandonedReservation>>
+    /\ UNCHANGED <<reservation, crashed, sessionReconciled, abandonedReservation,
+                   cancelReservation, cancelCalls, cancelResolved,
+                   brokerCancelled, abandonedCancelReservation>>
 
 SubmitNotAcceptedResponseLost ==
     /\ ~crashed
@@ -103,7 +127,9 @@ SubmitNotAcceptedResponseLost ==
     /\ submitCalls' = 1
     /\ brokerExists' = FALSE
     /\ unknownGate' = TRUE
-    /\ UNCHANGED <<reservation, crashed, sessionReconciled, abandonedReservation>>
+    /\ UNCHANGED <<reservation, crashed, sessionReconciled, abandonedReservation,
+                   cancelReservation, cancelCalls, cancelResolved,
+                   brokerCancelled, abandonedCancelReservation>>
 
 SubmitRejected ==
     /\ ~crashed
@@ -115,23 +141,158 @@ SubmitRejected ==
     /\ submitCalls' = 1
     /\ brokerExists' = FALSE
     /\ UNCHANGED <<reservation, crashed, sessionReconciled,
-                   abandonedReservation, unknownGate>>
+                   abandonedReservation, unknownGate, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
+
+CancelRequest ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase \in {"ACKNOWLEDGED", "PARTIALLY_FILLED"}
+    /\ ~cancelReservation
+    /\ cancelCalls = 0
+    /\ phase' = "CANCEL_PENDING"
+    /\ cancelReservation' = TRUE
+    /\ cancelResolved' = FALSE
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelCalls, brokerCancelled, abandonedCancelReservation>>
+
+CancelAcceptedAck ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase \in {"CANCEL_PENDING", "PARTIALLY_FILLED"}
+    /\ cancelReservation
+    /\ cancelCalls = 0
+    /\ ~cancelResolved
+    /\ phase' = "CANCELLED"
+    /\ cancelCalls' = 1
+    /\ cancelResolved' = TRUE
+    /\ brokerCancelled' = TRUE
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelReservation, abandonedCancelReservation>>
+
+CancelAcceptedResponseLost ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase \in {"CANCEL_PENDING", "PARTIALLY_FILLED"}
+    /\ cancelReservation
+    /\ cancelCalls = 0
+    /\ ~cancelResolved
+    /\ phase' = "UNKNOWN"
+    /\ cancelCalls' = 1
+    /\ brokerCancelled' = TRUE
+    /\ unknownGate' = TRUE
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, cancelReservation,
+                   cancelResolved, abandonedCancelReservation>>
+
+CancelNotAcceptedResponseLost ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase \in {"CANCEL_PENDING", "PARTIALLY_FILLED"}
+    /\ cancelReservation
+    /\ cancelCalls = 0
+    /\ ~cancelResolved
+    /\ phase' = "UNKNOWN"
+    /\ cancelCalls' = 1
+    /\ brokerCancelled' = FALSE
+    /\ unknownGate' = TRUE
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, cancelReservation,
+                   cancelResolved, abandonedCancelReservation>>
+
+CancelSideEffectBeforePersist ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase \in {"CANCEL_PENDING", "PARTIALLY_FILLED"}
+    /\ cancelReservation
+    /\ cancelCalls = 0
+    /\ ~cancelResolved
+    /\ phase' = phase
+    /\ cancelCalls' = 1
+    /\ brokerCancelled' = TRUE
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelReservation, cancelResolved, abandonedCancelReservation>>
+
+PersistCancelAckAfterSideEffect ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase \in {"CANCEL_PENDING", "PARTIALLY_FILLED"}
+    /\ cancelReservation
+    /\ cancelCalls = 1
+    /\ brokerCancelled
+    /\ ~cancelResolved
+    /\ phase' = "CANCELLED"
+    /\ cancelResolved' = TRUE
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelReservation, cancelCalls, brokerCancelled,
+                   abandonedCancelReservation>>
+
+PersistCancelUnknownAfterSideEffect ==
+    /\ ~crashed
+    /\ sessionReconciled
+    /\ phase \in {"CANCEL_PENDING", "PARTIALLY_FILLED"}
+    /\ cancelReservation
+    /\ cancelCalls = 1
+    /\ brokerCancelled
+    /\ ~cancelResolved
+    /\ phase' = "UNKNOWN"
+    /\ unknownGate' = TRUE
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
+
+PartialFill ==
+    /\ ~crashed
+    /\ brokerExists
+    /\ ~brokerCancelled
+    /\ phase \in {"ACKNOWLEDGED", "CANCEL_PENDING"}
+    /\ phase' = "PARTIALLY_FILLED"
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelReservation, cancelCalls, cancelResolved,
+                   brokerCancelled, abandonedCancelReservation>>
+
+Fill ==
+    /\ ~crashed
+    /\ brokerExists
+    /\ ~brokerCancelled
+    /\ phase \in {"ACKNOWLEDGED", "PARTIALLY_FILLED", "CANCEL_PENDING"}
+    /\ phase' = "FILLED"
+    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
+                   sessionReconciled, abandonedReservation, unknownGate,
+                   cancelReservation, cancelCalls, cancelResolved,
+                   brokerCancelled, abandonedCancelReservation>>
 
 Crash ==
     /\ ~crashed
     /\ crashed' = TRUE
     /\ sessionReconciled' = FALSE
     /\ UNCHANGED <<phase, reservation, submitCalls, brokerExists,
-                   abandonedReservation, unknownGate>>
+                   abandonedReservation, unknownGate, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
 
 Restart ==
     /\ crashed
-    /\ crashed' = FALSE
-    /\ phase' = IF phase = "SUBMITTING" THEN "UNKNOWN" ELSE phase
-    /\ unknownGate' = IF phase = "SUBMITTING" THEN TRUE ELSE unknownGate
-    /\ abandonedReservation' =
-        (abandonedReservation \/ (phase = "SUBMITTING" /\ submitCalls = 0))
-    /\ UNCHANGED <<reservation, submitCalls, brokerExists, sessionReconciled>>
+    /\ LET submitAmbiguous == phase = "SUBMITTING"
+            cancelAmbiguous == cancelReservation /\ ~cancelResolved /\ phase \in CancelActivePhases
+            cancelTerminal == cancelReservation /\ ~cancelResolved /\ phase \in CancelTerminalPhases
+       IN /\ crashed' = FALSE
+          /\ phase' = IF submitAmbiguous \/ cancelAmbiguous THEN "UNKNOWN" ELSE phase
+          /\ unknownGate' = IF submitAmbiguous \/ cancelAmbiguous THEN TRUE ELSE unknownGate
+          /\ abandonedReservation' =
+                (abandonedReservation \/ (submitAmbiguous /\ submitCalls = 0))
+          /\ abandonedCancelReservation' =
+                (abandonedCancelReservation \/ (cancelAmbiguous /\ cancelCalls = 0))
+          /\ cancelResolved' = IF cancelTerminal THEN TRUE ELSE cancelResolved
+          /\ UNCHANGED <<reservation, submitCalls, brokerExists, sessionReconciled,
+                         cancelReservation, cancelCalls, brokerCancelled>>
 
 BeginReconcile ==
     /\ ~crashed
@@ -139,16 +300,20 @@ BeginReconcile ==
     /\ phase' = "RECONCILING"
     /\ unknownGate' = FALSE
     /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   sessionReconciled, abandonedReservation>>
+                   sessionReconciled, abandonedReservation, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
 
 ReconcileFound ==
     /\ ~crashed
     /\ phase = "RECONCILING"
     /\ brokerExists
-    /\ phase' = "ACKNOWLEDGED"
+    /\ phase' = IF brokerCancelled THEN "CANCELLED" ELSE "ACKNOWLEDGED"
     /\ sessionReconciled' = TRUE
+    /\ cancelResolved' = IF cancelReservation THEN TRUE ELSE cancelResolved
     /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   abandonedReservation, unknownGate>>
+                   abandonedReservation, unknownGate, cancelReservation,
+                   cancelCalls, brokerCancelled, abandonedCancelReservation>>
 
 ReconcileNotFound ==
     /\ ~crashed
@@ -156,8 +321,10 @@ ReconcileNotFound ==
     /\ ~brokerExists
     /\ phase' = "MANUAL_REVIEW"
     /\ sessionReconciled' = TRUE
+    /\ cancelResolved' = IF cancelReservation THEN TRUE ELSE cancelResolved
     /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   abandonedReservation, unknownGate>>
+                   abandonedReservation, unknownGate, cancelReservation,
+                   cancelCalls, brokerCancelled, abandonedCancelReservation>>
 
 RecoverNoCandidate ==
     /\ ~crashed
@@ -165,43 +332,9 @@ RecoverNoCandidate ==
     /\ phase \notin RecoveryCandidates
     /\ sessionReconciled' = TRUE
     /\ UNCHANGED <<phase, reservation, submitCalls, brokerExists, crashed,
-                   abandonedReservation, unknownGate>>
-
-CancelRequest ==
-    /\ ~crashed
-    /\ phase \in {"ACKNOWLEDGED", "PARTIALLY_FILLED"}
-    /\ phase' = "CANCEL_PENDING"
-    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   sessionReconciled, abandonedReservation, unknownGate>>
-
-CancelAck ==
-    /\ ~crashed
-    /\ phase = "CANCEL_PENDING"
-    /\ phase' = "CANCELLED"
-    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   sessionReconciled, abandonedReservation, unknownGate>>
-
-CancelOutcomeUnknown ==
-    /\ ~crashed
-    /\ phase = "CANCEL_PENDING"
-    /\ phase' = "UNKNOWN"
-    /\ unknownGate' = TRUE
-    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   sessionReconciled, abandonedReservation>>
-
-PartialFill ==
-    /\ ~crashed
-    /\ phase \in {"ACKNOWLEDGED", "CANCEL_PENDING"}
-    /\ phase' = "PARTIALLY_FILLED"
-    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   sessionReconciled, abandonedReservation, unknownGate>>
-
-Fill ==
-    /\ ~crashed
-    /\ phase \in {"ACKNOWLEDGED", "PARTIALLY_FILLED", "CANCEL_PENDING"}
-    /\ phase' = "FILLED"
-    /\ UNCHANGED <<reservation, submitCalls, brokerExists, crashed,
-                   sessionReconciled, abandonedReservation, unknownGate>>
+                   abandonedReservation, unknownGate, cancelReservation,
+                   cancelCalls, cancelResolved, brokerCancelled,
+                   abandonedCancelReservation>>
 
 Stutter == UNCHANGED vars
 
@@ -209,9 +342,11 @@ Next ==
     RiskAccept \/ RiskReject \/ ReserveSubmit \/
     SubmitAcceptedAck \/ SubmitAcceptedResponseLost \/
     SubmitNotAcceptedResponseLost \/ SubmitRejected \/
-    Crash \/ Restart \/ BeginReconcile \/ ReconcileFound \/ ReconcileNotFound \/
-    RecoverNoCandidate \/ CancelRequest \/ CancelAck \/ CancelOutcomeUnknown \/
-    PartialFill \/ Fill \/ Stutter
+    CancelRequest \/ CancelAcceptedAck \/ CancelAcceptedResponseLost \/
+    CancelNotAcceptedResponseLost \/ CancelSideEffectBeforePersist \/
+    PersistCancelAckAfterSideEffect \/ PersistCancelUnknownAfterSideEffect \/
+    PartialFill \/ Fill \/ Crash \/ Restart \/ BeginReconcile \/
+    ReconcileFound \/ ReconcileNotFound \/ RecoverNoCandidate \/ Stutter
 
 Spec ==
     /\ Init
@@ -231,6 +366,11 @@ TypeOK ==
     /\ sessionReconciled \in BOOLEAN
     /\ abandonedReservation \in BOOLEAN
     /\ unknownGate \in BOOLEAN
+    /\ cancelReservation \in BOOLEAN
+    /\ cancelCalls \in 0..1
+    /\ cancelResolved \in BOOLEAN
+    /\ brokerCancelled \in BOOLEAN
+    /\ abandonedCancelReservation \in BOOLEAN
 
 AtMostOneSubmit == submitCalls <= 1
 SubmitSideEffectRequiresReservation == submitCalls = 0 \/ reservation
@@ -242,11 +382,19 @@ AbandonedReservationNeverResubmitted == ~abandonedReservation \/ submitCalls = 0
 PostSubmitNeverReturnsToRisk ==
     ~(reservation /\ phase \in {"CREATED", "RISK_ACCEPTED"})
 
+AtMostOneCancel == cancelCalls <= 1
+CancelSideEffectRequiresReservation == cancelCalls = 0 \/ cancelReservation
+BrokerCancelledRequiresCancel == ~brokerCancelled \/ (cancelReservation /\ cancelCalls = 1)
+CancelledLifecycleHasBrokerCancel == phase # "CANCELLED" \/ brokerCancelled
+AbandonedCancelReservationNeverRecancelled ==
+    ~abandonedCancelReservation \/ cancelCalls = 0
+ResolvedCancelRequiresReservation == ~cancelResolved \/ cancelReservation
+
 UnknownEventuallyBeginsReconcile ==
     (phase = "UNKNOWN" /\ ~crashed) ~> (phase = "RECONCILING")
 
 ReconcilingEventuallySettles ==
     (phase = "RECONCILING" /\ ~crashed) ~>
-        (phase \in {"ACKNOWLEDGED", "MANUAL_REVIEW"})
+        (phase \in {"ACKNOWLEDGED", "CANCELLED", "MANUAL_REVIEW"})
 
 ====

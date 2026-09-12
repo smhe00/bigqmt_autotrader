@@ -25,6 +25,10 @@ class SubmitAlreadyStarted(RuntimeError):
     pass
 
 
+class CancelAlreadyStarted(RuntimeError):
+    pass
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -80,8 +84,9 @@ class OmsRepository:
                 """
                 INSERT INTO broker_orders(
                     account_fingerprint, client_order_id, status, broker_order_id,
-                    filled_quantity, submit_call_started, updated_at
-                ) VALUES(?, ?, ?, NULL, 0, 0, ?)
+                    filled_quantity, submit_call_started, cancel_call_started,
+                    cancel_outcome_resolved, updated_at
+                ) VALUES(?, ?, ?, NULL, 0, 0, 0, 0, ?)
                 """,
                 (
                     intent.account_fingerprint,
@@ -163,6 +168,38 @@ class OmsRepository:
                 evidence={"submit_call_started": True},
             )
 
+    def prepare_cancel(self, account_fingerprint: str, client_order_id: str) -> None:
+        """Commit CANCEL_PENDING plus cancel-call reservation before side effect."""
+        with transaction(self.conn):
+            current = self._get_status_in_tx(account_fingerprint, client_order_id)
+            outcome = transition(current, OrderStatus.CANCEL_PENDING)
+            if not outcome.changed:
+                raise CancelAlreadyStarted(client_order_id)
+            cursor = self.conn.execute(
+                """
+                UPDATE broker_orders
+                SET status=?, cancel_call_started=1, cancel_outcome_resolved=0, updated_at=?
+                WHERE account_fingerprint=? AND client_order_id=? AND cancel_call_started=0
+                """,
+                (
+                    OrderStatus.CANCEL_PENDING.value,
+                    _utc_now(),
+                    account_fingerprint,
+                    client_order_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise CancelAlreadyStarted(client_order_id)
+            self._insert_event(
+                account_fingerprint,
+                client_order_id,
+                event_type="CANCEL_RESERVED",
+                from_status=current,
+                to_status=OrderStatus.CANCEL_PENDING,
+                disposition=outcome.disposition,
+                evidence={"cancel_call_started": True, "cancel_outcome_resolved": False},
+            )
+
     def transition_order(
         self,
         account_fingerprint: str,
@@ -173,6 +210,7 @@ class OmsRepository:
         evidence: dict[str, Any] | None = None,
         broker_order_id: str | None = None,
         filled_quantity: int | None = None,
+        cancel_outcome_resolved: bool | None = None,
     ):
         with transaction(self.conn):
             return self._transition_in_tx(
@@ -183,6 +221,7 @@ class OmsRepository:
                 evidence=evidence or {},
                 broker_order_id=broker_order_id,
                 filled_quantity=filled_quantity,
+                cancel_outcome_resolved=cancel_outcome_resolved,
             )
 
     def _transition_in_tx(
@@ -195,24 +234,33 @@ class OmsRepository:
         evidence: dict[str, Any],
         broker_order_id: str | None = None,
         filled_quantity: int | None = None,
+        cancel_outcome_resolved: bool | None = None,
     ):
         current = self._get_status_in_tx(account_fingerprint, client_order_id)
         outcome = transition(current, target)
+
+        fields: list[str] = []
+        values: list[Any] = []
         if outcome.changed:
-            fields = ["status=?", "updated_at=?"]
-            values: list[Any] = [outcome.current.value, _utc_now()]
-            if broker_order_id is not None:
-                fields.append("broker_order_id=?")
-                values.append(broker_order_id)
-            if filled_quantity is not None:
-                fields.append("filled_quantity=?")
-                values.append(filled_quantity)
+            fields.extend(["status=?", "updated_at=?"])
+            values.extend([outcome.current.value, _utc_now()])
+        if broker_order_id is not None:
+            fields.append("broker_order_id=?")
+            values.append(broker_order_id)
+        if filled_quantity is not None:
+            fields.append("filled_quantity=?")
+            values.append(filled_quantity)
+        if cancel_outcome_resolved is not None:
+            fields.append("cancel_outcome_resolved=?")
+            values.append(int(cancel_outcome_resolved))
+        if fields:
             values.extend([account_fingerprint, client_order_id])
             self.conn.execute(
                 "UPDATE broker_orders SET " + ", ".join(fields) +
                 " WHERE account_fingerprint=? AND client_order_id=?",
                 tuple(values),
             )
+
         self._insert_event(
             account_fingerprint,
             client_order_id,
@@ -243,14 +291,20 @@ class OmsRepository:
         return row
 
     def list_recovery_candidates(self) -> Iterable[sqlite3.Row]:
-        values = (
+        status_values = (
             OrderStatus.SUBMITTING.value,
+            OrderStatus.CANCEL_PENDING.value,
             OrderStatus.UNKNOWN.value,
             OrderStatus.RECONCILING.value,
         )
         return self.conn.execute(
-            "SELECT * FROM broker_orders WHERE status IN (?, ?, ?) ORDER BY rowid",
-            values,
+            """
+            SELECT * FROM broker_orders
+            WHERE status IN (?, ?, ?, ?)
+               OR (cancel_call_started=1 AND cancel_outcome_resolved=0)
+            ORDER BY rowid
+            """,
+            status_values,
         ).fetchall()
 
     def list_events(self, account_fingerprint: str, client_order_id: str):

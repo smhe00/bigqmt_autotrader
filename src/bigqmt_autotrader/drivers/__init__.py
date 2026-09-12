@@ -1,4 +1,7 @@
 from .simulated import (
+    CancelFailureMode,
+    CancelOutcomeUnknown,
+    DuplicateBrokerCancel,
     DuplicateBrokerSubmit,
     SimulatedDriver,
     SimulatedOrderEvidence,
@@ -7,6 +10,9 @@ from .simulated import (
 )
 
 __all__ = [
+    "CancelFailureMode",
+    "CancelOutcomeUnknown",
+    "DuplicateBrokerCancel",
     "DuplicateBrokerSubmit",
     "SimulatedDriver",
     "SimulatedOrderEvidence",

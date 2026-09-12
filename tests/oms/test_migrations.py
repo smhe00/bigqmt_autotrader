@@ -12,10 +12,12 @@ from bigqmt_autotrader.oms import (
 def test_fresh_database_migrates_to_supported_version(tmp_path):
     conn = connect_database(tmp_path / "fresh.sqlite3")
     initialize_database(conn)
-    assert current_schema_version(conn) == SUPPORTED_SCHEMA_VERSION == 1
-    assert conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='broker_orders'"
-    ).fetchone() is not None
+    assert current_schema_version(conn) == SUPPORTED_SCHEMA_VERSION == 2
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(broker_orders)").fetchall()
+    }
+    assert "cancel_call_started" in columns
 
 
 def test_initialize_is_idempotent(tmp_path):
@@ -23,7 +25,7 @@ def test_initialize_is_idempotent(tmp_path):
     initialize_database(conn)
     initialize_database(conn)
     rows = conn.execute("SELECT version FROM schema_meta ORDER BY version").fetchall()
-    assert [row["version"] for row in rows] == [1]
+    assert [row["version"] for row in rows] == [1, 2]
 
 
 def test_future_schema_fails_closed(tmp_path):
@@ -36,7 +38,7 @@ def test_future_schema_fails_closed(tmp_path):
         initialize_database(conn)
 
 
-def test_packaged_migration_creates_foreign_keys_and_indexes(tmp_path):
+def test_packaged_migrations_create_foreign_keys_and_indexes(tmp_path):
     conn = connect_database(tmp_path / "shape.sqlite3")
     initialize_database(conn)
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
