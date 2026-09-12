@@ -12,12 +12,16 @@ from bigqmt_autotrader.oms import (
 def test_fresh_database_migrates_to_supported_version(tmp_path):
     conn = connect_database(tmp_path / "fresh.sqlite3")
     initialize_database(conn)
-    assert current_schema_version(conn) == SUPPORTED_SCHEMA_VERSION == 2
+    assert current_schema_version(conn) == SUPPORTED_SCHEMA_VERSION == 3
     columns = {
         row["name"]
         for row in conn.execute("PRAGMA table_info(broker_orders)").fetchall()
     }
     assert "cancel_call_started" in columns
+    leader_tables = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='oms_leader'"
+    ).fetchall()
+    assert [row["name"] for row in leader_tables] == ["oms_leader"]
 
 
 def test_initialize_is_idempotent(tmp_path):
@@ -25,7 +29,7 @@ def test_initialize_is_idempotent(tmp_path):
     initialize_database(conn)
     initialize_database(conn)
     rows = conn.execute("SELECT version FROM schema_meta ORDER BY version").fetchall()
-    assert [row["version"] for row in rows] == [1, 2]
+    assert [row["version"] for row in rows] == [1, 2, 3]
 
 
 def test_future_schema_fails_closed(tmp_path):
