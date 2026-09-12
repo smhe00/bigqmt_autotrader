@@ -1,0 +1,10 @@
+-- P1 schema reference. Executable authority currently lives in
+-- src/bigqmt_autotrader/oms/db.py::SCHEMA_V1 and will move to packaged
+-- migration resources before distribution.
+--
+-- Core invariants:
+--   UNIQUE(account_fingerprint, client_order_id)
+--   durable broker order status
+--   immutable order event stream
+--   persisted risk decision
+--   runtime reconciliation sessions
