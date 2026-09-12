@@ -26,8 +26,15 @@ class TransitionOutcome:
 
 
 _ALLOWED = {
-    OrderStatus.CREATED: {OrderStatus.RISK_REJECTED, OrderStatus.RISK_ACCEPTED},
-    OrderStatus.RISK_ACCEPTED: {OrderStatus.SUBMITTING},
+    OrderStatus.CREATED: {
+        OrderStatus.RISK_REJECTED,
+        OrderStatus.RISK_ACCEPTED,
+        OrderStatus.ABORTED,
+    },
+    OrderStatus.RISK_ACCEPTED: {
+        OrderStatus.SUBMITTING,
+        OrderStatus.ABORTED,
+    },
     OrderStatus.SUBMITTING: {
         OrderStatus.ACKNOWLEDGED,
         OrderStatus.REJECTED,
@@ -92,6 +99,8 @@ def transition(current: OrderStatus, requested: OrderStatus) -> TransitionOutcom
 
     Unknown outcomes are never inferred away. UNKNOWN can only move to
     RECONCILING; reconciliation evidence then selects an explicit next state.
+    Pre-side-effect restart recovery may terminate CREATED/RISK_ACCEPTED as
+    ABORTED, but ABORTED itself is absorbing and can never lead to submission.
     """
     if current == requested:
         return TransitionOutcome(
