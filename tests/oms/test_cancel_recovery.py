@@ -87,6 +87,7 @@ def test_cancel_timeout_after_accept_reconciles_to_cancelled_without_retry(tmp_p
     assert repo.get_order_row("account-A", "cid-cancel")["cancel_outcome_resolved"] == 0
     assert driver.cancel_call_count("account-A", "cid-cancel") == 1
 
+    oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
     assert repo.get_status("account-A", "cid-cancel") is OrderStatus.CANCELLED
@@ -102,6 +103,7 @@ def test_cancel_timeout_before_accept_reconciles_active_without_retry(tmp_path):
     result = oms.cancel_order("account-A", "cid-cancel")
     assert result.status is OrderStatus.UNKNOWN
 
+    oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
     assert repo.get_status("account-A", "cid-cancel") is OrderStatus.ACKNOWLEDGED
@@ -120,6 +122,7 @@ def test_crash_after_cancel_reservation_before_side_effect_never_recancels(tmp_p
     assert repo.get_status("account-A", "cid-cancel") is OrderStatus.CANCEL_PENDING
     assert driver.cancel_call_count("account-A", "cid-cancel") == 0
 
+    oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
     assert repo.get_status("account-A", "cid-cancel") is OrderStatus.ACKNOWLEDGED
@@ -153,6 +156,7 @@ def test_partial_fill_does_not_erase_unresolved_cancel_across_restart(tmp_path):
     assert row["cancel_call_started"] == 1
     assert row["cancel_outcome_resolved"] == 0
 
+    oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
     row = repo.get_order_row("account-A", "cid-cancel")
@@ -171,7 +175,9 @@ def test_cancel_event_log_records_ambiguity_and_reconciliation(tmp_path):
     submit_one(oms)
     driver.fail_next_cancel(CancelFailureMode.TIMEOUT_AFTER_ACCEPT)
     oms.cancel_order("account-A", "cid-cancel")
-    OfflineOms(repo, driver).recover()
+    oms.close()
+    restarted = OfflineOms(repo, driver)
+    restarted.recover()
 
     event_types = [row["event_type"] for row in repo.list_events("account-A", "cid-cancel")]
     assert "CANCEL_RESERVED" in event_types
