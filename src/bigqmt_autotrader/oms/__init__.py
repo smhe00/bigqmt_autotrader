@@ -6,6 +6,7 @@ from .db import (
     current_schema_version,
     initialize_database,
 )
+from .leader import LeaderCoordinator, LeaderLease, OmsLeaderLost, OmsLeaderUnavailable
 from .repository import (
     CancelAlreadyStarted,
     OmsRepository,
@@ -18,8 +19,12 @@ __all__ = [
     "CancelAlreadyStarted",
     "CancelResult",
     "FutureSchemaVersion",
+    "LeaderCoordinator",
+    "LeaderLease",
     "MigrationError",
     "OfflineOms",
+    "OmsLeaderLost",
+    "OmsLeaderUnavailable",
     "OmsNotReconciled",
     "OmsRepository",
     "OrderNotFound",
