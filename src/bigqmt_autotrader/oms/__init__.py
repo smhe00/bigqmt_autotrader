@@ -22,7 +22,13 @@ from .repository import (
     OrderNotFound,
     SubmitAlreadyStarted,
 )
-from .service import CancelResult, OfflineOms, OmsNotReconciled, SubmitResult
+from .service import (
+    CancelResult,
+    OfflineOms,
+    OmsNotReconciled,
+    RecoveryInvariantViolation,
+    SubmitResult,
+)
 
 __all__ = [
     "BrokerEvidenceConflict",
@@ -43,6 +49,7 @@ __all__ = [
     "OmsNotReconciled",
     "OmsRepository",
     "OrderNotFound",
+    "RecoveryInvariantViolation",
     "SUPPORTED_SCHEMA_VERSION",
     "SubmitAlreadyStarted",
     "SubmitResult",
