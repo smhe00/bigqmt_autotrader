@@ -32,6 +32,17 @@ class ManualClock:
         self.now += timedelta(seconds=seconds)
 
 
+class TakeoverOnSubmitDriver(SimulatedDriver):
+    def __init__(self, after_accept):
+        super().__init__()
+        self._after_accept = after_accept
+
+    def submit_limit_order(self, intent):
+        evidence = super().submit_limit_order(intent)
+        self._after_accept()
+        return evidence
+
+
 def _intent(client_order_id="cid-leader"):
     created = datetime(2026, 9, 12, 9, 40, tzinfo=timezone(timedelta(hours=8)))
     return OrderIntent(
@@ -125,6 +136,33 @@ def test_lost_leader_after_submit_reservation_never_calls_broker(tmp_path):
     successor.recover()
     assert repo2.get_status("account-A", "cid-leader") is OrderStatus.MANUAL_REVIEW
     assert driver.submit_call_count("account-A", "cid-leader") == 0
+
+
+def test_takeover_during_broker_call_fences_old_ack_persistence(tmp_path):
+    (_, repo1), (_, repo2) = _two_repositories(tmp_path)
+    clock = ManualClock(datetime(2026, 9, 12, 1, 0, tzinfo=timezone.utc))
+    successor_holder = {}
+
+    def takeover():
+        clock.advance(seconds=6)
+        successor_holder["oms"] = OfflineOms(
+            repo2, driver, leader_lease_seconds=5, clock=clock
+        )
+
+    driver = TakeoverOnSubmitDriver(takeover)
+    old = OfflineOms(repo1, driver, leader_lease_seconds=5, clock=clock)
+    old.recover()
+
+    with pytest.raises(OmsLeaderLost):
+        old.submit_intent(_intent(), _decision())
+
+    assert repo1.get_status("account-A", "cid-leader") is OrderStatus.SUBMITTING
+    assert driver.submit_call_count("account-A", "cid-leader") == 1
+
+    successor = successor_holder["oms"]
+    successor.recover()
+    assert repo2.get_status("account-A", "cid-leader") is OrderStatus.ACKNOWLEDGED
+    assert driver.submit_call_count("account-A", "cid-leader") == 1
 
 
 def test_heartbeat_extends_only_current_unexpired_lease(tmp_path):
