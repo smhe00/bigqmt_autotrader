@@ -57,3 +57,7 @@ jobs:
         run: |
           cd formal
           java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config LeaderLease.cfg LeaderLease.tla
+      - name: TLC - broker evidence replay
+        run: |
+          cd formal
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config EvidenceReplay.cfg EvidenceReplay.tla
