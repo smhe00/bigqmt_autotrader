@@ -53,3 +53,7 @@ jobs:
         run: |
           cd formal
           java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config SubmitProtocol.cfg SubmitProtocol.tla
+      - name: TLC - OMS leader lease
+        run: |
+          cd formal
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config LeaderLease.cfg LeaderLease.tla
