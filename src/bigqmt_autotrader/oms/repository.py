@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from bigqmt_autotrader.domain import (
     DuplicateClientOrderId,
@@ -48,9 +48,28 @@ def _utc_now() -> str:
 class OmsRepository:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
+        self._write_guard: Callable[[], None] | None = None
+
+    def bind_write_guard(self, write_guard: Callable[[], None]) -> None:
+        """Bind repository writes to the currently owning OMS leader.
+
+        The guard is invoked only after BEGIN IMMEDIATE has acquired SQLite's
+        single-writer slot. Therefore a successful guard check and the ensuing
+        durable write are linearized with respect to any successor takeover.
+        """
+        if not callable(write_guard):
+            raise TypeError("write_guard must be callable")
+        self._write_guard = write_guard
+
+    def _guard_write_in_tx(self) -> None:
+        if not self.conn.in_transaction:
+            raise RuntimeError("write guard requires an active transaction")
+        if self._write_guard is not None:
+            self._write_guard()
 
     def start_session(self, session_id: str) -> None:
         with transaction(self.conn):
+            self._guard_write_in_tx()
             self.conn.execute(
                 "INSERT INTO runtime_sessions(session_id, started_at, reconciled_at) VALUES(?, ?, NULL)",
                 (session_id, _utc_now()),
@@ -58,6 +77,7 @@ class OmsRepository:
 
     def mark_session_reconciled(self, session_id: str) -> None:
         with transaction(self.conn):
+            self._guard_write_in_tx()
             self.conn.execute(
                 "UPDATE runtime_sessions SET reconciled_at=? WHERE session_id=?",
                 (_utc_now(), session_id),
@@ -65,6 +85,7 @@ class OmsRepository:
 
     def create_intent(self, intent: OrderIntent) -> None:
         with transaction(self.conn):
+            self._guard_write_in_tx()
             try:
                 self.conn.execute(
                     """
@@ -121,6 +142,7 @@ class OmsRepository:
         self, account_fingerprint: str, client_order_id: str, decision: RiskDecision
     ) -> OrderStatus:
         with transaction(self.conn):
+            self._guard_write_in_tx()
             self.conn.execute(
                 """
                 INSERT INTO risk_decisions(
@@ -151,6 +173,7 @@ class OmsRepository:
     def prepare_submit(self, account_fingerprint: str, client_order_id: str) -> None:
         """Commit SUBMITTING plus submit-call reservation before any side effect."""
         with transaction(self.conn):
+            self._guard_write_in_tx()
             current = self._get_status_in_tx(account_fingerprint, client_order_id)
             outcome = transition(current, OrderStatus.SUBMITTING)
             if not outcome.changed:
@@ -183,6 +206,7 @@ class OmsRepository:
     def prepare_cancel(self, account_fingerprint: str, client_order_id: str) -> None:
         """Commit CANCEL_PENDING plus cancel-call reservation before side effect."""
         with transaction(self.conn):
+            self._guard_write_in_tx()
             current = self._get_status_in_tx(account_fingerprint, client_order_id)
             outcome = transition(current, OrderStatus.CANCEL_PENDING)
             if not outcome.changed:
@@ -225,6 +249,7 @@ class OmsRepository:
         cancel_outcome_resolved: bool | None = None,
     ):
         with transaction(self.conn):
+            self._guard_write_in_tx()
             return self._transition_in_tx(
                 account_fingerprint,
                 client_order_id,
@@ -248,15 +273,10 @@ class OmsRepository:
         filled_quantity: int | None = None,
         cancel_outcome_resolved: bool | None = None,
     ):
-        """Merge one broker fact inside a caller-owned write transaction.
-
-        Evidence ingestion uses this method so callback replay and active-query
-        reconciliation share the exact same broker-id, fill-quantity and status
-        normalization rules. The surrounding transaction is also where the OMS
-        leader fencing token is checked, making journal+aggregate updates atomic.
-        """
+        """Merge one broker fact inside a caller-owned write transaction."""
         if not self.conn.in_transaction:
             raise RuntimeError("merge_broker_fact_in_tx requires an active transaction")
+        self._guard_write_in_tx()
         return self._transition_in_tx(
             account_fingerprint,
             client_order_id,
