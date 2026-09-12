@@ -61,3 +61,7 @@ jobs:
         run: |
           cd formal
           java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config EvidenceReplay.cfg EvidenceReplay.tla
+      - name: TLC - pre-submit restart recovery
+        run: |
+          cd formal
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config PreSubmitRecovery.cfg PreSubmitRecovery.tla
