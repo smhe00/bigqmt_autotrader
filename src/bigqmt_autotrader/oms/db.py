@@ -2,82 +2,21 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
+from importlib import resources
 from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_V1 = """
-CREATE TABLE IF NOT EXISTS schema_meta (
-    version INTEGER PRIMARY KEY,
-    applied_at TEXT NOT NULL
-);
+SUPPORTED_SCHEMA_VERSION = 1
+MIGRATION_PACKAGE = "bigqmt_autotrader.oms.migrations"
 
-CREATE TABLE IF NOT EXISTS order_intents (
-    account_fingerprint TEXT NOT NULL,
-    client_order_id TEXT NOT NULL,
-    strategy_id TEXT NOT NULL,
-    strategy_version TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    side TEXT NOT NULL,
-    order_type TEXT NOT NULL,
-    quantity INTEGER NOT NULL CHECK(quantity > 0),
-    limit_price TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    signal_id TEXT NOT NULL,
-    reason_code TEXT NOT NULL,
-    PRIMARY KEY(account_fingerprint, client_order_id)
-);
 
-CREATE TABLE IF NOT EXISTS broker_orders (
-    account_fingerprint TEXT NOT NULL,
-    client_order_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    broker_order_id TEXT,
-    filled_quantity INTEGER NOT NULL DEFAULT 0 CHECK(filled_quantity >= 0),
-    submit_call_started INTEGER NOT NULL DEFAULT 0 CHECK(submit_call_started IN (0, 1)),
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY(account_fingerprint, client_order_id),
-    FOREIGN KEY(account_fingerprint, client_order_id)
-      REFERENCES order_intents(account_fingerprint, client_order_id)
-);
+class MigrationError(RuntimeError):
+    pass
 
-CREATE TABLE IF NOT EXISTS risk_decisions (
-    account_fingerprint TEXT NOT NULL,
-    client_order_id TEXT NOT NULL,
-    accepted INTEGER NOT NULL CHECK(accepted IN (0, 1)),
-    reason_code TEXT NOT NULL,
-    rule_version TEXT NOT NULL,
-    snapshot_hash TEXT NOT NULL,
-    decided_at TEXT NOT NULL,
-    PRIMARY KEY(account_fingerprint, client_order_id),
-    FOREIGN KEY(account_fingerprint, client_order_id)
-      REFERENCES order_intents(account_fingerprint, client_order_id)
-);
 
-CREATE TABLE IF NOT EXISTS order_events (
-    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_fingerprint TEXT NOT NULL,
-    client_order_id TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    from_status TEXT,
-    to_status TEXT NOT NULL,
-    disposition TEXT NOT NULL,
-    evidence_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(account_fingerprint, client_order_id)
-      REFERENCES order_intents(account_fingerprint, client_order_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_order_events_key
-ON order_events(account_fingerprint, client_order_id, event_id);
-
-CREATE TABLE IF NOT EXISTS runtime_sessions (
-    session_id TEXT PRIMARY KEY,
-    started_at TEXT NOT NULL,
-    reconciled_at TEXT
-);
-"""
+class FutureSchemaVersion(MigrationError):
+    pass
 
 
 def connect_database(path: str | Path) -> sqlite3.Connection:
@@ -89,11 +28,72 @@ def connect_database(path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def _ensure_schema_meta(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_meta (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def current_schema_version(conn: sqlite3.Connection) -> int:
+    _ensure_schema_meta(conn)
+    row = conn.execute("SELECT MAX(version) AS version FROM schema_meta").fetchone()
+    if row is None or row["version"] is None:
+        return 0
+    return int(row["version"])
+
+
+def _migration_text(version: int) -> str:
+    name = f"{version:04d}_initial.sql" if version == 1 else f"{version:04d}.sql"
+    try:
+        return resources.files(MIGRATION_PACKAGE).joinpath(name).read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise MigrationError(f"missing migration resource for schema version {version}: {name}") from exc
+
+
+def _apply_migration(conn: sqlite3.Connection, version: int, sql: str) -> None:
+    # sqlite3.executescript() manages statements itself, so transaction control is
+    # included in the script. A failed migration is explicitly rolled back.
+    script = (
+        "BEGIN IMMEDIATE;\n"
+        + sql
+        + "\nINSERT INTO schema_meta(version, applied_at) "
+        "VALUES(" + str(version) + ", strftime('%Y-%m-%dT%H:%M:%fZ','now'));\n"
+        "COMMIT;\n"
+    )
+    try:
+        conn.executescript(script)
+    except BaseException:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+
+
 def initialize_database(conn: sqlite3.Connection) -> None:
-    with transaction(conn):
-        conn.executescript(SCHEMA_V1)
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_meta(version, applied_at) VALUES(1, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+    """Bring the database to the newest supported forward-only schema.
+
+    Fail closed when the database was created by a newer binary. Downgrades are
+    never attempted automatically.
+    """
+    version = current_schema_version(conn)
+    if version > SUPPORTED_SCHEMA_VERSION:
+        raise FutureSchemaVersion(
+            f"database schema version {version} is newer than supported "
+            f"version {SUPPORTED_SCHEMA_VERSION}"
+        )
+
+    for target in range(version + 1, SUPPORTED_SCHEMA_VERSION + 1):
+        sql = _migration_text(target)
+        _apply_migration(conn, target, sql)
+
+    final = current_schema_version(conn)
+    if final != SUPPORTED_SCHEMA_VERSION:
+        raise MigrationError(
+            f"schema migration incomplete: expected {SUPPORTED_SCHEMA_VERSION}, got {final}"
         )
 
 
