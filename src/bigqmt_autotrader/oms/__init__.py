@@ -14,7 +14,10 @@ from .evidence import (
 )
 from .leader import LeaderCoordinator, LeaderLease, OmsLeaderLost, OmsLeaderUnavailable
 from .repository import (
+    BrokerFactConflict,
+    BrokerOrderIdMismatch,
     CancelAlreadyStarted,
+    InvalidFilledQuantity,
     OmsRepository,
     OrderNotFound,
     SubmitAlreadyStarted,
@@ -23,11 +26,14 @@ from .service import CancelResult, OfflineOms, OmsNotReconciled, SubmitResult
 
 __all__ = [
     "BrokerEvidenceConflict",
+    "BrokerFactConflict",
+    "BrokerOrderIdMismatch",
     "CancelAlreadyStarted",
     "CancelResult",
     "EvidenceIngestResult",
     "EvidenceJournal",
     "FutureSchemaVersion",
+    "InvalidFilledQuantity",
     "LeaderCoordinator",
     "LeaderLease",
     "MigrationError",
