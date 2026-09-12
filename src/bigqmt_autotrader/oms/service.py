@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Callable
 from uuid import uuid4
 
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus, RiskDecision
@@ -10,6 +12,7 @@ from bigqmt_autotrader.drivers.simulated import (
     SubmitOutcomeUnknown,
 )
 
+from .leader import LeaderCoordinator, LeaderLease
 from .repository import OmsRepository
 
 
@@ -30,21 +33,88 @@ class CancelResult:
 
 
 class OfflineOms:
-    """P1 single-process/single-writer OMS against a simulated driver only."""
+    """P1 single-machine OMS against a simulated driver only.
 
-    def __init__(self, repository: OmsRepository, driver: SimulatedDriver) -> None:
+    Construction acquires the SQLite-backed OMS leader lease. The surrounding
+    service loop must heartbeat before the lease expires. Every recovery and
+    broker side-effect path verifies the fencing token and fails closed if
+    ownership was lost.
+    """
+
+    def __init__(
+        self,
+        repository: OmsRepository,
+        driver: SimulatedDriver,
+        *,
+        leader_lease_seconds: int = 30,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        if leader_lease_seconds <= 0:
+            raise ValueError("leader_lease_seconds must be positive")
+
         self.repository = repository
         self.driver = driver
         self.session_id = str(uuid4())
-        self.repository.start_session(self.session_id)
         self._reconciled = False
+        self._leader_lease_seconds = leader_lease_seconds
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._leader = LeaderCoordinator(repository.conn)
+        self._closed = False
+
+        self._leader_lease = self._leader.acquire(
+            self.session_id,
+            lease_seconds=self._leader_lease_seconds,
+            now=self._now(),
+        )
+        try:
+            self.repository.start_session(self.session_id)
+        except BaseException:
+            self._leader.release(self._leader_lease)
+            raise
+
+    def _now(self) -> datetime:
+        value = self._clock()
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("OMS clock must return timezone-aware datetime")
+        return value
 
     @property
     def reconciled(self) -> bool:
         return self._reconciled
 
+    @property
+    def leader_lease(self) -> LeaderLease:
+        return self._leader_lease
+
+    def assert_leader(self) -> None:
+        if self._closed:
+            raise RuntimeError("OMS instance is closed")
+        self._leader.assert_held(self._leader_lease, now=self._now())
+
+    def heartbeat(self) -> LeaderLease:
+        if self._closed:
+            raise RuntimeError("OMS instance is closed")
+        self._leader_lease = self._leader.heartbeat(
+            self._leader_lease,
+            lease_seconds=self._leader_lease_seconds,
+            now=self._now(),
+        )
+        return self._leader_lease
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._leader.release(self._leader_lease)
+        self._closed = True
+        self._reconciled = False
+
     def recover(self) -> None:
+        self.assert_leader()
         for row in self.repository.list_recovery_candidates():
+            # Keep a long reconciliation pass from silently running past its
+            # lease. Heartbeat refuses to resurrect an already-expired lease.
+            self.heartbeat()
+
             account = row["account_fingerprint"]
             client_order_id = row["client_order_id"]
             status = OrderStatus(row["status"])
@@ -116,6 +186,7 @@ class OfflineOms:
                 )
                 status = OrderStatus.RECONCILING
 
+            self.assert_leader()
             evidence = self.driver.query_by_client_order_id(account, client_order_id)
             if evidence is None:
                 self.repository.transition_order(
@@ -138,10 +209,13 @@ class OfflineOms:
                     cancel_outcome_resolved=True if cancel_unresolved else None,
                 )
 
+        self.assert_leader()
         self.repository.mark_session_reconciled(self.session_id)
         self._reconciled = True
+        self.heartbeat()
 
     def submit_intent(self, intent: OrderIntent, decision: RiskDecision) -> SubmitResult:
+        self.assert_leader()
         if not self._reconciled:
             raise OmsNotReconciled("startup reconciliation must complete before new intents")
 
@@ -156,6 +230,11 @@ class OfflineOms:
         # this client order identity is never automatically submitted again.
         self.repository.prepare_submit(intent.account_fingerprint, intent.client_order_id)
 
+        # Re-check the fencing token after the durable reservation and as close
+        # as possible to the external side effect. If ownership was lost, the
+        # order remains SUBMITTING and the new leader must reconcile it; the old
+        # leader never calls the broker.
+        self.assert_leader()
         try:
             ack = self.driver.submit_limit_order(intent)
         except SubmitOutcomeUnknown as exc:
@@ -188,11 +267,15 @@ class OfflineOms:
         return SubmitResult(status=OrderStatus.ACKNOWLEDGED, broker_order_id=ack.broker_order_id)
 
     def cancel_order(self, account_fingerprint: str, client_order_id: str) -> CancelResult:
+        self.assert_leader()
         if not self._reconciled:
             raise OmsNotReconciled("startup reconciliation must complete before cancellation")
 
         self.repository.prepare_cancel(account_fingerprint, client_order_id)
 
+        # Same fencing rule as submit: a lost leader leaves the durable cancel
+        # reservation unresolved for the successor to reconcile, never recancel.
+        self.assert_leader()
         try:
             ack = self.driver.cancel_order(account_fingerprint, client_order_id)
         except CancelOutcomeUnknown as exc:
