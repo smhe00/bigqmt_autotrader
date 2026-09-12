@@ -2,7 +2,7 @@
 """Exhaustive implementation/spec conformance check for the finite order FSM.
 
 This is intentionally independent of the implementation's private _ALLOWED/_STALE
-objects.  It enumerates every current/requested pair and compares the observed
+objects. It enumerates every current/requested pair and compares the observed
 Python behavior against the frozen formal contract mirrored by formal/OrderFSM.tla.
 """
 
@@ -21,7 +21,9 @@ S = OrderStatus
 ALLOWED = {
     (S.CREATED, S.RISK_REJECTED),
     (S.CREATED, S.RISK_ACCEPTED),
+    (S.CREATED, S.ABORTED),
     (S.RISK_ACCEPTED, S.SUBMITTING),
+    (S.RISK_ACCEPTED, S.ABORTED),
     (S.SUBMITTING, S.ACKNOWLEDGED),
     (S.SUBMITTING, S.REJECTED),
     (S.SUBMITTING, S.UNKNOWN),
@@ -145,7 +147,7 @@ def main() -> None:
             verify_pair(current, requested)
             checked += 1
 
-    assert checked == expected_pairs == 169
+    assert checked == expected_pairs == 196
 
     reached = reachable_from(S.CREATED)
     missing = set(statuses) - reached
@@ -159,12 +161,18 @@ def main() -> None:
     unknown_targets = {dst for src, dst in ALLOWED if src is S.UNKNOWN}
     assert unknown_targets == {S.RECONCILING}
 
+    abort_sources = {src for src, dst in ALLOWED if dst is S.ABORTED}
+    assert abort_sources == {S.CREATED, S.RISK_ACCEPTED}
+
     pre_submit = {S.CREATED, S.RISK_ACCEPTED, S.SUBMITTING}
     for start in (S.UNKNOWN, S.RECONCILING):
         leaked = transitive_reachable(start) & pre_submit
         assert not leaked, (
             f"ambiguity path can return to pre-submit states from {start.value}: "
             f"{[x.value for x in leaked]}"
+        )
+        assert S.ABORTED not in transitive_reachable(start), (
+            f"post-submit ambiguity can incorrectly reach ABORTED from {start.value}"
         )
 
     print(
