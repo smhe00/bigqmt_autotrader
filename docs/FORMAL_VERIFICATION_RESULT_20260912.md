@@ -1,104 +1,133 @@
-# Formal Verification Result — Order State Machine
+# Formal Verification Result — P1 Safety Protocols
 
 Date: 2026-09-12
 
-Candidate commit: `3c9270cb4244441d8f4e8e2093ba55a4be3df2fc`
+Implementation candidate: `195c2f675a7b9f01667c3146e09c4bd941e95d98`
 
-GitHub Actions run: `34695744312`
+GitHub Actions run: `34700851624`
 
-Result: **PASS — no invariant or temporal-property counterexample**
+Result: **PASS — no configured invariant or temporal-property counterexample**
 
-## 1. Implementation/spec conformance
+## 1. Python/FSM conformance
 
-`tools/verify_fsm_exhaustive.py` exhaustively checked every current/requested status combination against the independent frozen formal transition relation.
+`tools/verify_fsm_exhaustive.py` independently checked every current/requested status combination against the frozen formal relation.
 
 Result:
 
-- state/request combinations checked: **169 / 169**;
-- applied edges: **23**;
-- declared states reachable from `CREATED`: **13 / 13**;
+- state/request combinations: **196 / 196 PASS**;
+- declared states: **14 / 14 reachable**;
+- applied edges: **25**;
 - classification counts:
-  - `APPLIED`: 23;
-  - `DUPLICATE`: 13;
-  - `STALE`: 74;
-  - `ILLEGAL`: 59.
+  - `APPLIED`: 25;
+  - `DUPLICATE`: 14;
+  - `STALE`: 92;
+  - `ILLEGAL`: 65.
 
-The checker also verified:
+The checker also confirmed terminal absorption, UNKNOWN-only-via-RECONCILING recovery, no ambiguity path back to pre-submit execution opportunity, and the restricted `ABORTED` entry policy.
 
-- no terminal state has an applied exit;
-- UNKNOWN's only applied exit is RECONCILING;
-- UNKNOWN and RECONCILING have no transitive path back to CREATED/RISK_ACCEPTED/SUBMITTING;
-- Python `transition()` agrees with the formal classification for every pair.
+## 2. Static execution/write-surface audit
 
-## 2. TLC — OrderFSM
+`tools/audit_side_effect_calls.py`: **PASS**.
 
-Model: `formal/OrderFSM.tla`
+Observed production surfaces on the candidate:
 
-Configured checks:
+- `submit_limit_order`: `oms/service.py:submit_intent()` only;
+- `cancel_order`: `oms/service.py:cancel_order()` only;
+- `merge_broker_fact_in_tx`: `oms/evidence.py:ingest()` only;
+- `EvidenceJournal`: constructed only by `oms/service.py:__init__()`.
 
-- `TypeOK`;
-- `TerminalAbsorption`;
-- `ClassificationIsTotalAndExclusive`;
-- `TerminalHasNoAppliedExit`;
-- `UnknownOnlyExitsToReconciling`;
-- `NoReturnToPreSubmitFromAmbiguity`.
+## 3. TLC — `OrderFSM`
 
-TLC result:
+Result:
 
-- **Model checking completed. No error has been found.**
-- states generated: **124**;
-- distinct reachable states: **13**;
-- states left on queue: **0**;
-- complete-state-graph depth: **6**.
+- **No error found**;
+- states generated: **146**;
+- distinct reachable states: **14**;
+- queue remaining: **0**;
+- complete graph depth: **6**.
 
-## 3. TLC — SubmitProtocol
+## 4. TLC — `SubmitProtocol`
 
-Model: `formal/SubmitProtocol.tla`
+The final P1 model includes durable submit/cancel reservation, response loss, accepted/not-accepted broker side effects before result persistence, hard crash, restart, reconciliation, fill and cancel races.
 
-Safety invariants checked:
+Result:
 
-- `TypeOK`;
-- `AtMostOneSubmit`;
-- `SubmitSideEffectRequiresReservation`;
-- `BrokerOrderRequiresSubmit`;
-- `KnownBrokerLifecycleHasBroker`;
-- `CrashedSessionIsNotReconciled`;
-- `UnknownMustPassReconcile`;
-- `AbandonedReservationNeverResubmitted`;
-- `PostSubmitNeverReturnsToRisk`.
+- **No error found**;
+- states generated: **302**;
+- distinct reachable states: **105**;
+- queue remaining: **0**;
+- complete graph depth: **12**;
+- temporal-property satisfiability branches: **2**, both checked successfully.
 
-Temporal properties checked under the explicit strong-fairness assumptions in the spec:
+Key configured safety claims include at-most-one submit, at-most-one cancel, reservation-before-side-effect, broker causality, no automatic retry after ambiguity/crash, and no return from post-submit lifecycle to risk/pre-submit states.
 
-- `UnknownEventuallyBeginsReconcile`;
-- `ReconcilingEventuallySettles`.
+## 5. TLC — `LeaderLease`
 
-TLC result:
+Result:
 
-- **Model checking completed. No error has been found.**
-- states generated: **149**;
-- distinct reachable states: **51**;
-- states left on queue: **0**;
-- complete-state-graph depth: **9**;
-- temporal-property branches checked: **2**.
+- **No error found**;
+- states generated: **234**;
+- distinct reachable states: **73**;
+- queue remaining: **0**;
+- complete graph depth: **9**.
 
-## 4. Counterexample-driven correction during verification
+The model verifies single valid executor and fencing semantics. Implementation tests additionally verify the SQLite transactional linearization point: the current leader token is checked after `BEGIN IMMEDIATE`, before every OMS durable write.
 
-The first formal CI run did not pass. TLC detected that `Restart` did not syntactically assign `abandonedReservation'` on every parsed branch because the intended Boolean RHS was not explicitly parenthesized. The model was corrected so the next-state relation is total. The corrected model was then rerun from a clean CI checkout and passed the complete state-space and temporal checks above.
+## 6. TLC — `EvidenceReplay`
 
-This failed-first run is retained in Git history as evidence that the formal gate is active rather than decorative.
+Result:
 
-## 5. Verification boundary
+- **No error found**;
+- states generated: **33**;
+- distinct reachable states: **8**;
+- queue remaining: **0**;
+- complete graph depth: **4**.
 
-This PASS means the following claim is justified:
+The model checks deduplication and monotonic aggregate facts under duplicate/out-of-order evidence.
 
-> For the finite abstractions encoded in `OrderFSM.tla` and `SubmitProtocol.tla`, TLC exhaustively explored all reachable abstract states and found no violation of the configured safety invariants or temporal properties; the current Python `transition()` implementation also matches the frozen state-transition contract for all 169 possible status-request pairs.
+## 7. TLC — `PreSubmitRecovery`
 
-It does **not** prove the correctness of CPython, SQLite, the filesystem, Windows, QMT, broker infrastructure, networking, or code outside the modeled abstraction.
+Result:
 
-Those layers remain subject to crash injection, replay testing, integration testing, and later formal-model extensions.
+- **No error found**;
+- states generated: **47**;
+- distinct reachable states: **19**;
+- queue remaining: **0**;
+- complete graph depth: **7**;
+- temporal-property branches: **1**, checked successfully.
 
-## 6. Gate decision
+This model proves the fail-safe pre-side-effect restart policy: a stale `CREATED`/`RISK_ACCEPTED` intent without a submit reservation becomes terminal `ABORTED` and cannot later produce a submit side effect.
 
-**STATE-MACHINE FORMAL VERIFICATION: PASS**
+## 8. Runtime/fault boundary verification
 
-This becomes a permanent required CI gate. P1 itself remains **IN PROGRESS** because cancellation execution/recovery, leader ownership, migrations, callback dedup/replay, and broader fault injection are still incomplete.
+Formal checking is complemented by Python tests on the same candidate. The P1 suite reports **75 passed** on both CPython 3.11 and CPython 3.12. It includes:
+
+- timeout before/after broker acceptance;
+- hard crash before/after submit acceptance;
+- hard crash before/after cancel acceptance;
+- crash after durable submit/cancel reservation but before the driver call;
+- SQLite write failure before side effects;
+- ACK persistence failure after side effects;
+- atomic rollback of aggregate/event/dedup evidence if evidence persistence fails;
+- leader takeover and stale-writer fencing;
+- duplicate/out-of-order callback replay;
+- broker-ID and fill-quantity conflict handling;
+- migration/version fail-close behavior.
+
+## 9. Historical counterexample-driven corrections
+
+Formal and CI gates have caught real defects during P1 development, including an incomplete TLA+ next-state assignment and implementation/test mismatches around restart semantics. Those failures were corrected and rerun rather than waived. The history is intentionally retained.
+
+## 10. Verification boundary
+
+This result justifies the following bounded claim:
+
+> For the finite abstractions encoded in the five P1 TLA+ models, TLC exhaustively explored the complete configured reachable state spaces and found no configured safety or temporal-property violation; the Python order transition function also matches the independent 14-state formal contract for all 196 state/request pairs, and the implementation fault/replay suite passes on the supported CI runtimes.
+
+It does **not** prove CPython, SQLite, Windows, QMT, networking, the broker, or future code outside these abstractions. Real-QMT phases require their own integration and operational gates.
+
+## 11. Decision
+
+**P1 FORMAL/SAFETY VERIFICATION: PASS**
+
+This is not authorization for live trading. The repository still contains no enabled real-QMT submit/cancel path.
