@@ -97,6 +97,7 @@ def test_timeout_after_accept_enters_unknown_then_reconciles_without_resubmit(tm
     assert result.status is OrderStatus.UNKNOWN
     assert driver.submit_call_count("account-A", "cid-1") == 1
 
+    oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
     assert repo.get_status("account-A", "cid-1") is OrderStatus.ACKNOWLEDGED
@@ -110,6 +111,7 @@ def test_timeout_before_accept_goes_to_manual_review_and_is_not_retried(tmp_path
     result = oms.submit_intent(intent(), accept_decision())
     assert result.status is OrderStatus.UNKNOWN
 
+    oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
     assert repo.get_status("account-A", "cid-1") is OrderStatus.MANUAL_REVIEW
@@ -126,6 +128,7 @@ def test_crash_after_submit_reservation_before_side_effect_never_resubmits(tmp_p
     assert repo.get_status("account-A", "cid-1") is OrderStatus.SUBMITTING
     assert driver.submit_call_count("account-A", "cid-1") == 0
 
+    oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
     assert repo.get_status("account-A", "cid-1") is OrderStatus.MANUAL_REVIEW
@@ -137,7 +140,9 @@ def test_event_log_keeps_reconciliation_evidence(tmp_path):
     oms.recover()
     driver.fail_next_submit(SubmitFailureMode.TIMEOUT_AFTER_ACCEPT)
     oms.submit_intent(intent(), accept_decision())
-    OfflineOms(repo, driver).recover()
+    oms.close()
+    restarted = OfflineOms(repo, driver)
+    restarted.recover()
     event_types = [row["event_type"] for row in repo.list_events("account-A", "cid-1")]
     assert "SUBMIT_OUTCOME_UNKNOWN" in event_types
     assert "STARTUP_RECONCILE_BEGIN" in event_types
