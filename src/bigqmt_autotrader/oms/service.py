@@ -11,6 +11,7 @@ from bigqmt_autotrader.drivers.simulated import (
     SimulatedDriver,
     SubmitOutcomeUnknown,
 )
+from bigqmt_autotrader.risk import RiskEvaluation, RiskPolicy, RiskSnapshot, evaluate_risk
 
 from .evidence import EvidenceIngestResult, EvidenceJournal
 from .leader import LeaderCoordinator, LeaderLease
@@ -29,6 +30,7 @@ class RecoveryInvariantViolation(RuntimeError):
 class SubmitResult:
     status: OrderStatus
     broker_order_id: str | None = None
+    risk_evaluation: RiskEvaluation | None = None
 
 
 @dataclass(frozen=True)
@@ -38,12 +40,12 @@ class CancelResult:
 
 
 class OfflineOms:
-    """P1 single-machine OMS against a simulated driver only.
+    """Single-machine OMS with P1 persistence and P2 pre-trade risk ownership.
 
-    Construction acquires the SQLite-backed OMS leader lease. The surrounding
-    service loop must heartbeat before the lease expires. Every repository write,
-    recovery operation, broker side effect and callback/evidence write is fenced
-    by the current lease token.
+    Construction acquires the SQLite-backed OMS leader lease. Every repository
+    write, recovery operation, broker side effect and callback/evidence write is
+    fenced by the current lease token. Public order submission evaluates risk
+    inside the OMS; callers cannot supply an already-accepted RiskDecision.
     """
 
     def __init__(
@@ -71,9 +73,6 @@ class OfflineOms:
             lease_seconds=self._leader_lease_seconds,
             now=self._now(),
         )
-        # Every repository write now checks this exact lease after acquiring
-        # SQLite's BEGIN IMMEDIATE writer lock. This closes the race between a
-        # service-level assertion and the durable write transaction.
         self.repository.bind_write_guard(self.assert_leader)
         try:
             self.repository.start_session(self.session_id)
@@ -279,7 +278,45 @@ class OfflineOms:
         self.assert_leader()
         self._reconciled = True
 
-    def submit_intent(self, intent: OrderIntent, decision: RiskDecision) -> SubmitResult:
+    def submit_intent(
+        self,
+        intent: OrderIntent,
+        risk_snapshot: RiskSnapshot,
+        risk_policy: RiskPolicy,
+    ) -> SubmitResult:
+        """Public submit path: risk is evaluated inside the OMS.
+
+        A caller supplies facts/policy, never an accepted RiskDecision. Leader and
+        startup-reconciliation gates are independently enforced by the OMS before
+        any risk decision can become durable execution authority.
+        """
+        self.assert_leader()
+        if not self._reconciled:
+            raise OmsNotReconciled("startup reconciliation must complete before new intents")
+        evaluation = evaluate_risk(
+            intent,
+            risk_snapshot,
+            risk_policy,
+            now=self._now(),
+        )
+        return self._submit_decided_intent(
+            intent,
+            evaluation.decision,
+            risk_evaluation=evaluation,
+        )
+
+    def _submit_decided_intent(
+        self,
+        intent: OrderIntent,
+        decision: RiskDecision,
+        *,
+        risk_evaluation: RiskEvaluation | None = None,
+    ) -> SubmitResult:
+        """Internal/test hook after deterministic risk evaluation.
+
+        Production source code may call this method only from ``submit_intent``.
+        P1 tests use it to isolate persistence/recovery behavior from P2 rules.
+        """
         self.assert_leader()
         if not self._reconciled:
             raise OmsNotReconciled("startup reconciliation must complete before new intents")
@@ -289,7 +326,7 @@ class OfflineOms:
             intent.account_fingerprint, intent.client_order_id, decision
         )
         if status is OrderStatus.RISK_REJECTED:
-            return SubmitResult(status=status)
+            return SubmitResult(status=status, risk_evaluation=risk_evaluation)
 
         self.repository.prepare_submit(intent.account_fingerprint, intent.client_order_id)
         self.assert_leader()
@@ -304,7 +341,7 @@ class OfflineOms:
                 event_type="SUBMIT_OUTCOME_UNKNOWN",
                 evidence={"error": str(exc)},
             )
-            return SubmitResult(status=OrderStatus.UNKNOWN)
+            return SubmitResult(status=OrderStatus.UNKNOWN, risk_evaluation=risk_evaluation)
         except Exception as exc:
             self.assert_leader()
             self.repository.transition_order(
@@ -314,7 +351,7 @@ class OfflineOms:
                 event_type="SUBMIT_EXCEPTION_UNKNOWN",
                 evidence={"error_type": type(exc).__name__},
             )
-            return SubmitResult(status=OrderStatus.UNKNOWN)
+            return SubmitResult(status=OrderStatus.UNKNOWN, risk_evaluation=risk_evaluation)
 
         self.assert_leader()
         self.repository.transition_order(
@@ -325,7 +362,11 @@ class OfflineOms:
             evidence={"broker_order_id": ack.broker_order_id},
             broker_order_id=ack.broker_order_id,
         )
-        return SubmitResult(status=OrderStatus.ACKNOWLEDGED, broker_order_id=ack.broker_order_id)
+        return SubmitResult(
+            status=OrderStatus.ACKNOWLEDGED,
+            broker_order_id=ack.broker_order_id,
+            risk_evaluation=risk_evaluation,
+        )
 
     def cancel_order(self, account_fingerprint: str, client_order_id: str) -> CancelResult:
         self.assert_leader()
