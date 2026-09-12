@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SUPPORTED_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSION = 3
 MIGRATION_PACKAGE = "bigqmt_autotrader.oms.migrations"
 
 
