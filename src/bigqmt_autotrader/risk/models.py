@@ -171,6 +171,7 @@ class StrategyRiskSnapshot:
     strategy_id: str
     strategy_version: str
     gross_exposure: Decimal
+    security_gross_exposure: Decimal
     daily_turnover: Decimal
     position_count: int
     heartbeat_at: datetime
@@ -179,6 +180,9 @@ class StrategyRiskSnapshot:
         _require_nonempty("strategy_id", self.strategy_id)
         _require_nonempty("strategy_version", self.strategy_version)
         _require_decimal("gross_exposure", self.gross_exposure)
+        _require_decimal("security_gross_exposure", self.security_gross_exposure)
+        if self.security_gross_exposure > self.gross_exposure:
+            raise ValueError("security_gross_exposure cannot exceed strategy gross_exposure")
         _require_decimal("daily_turnover", self.daily_turnover)
         _require_nonnegative_int("position_count", self.position_count)
         _require_aware("heartbeat_at", self.heartbeat_at)
