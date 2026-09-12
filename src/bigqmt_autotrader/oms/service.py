@@ -20,6 +20,10 @@ class OmsNotReconciled(RuntimeError):
     pass
 
 
+class RecoveryInvariantViolation(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class SubmitResult:
     status: OrderStatus
@@ -116,11 +120,33 @@ class OfflineOms:
             account = row["account_fingerprint"]
             client_order_id = row["client_order_id"]
             status = OrderStatus(row["status"])
-            cancel_unresolved = bool(row["cancel_call_started"]) and not bool(
-                row["cancel_outcome_resolved"]
-            )
+            submit_started = bool(row["submit_call_started"])
+            cancel_started = bool(row["cancel_call_started"])
+            cancel_unresolved = cancel_started and not bool(row["cancel_outcome_resolved"])
+
+            if status in {OrderStatus.CREATED, OrderStatus.RISK_ACCEPTED}:
+                if submit_started or cancel_started or row["broker_order_id"] is not None:
+                    raise RecoveryInvariantViolation(
+                        f"pre-submit state {status.value} has impossible side-effect evidence "
+                        f"for {client_order_id}"
+                    )
+                self.repository.transition_order(
+                    account,
+                    client_order_id,
+                    OrderStatus.ABORTED,
+                    event_type="STARTUP_PRE_SUBMIT_ABORT",
+                    evidence={
+                        "reason": "restart found durable pre-side-effect orphan",
+                        "policy": "abort_and_require_new_intent_and_risk",
+                    },
+                )
+                continue
 
             if status is OrderStatus.SUBMITTING:
+                if not submit_started:
+                    raise RecoveryInvariantViolation(
+                        f"SUBMITTING without submit reservation: {client_order_id}"
+                    )
                 self.repository.transition_order(
                     account,
                     client_order_id,
@@ -159,6 +185,10 @@ class OfflineOms:
                 continue
 
             if status is OrderStatus.CANCEL_PENDING:
+                if not cancel_started:
+                    raise RecoveryInvariantViolation(
+                        f"CANCEL_PENDING without cancel reservation: {client_order_id}"
+                    )
                 self.repository.transition_order(
                     account,
                     client_order_id,
@@ -166,7 +196,7 @@ class OfflineOms:
                     event_type="STARTUP_CANCEL_AMBIGUITY",
                     evidence={
                         "reason": "cancel reservation existed at restart",
-                        "cancel_call_started": bool(row["cancel_call_started"]),
+                        "cancel_call_started": True,
                     },
                 )
                 status = OrderStatus.UNKNOWN
