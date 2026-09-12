@@ -5,6 +5,7 @@ Statuses == {
     "CREATED",
     "RISK_REJECTED",
     "RISK_ACCEPTED",
+    "ABORTED",
     "SUBMITTING",
     "ACKNOWLEDGED",
     "PARTIALLY_FILLED",
@@ -19,6 +20,7 @@ Statuses == {
 
 TerminalStatuses == {
     "RISK_REJECTED",
+    "ABORTED",
     "FILLED",
     "CANCELLED",
     "REJECTED",
@@ -28,7 +30,9 @@ TerminalStatuses == {
 Allowed == {
     <<"CREATED", "RISK_REJECTED">>,
     <<"CREATED", "RISK_ACCEPTED">>,
+    <<"CREATED", "ABORTED">>,
     <<"RISK_ACCEPTED", "SUBMITTING">>,
+    <<"RISK_ACCEPTED", "ABORTED">>,
     <<"SUBMITTING", "ACKNOWLEDGED">>,
     <<"SUBMITTING", "REJECTED">>,
     <<"SUBMITTING", "UNKNOWN">>,
@@ -94,6 +98,14 @@ UnknownOnlyExitsToReconciling ==
 NoReturnToPreSubmitFromAmbiguity ==
     \A c \in {"UNKNOWN", "RECONCILING"} :
         \A r \in {"CREATED", "RISK_ACCEPTED", "SUBMITTING"} : ~IsAllowed(c, r)
+
+AbortOnlyFromPreSubmit ==
+    \A c \in Statuses : IsAllowed(c, "ABORTED") <=> c \in {"CREATED", "RISK_ACCEPTED"}
+
+NoPostSubmitAbort ==
+    \A c \in {"SUBMITTING", "ACKNOWLEDGED", "PARTIALLY_FILLED", "FILLED",
+               "CANCEL_PENDING", "CANCELLED", "REJECTED", "UNKNOWN",
+               "RECONCILING", "MANUAL_REVIEW"} : ~IsAllowed(c, "ABORTED")
 
 VARIABLES status, terminalLock
 vars == <<status, terminalLock>>
