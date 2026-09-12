@@ -129,8 +129,8 @@ Restart ==
     /\ crashed' = FALSE
     /\ phase' = IF phase = "SUBMITTING" THEN "UNKNOWN" ELSE phase
     /\ unknownGate' = IF phase = "SUBMITTING" THEN TRUE ELSE unknownGate
-    /\ abandonedReservation' = abandonedReservation \/
-                               (phase = "SUBMITTING" /\ submitCalls = 0)
+    /\ abandonedReservation' =
+        (abandonedReservation \/ (phase = "SUBMITTING" /\ submitCalls = 0))
     /\ UNCHANGED <<reservation, submitCalls, brokerExists, sessionReconciled>>
 
 BeginReconcile ==
