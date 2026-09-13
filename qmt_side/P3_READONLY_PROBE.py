@@ -8,6 +8,7 @@ Safety contract:
 - no credentials;
 - no raw account id in output;
 - no cash, position quantity, order id, trade id, price or PnL values in output;
+- no exception text or filesystem paths in output;
 - read-only inspection plus get_trade_detail_data() queries only.
 
 The script is intentionally compatible with Python 3.6-era syntax and standard
@@ -28,6 +29,7 @@ PROBE_PREFIX = "P3_PROBE_JSON="
 _QUERY_TYPES = ("ACCOUNT", "POSITION", "ORDER", "DEAL")
 _ACCOUNT_ATTRS = ("accountid", "accid", "accountID", "account_id")
 _ACCOUNT_TYPE_ATTRS = ("accountType", "account_type")
+_MAX_ATTEMPTS = 3
 
 # Introspection only. Presence is reported; none of these mutation functions is
 # ever invoked by this probe.
@@ -47,6 +49,8 @@ _READONLY_NAMES = (
 )
 
 _probe_finished = False
+_probe_attempts = 0
+_runtime_emitted = False
 
 
 def _emit(event, payload):
@@ -134,11 +138,12 @@ def _capability_payload():
 
 
 def _query_schemas(context):
+    """Return True once a bound account is visible and queries were attempted."""
     namespace = globals()
     query_fn = namespace.get("get_trade_detail_data")
     if not callable(query_fn):
         _emit("query_unavailable", {"reason": "get_trade_detail_data_not_callable"})
-        return
+        return True
 
     account_attr, account_id = _read_noncallable_attr(context, _ACCOUNT_ATTRS)
     account_type_attr, account_type = _read_noncallable_attr(context, _ACCOUNT_TYPE_ATTRS)
@@ -151,7 +156,7 @@ def _query_schemas(context):
                 "account_attr_candidates": list(_ACCOUNT_ATTRS),
             },
         )
-        return
+        return False
 
     if not account_type:
         account_type = "STOCK"
@@ -190,37 +195,63 @@ def _query_schemas(context):
                 {
                     "data_type": data_type,
                     "error_type": type(exc).__name__,
-                    "error_text": str(exc)[:300],
                 },
             )
+    return True
 
 
-def _run_once(context, source):
+def _run_probe(context, source):
+    global _probe_attempts
     global _probe_finished
+    global _runtime_emitted
+
     if _probe_finished:
         return
+    if _probe_attempts >= _MAX_ATTEMPTS:
+        _probe_finished = True
+        return
 
-    _emit("probe_start", {"source": source, "target": "Guojin QMT 2.1.19.0"})
-    _emit("runtime", _runtime_payload())
-    _emit("capabilities", _capability_payload())
-    _emit("context_schema", {"attributes": _context_schema(context)})
-    _query_schemas(context)
-    _emit("probe_complete", {"mutation_calls_made": 0})
-    _probe_finished = True
+    _probe_attempts += 1
+    _emit(
+        "probe_attempt",
+        {
+            "attempt": _probe_attempts,
+            "source": source,
+            "target": "Guojin QMT 2.1.19.0",
+        },
+    )
+
+    if not _runtime_emitted:
+        _emit("runtime", _runtime_payload())
+        _emit("capabilities", _capability_payload())
+        _emit("context_schema", {"attributes": _context_schema(context)})
+        _runtime_emitted = True
+
+    completed = _query_schemas(context)
+    if completed:
+        _emit("probe_complete", {"mutation_calls_made": 0})
+        _probe_finished = True
+    elif _probe_attempts >= _MAX_ATTEMPTS:
+        _emit(
+            "probe_incomplete",
+            {
+                "reason": "bound_account_not_visible_after_retries",
+                "mutation_calls_made": 0,
+            },
+        )
+        _probe_finished = True
 
 
 def init(ContextInfo):
-    # Some QMT builds do not expose the bound account until after init. Run an
-    # initial pass anyway; if no account is visible, handlebar gets one retry.
-    _run_once(ContextInfo, "init")
+    _run_probe(ContextInfo, "init")
 
 
 def after_init(ContextInfo):
-    _run_once(ContextInfo, "after_init")
+    _run_probe(ContextInfo, "after_init")
 
 
 def handlebar(ContextInfo):
-    _run_once(ContextInfo, "handlebar")
+    _run_probe(ContextInfo, "handlebar")
 
 
 def order_callback(ContextInfo, orderInfo):
