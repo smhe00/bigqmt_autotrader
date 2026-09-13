@@ -14,6 +14,8 @@ Safety contract:
 - trading entry points remain hard-disabled.
 
 QMT injects ``account`` and ``accountType`` in model-trading mode.
+The bridge also emits a safe module-load diagnostic so editor-only execution can
+be distinguished from the real model-trading lifecycle.
 """
 
 from __future__ import print_function
@@ -348,6 +350,12 @@ def read_snapshot(account_id=None, account_type=None, query_fn=None, emit=True):
     return snapshot
 
 
+def _set_account_state(account_id, account_type):
+    _STATE.account_id = account_id
+    _STATE.account_type = account_type
+    _STATE.account_fingerprint = _fingerprint(account_id, account_type)
+
+
 def _bind_runtime(ContextInfo):
     account_id = globals().get("account")
     account_type = globals().get("accountType")
@@ -355,9 +363,7 @@ def _bind_runtime(ContextInfo):
         _runtime_error("ACCOUNT_BINDING_UNAVAILABLE")
         return False
 
-    _STATE.account_id = account_id
-    _STATE.account_type = account_type
-    _STATE.account_fingerprint = _fingerprint(account_id, account_type)
+    _set_account_state(account_id, account_type)
 
     setter = _get(ContextInfo, "set_account")
     if callable(setter):
@@ -447,3 +453,49 @@ def order_callback(ContextInfo, orderInfo):
 
 def deal_callback(ContextInfo, dealInfo):
     _callback_event("deal", _normalize_deal(dealInfo))
+
+
+def _top_level_bootstrap():
+    """Emit diagnostics even when QMT only loads the script module.
+
+    If model-trading globals are already injected at module load, take one
+    read-only snapshot immediately. No ContextInfo method is required for this
+    fallback; callback subscription still waits for ``init``.
+    """
+    namespace = globals()
+    account_id = namespace.get("account")
+    account_type = namespace.get("accountType")
+    query_available = callable(namespace.get("get_trade_detail_data"))
+
+    if account_id and account_type:
+        _set_account_state(account_id, account_type)
+
+    _safe_log(
+        "module_loaded",
+        {
+            "python_version": sys.version.split()[0],
+            "account_injected": bool(account_id),
+            "account_type_injected": bool(account_type),
+            "query_available": query_available,
+            "model_lifecycle_entered": False,
+        },
+    )
+
+    if not (account_id and account_type and query_available):
+        return
+
+    try:
+        read_snapshot(account_id, account_type)
+        _STATE.last_snapshot_monotonic = time.monotonic()
+        _safe_log(
+            "top_level_snapshot_ok",
+            {
+                "callback_subscription": False,
+                "note": "active query only; init has not run yet",
+            },
+        )
+    except Exception as exc:
+        _runtime_error("TOP_LEVEL_SNAPSHOT_FAILED", exc)
+
+
+_top_level_bootstrap()
