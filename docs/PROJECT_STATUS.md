@@ -1,23 +1,27 @@
 # Project Status
 
-Updated: 2026-09-13
+Updated: 2026-09-14
 
 | Item | State |
 | --- | --- |
 | Product target | Personal production-grade Big QMT execution platform |
 | Host Python baseline | **CPython 3.12** |
 | QMT-side syntax target | **Built-in Python 3.6 compatible** |
+| Observed Guojin QMT runtime | **CPython 3.6.8** |
 | P0 / G0 | **PASS** |
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
-| P3 Big QMT read-only | **IN PROGRESS — QMT adapter implemented; Guojin 2.1.19.0 field/runtime calibration pending** |
+| P3 Big QMT read-only | **IN PROGRESS — active-query path calibrated PASS; callbacks/host transport pending** |
 | P4 Big QMT trading bridge | NOT STARTED |
 | P5 Shadow / simulation / live canary | NOT STARTED |
 | Live trading allowed | **NO** |
 | Real QMT submit implemented | **NO** |
 | Real QMT cancel implemented | **NO** |
 | Big QMT read-only adapter implemented | **YES — active query + callback normalization, in-memory queue only** |
-| QMT-side transport to host | NOT IMPLEMENTED — pending P3 calibration |
+| Guojin ACCOUNT/POSITION active query | **PASS — real terminal calibration, no query errors** |
+| Guojin ORDER/DEAL active query | **CALL SUCCEEDED, 0 rows observed; field rows still uncalibrated** |
+| Guojin callback delivery | **PENDING CALIBRATION** |
+| QMT-side transport to host | **NOT IMPLEMENTED** |
 | P2 execution-authority policy | **SIMULATION only** |
 | SQLite schema | v4 forward-only migrations |
 | Latest verified Python tests | **117 passed on Python 3.12** |
@@ -45,6 +49,8 @@ P1 Gate evidence: `docs/P1_GATE_RESULT_20260912.md`.
 
 P2 Gate evidence: `docs/P2_GATE_RESULT_20260913.md`.
 
-Current checkpoint: **P0/P1/P2 PASS. P3 has started.** The QMT-side read-only adapter now consumes the model-trading `account` / `accountType` globals, calls `ContextInfo.set_account(account)` for account event subscriptions, queries `ACCOUNT` / `POSITION` / `ORDER` / `DEAL` through `get_trade_detail_data`, normalizes callbacks and query results, and stores full normalized events in a bounded in-memory queue. QMT logs contain only safe summaries without raw account IDs, balances, quantities, order IDs or trade IDs.
+P3 calibration evidence: `docs/P3_GUOJIN_QMT_CALIBRATION_20260914.md`.
 
-P3 is **not yet PASS**. Remaining work requires Guojin QMT 2.1.19.0 runtime calibration and then localhost host transport / host ingestion. This phase still does not authorize or implement real submit/cancel.
+Current checkpoint: **P0/P1/P2 PASS. P3 IN PROGRESS.** Real Guojin QMT 2.1.19.0 calibration has now confirmed built-in CPython 3.6.8, normal `init` / `handlebar` lifecycle behavior, account binding, and successful read-only ACCOUNT/POSITION queries through `get_trade_detail_data()` with zero query errors. The successful snapshot returned one ACCOUNT row and two POSITION rows; ORDER and DEAL queries returned zero rows in that run.
+
+The QMT-side adapter still has no trading mutation path. `passorder`, order-lot helpers, cancel/task mutation, real submit, and real cancel remain absent/disabled. P3 is **not yet PASS**: remaining work is callback-delivery calibration, localhost host transport, host ingestion into OMS evidence/reconciliation, and reconnect/startup testing.
