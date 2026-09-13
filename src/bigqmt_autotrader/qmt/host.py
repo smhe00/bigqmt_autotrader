@@ -7,6 +7,7 @@ from typing import Any
 
 from .ingestion import QmtHostIngestion
 from .receiver import IngressResult, LocalQmtReceiver, QmtIngressBuffer
+from .spool import FileSpoolReceiver, default_spool_root
 
 
 STATUS_PREFIX = "BIGQMT_HOST_STATUS="
@@ -49,7 +50,15 @@ def _event_summary(result: IngressResult, ingestion: QmtHostIngestion) -> dict[s
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Big QMT P3 read-only localhost receiver")
+    parser = argparse.ArgumentParser(description="Big QMT P3 read-only host receiver")
+    parser.add_argument(
+        "--transport",
+        choices=("spool", "tcp"),
+        default="spool",
+        help="spool is the Guojin QMT 2.1.19.0 production P3 path; tcp is retained for tests/future runtimes",
+    )
+    parser.add_argument("--spool-dir", default=None)
+    parser.add_argument("--poll-interval", type=float, default=0.2)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=18765)
     parser.add_argument(
@@ -78,32 +87,68 @@ def main(argv: list[str] | None = None) -> int:
             },
         )
 
-    receiver = LocalQmtReceiver(
+    if args.transport == "tcp":
+        receiver = LocalQmtReceiver(
+            ingress,
+            host=args.host,
+            port=args.port,
+            on_event=on_event,
+        )
+        receiver.start()
+        _safe_status(
+            "ready",
+            {
+                "transport": "tcp",
+                "host": receiver.host,
+                "port": receiver.port,
+                "trading_enabled": False,
+                "account_pin_mode": (
+                    "explicit" if args.expected_account_fingerprint else "first_valid_event"
+                ),
+            },
+        )
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            _safe_status("stopping", {"reason": "keyboard_interrupt"})
+        finally:
+            receiver.close()
+        return 0
+
+    spool = FileSpoolReceiver(
         ingress,
-        host=args.host,
-        port=args.port,
+        spool_root=args.spool_dir,
         on_event=on_event,
     )
-    receiver.start()
     _safe_status(
         "ready",
         {
-            "host": receiver.host,
-            "port": receiver.port,
+            "transport": "file_spool",
             "trading_enabled": False,
             "account_pin_mode": (
                 "explicit" if args.expected_account_fingerprint else "first_valid_event"
             ),
+            "spool_dir_source": "explicit" if args.spool_dir else "default_temp",
         },
     )
-
     try:
         while True:
-            time.sleep(3600)
+            try:
+                result = spool.poll_once()
+                if result.rejected:
+                    _safe_status(
+                        "spool_rejected",
+                        {"count": result.rejected, "pending": result.pending},
+                    )
+            except Exception as exc:
+                _safe_status(
+                    "spool_error",
+                    {"error_type": type(exc).__name__},
+                )
+            time.sleep(args.poll_interval)
     except KeyboardInterrupt:
         _safe_status("stopping", {"reason": "keyboard_interrupt"})
-    finally:
-        receiver.close()
     return 0
 
 
