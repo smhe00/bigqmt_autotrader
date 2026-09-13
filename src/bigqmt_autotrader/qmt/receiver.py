@@ -27,7 +27,6 @@ class QmtIngressBuffer:
 
     def __init__(self, *, expected_account_fingerprint: str | None = None) -> None:
         self.expected_account_fingerprint = expected_account_fingerprint
-        self.pinned_account_fingerprint = expected_account_fingerprint
         self.session_id: str | None = None
         self.last_sequence = 0
         self.needs_resync = True
@@ -36,9 +35,11 @@ class QmtIngressBuffer:
 
     def ingest(self, event: QmtEvent) -> IngressResult:
         with self._lock:
-            if self.pinned_account_fingerprint is None:
-                self.pinned_account_fingerprint = event.account_fingerprint
-            elif event.account_fingerprint != self.pinned_account_fingerprint:
+            if self.expected_account_fingerprint is None:
+                # Pin the first valid account identity for the lifetime of this
+                # host ingress instance. A later account switch is rejected.
+                self.expected_account_fingerprint = event.account_fingerprint
+            elif event.account_fingerprint != self.expected_account_fingerprint:
                 raise QmtProtocolError("unexpected account_fingerprint")
 
             if self.session_id != event.session_id:
@@ -87,7 +88,13 @@ class _ThreadingTcpServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 
 class LocalQmtReceiver:
-    """Loopback-only TCP receiver. It never grants trading authority."""
+    """Loopback-only TCP receiver retained for host tests/future runtimes.
+
+    Guojin QMT 2.1.19.0 built-in Python 3.6.8 cannot currently import the
+    ``_socket`` extension on the calibrated installation, so production P3 uses
+    the file-spool receiver instead. Keeping this receiver does not grant any
+    trading authority.
+    """
 
     def __init__(
         self,
