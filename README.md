@@ -4,14 +4,16 @@ Personal production-grade automated trading execution platform using **Big QMT a
 
 ## Safety status
 
-The project has passed **P0 / G0**, **P1 Offline OMS**, and **P2 Deterministic Risk Engine**. Development is intentionally stopped **before P3 Big QMT read-only integration**.
+The project has passed **P0 / G0**, **P1 Offline OMS**, and **P2 Deterministic Risk Engine**. **P3 Big QMT read-only integration is now in progress.**
 
+- Host-side development baseline: **Python 3.12**.
+- QMT-side bridge remains **Python 3.6 syntax compatible** for the built-in QMT runtime.
 - Live trading is **not enabled**.
 - Real QMT order submission is **not implemented**.
 - Real QMT cancellation is **not implemented**.
-- Big QMT read-only integration is **not started**.
-- Current execution tests use a deterministic simulated driver only.
-- The QMT-side bridge remains fail-closed and exposes only `ping` / `capabilities` plus disabled submit/cancel stubs.
+- The P3 QMT-side adapter can read and normalize `ACCOUNT`, `POSITION`, `ORDER`, and `DEAL` snapshots and callback facts.
+- The adapter stores full normalized facts only in a bounded in-memory queue; QMT logs contain safe summaries only.
+- No QMT mutation function is called by the P3 adapter.
 - Strategy code must never call QMT directly.
 - P2 `RiskPolicy` may authorize execution eligibility in **SIMULATION only**; live-named runtime modes cannot be enabled by configuration alone.
 
@@ -34,17 +36,17 @@ Market/account state
         v
    Broker Driver  <---- callbacks/query reconciliation
         |
-        +---- Current: deterministic simulated driver
+        +---- Current execution: deterministic simulated driver
         |
-        +---- P3: Big QMT read-only adapter (NOT STARTED)
+        +---- P3 read-only facts: Big QMT adapter (IN PROGRESS)
         |
-  localhost RPC
-        |
-        v
- QMT-side Execution Bridge
+  future localhost transport
         |
         v
-      Big QMT
+ QMT-side Read-Only Bridge -- Python 3.6-compatible, no trading calls
+        |
+        v
+  Guojin QMT 2.1.19.0
 ```
 
 ## Development gates
@@ -52,13 +54,15 @@ Market/account state
 1. **P0 / G0 — PASS**: order-domain contract and deterministic state machine.
 2. **P1 — PASS**: crash-recoverable offline OMS with SQLite WAL, fencing, replay and reconciliation.
 3. **P2 — PASS**: deterministic four-level pre-trade risk engine and OMS-owned risk-to-submit boundary.
-4. **P3 — NOT STARTED**: Big QMT read-only query/event bridge and field calibration.
+4. **P3 — IN PROGRESS**: Big QMT read-only query/callback adapter implemented; Guojin 2.1.19.0 runtime calibration and host transport remain.
 5. **P4 — NOT STARTED**: minimal limit-order/cancel bridge behind leases and dual unlock.
 6. **P5 — NOT STARTED**: shadow, simulation, then tightly limited live canary.
 
 No phase may skip directly to live trading.
 
-## Verified properties through P2
+## Verified properties
+
+Through P2:
 
 - durable account-scoped `client_order_id` uniqueness;
 - durable order/risk/event state and startup reconciliation;
@@ -76,6 +80,17 @@ No phase may skip directly to live trading.
 - static CI audits the broker-side-effect, evidence-write, risk-evaluation and internal submit call surfaces;
 - mandatory TLA+/TLC models cover the order FSM, submit/recovery protocol, leader lease, evidence replay, pre-submit recovery and risk precedence abstractions.
 
+P3 implementation candidate additionally verifies:
+
+- QMT bridge parses as Python 3.6 syntax;
+- `account` / `accountType` runtime binding is isolated to the QMT adapter;
+- `ContextInfo.set_account(account)` is used only for read-only callback subscription;
+- `get_trade_detail_data()` query results are normalized for account, position, order and deal facts;
+- raw account IDs are excluded from normalized output in favor of a SHA-256 account fingerprint;
+- QMT log output excludes cash balances, quantities, order IDs, trade IDs and raw account IDs;
+- source-level tests reject broker mutation call surfaces and thread/process imports;
+- real submit/cancel stubs remain hard-disabled.
+
 ## Local development
 
 ```bash
@@ -83,4 +98,4 @@ python -m pip install -e ".[test]"
 pytest -q
 ```
 
-See `docs/PROJECT_STATUS.md`, `docs/P1_GATE_RESULT_20260912.md`, and `docs/P2_GATE_RESULT_20260913.md` for current gate status and evidence.
+See `docs/PROJECT_STATUS.md`, `docs/P1_GATE_RESULT_20260912.md`, and `docs/P2_GATE_RESULT_20260913.md` for gate status and evidence.
