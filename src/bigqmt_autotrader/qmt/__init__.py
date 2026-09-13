@@ -1,3 +1,11 @@
+from .ingestion import (
+    BrokerEvidenceCandidate,
+    EvidenceMapper,
+    EvidenceSink,
+    HostIngestResult,
+    QmtHostIngestion,
+    observed_at_from_event,
+)
 from .protocol import (
     BRIDGE_PROTOCOL_VERSION,
     MAX_FRAME_BYTES,
@@ -25,4 +33,10 @@ __all__ = [
     "LocalQmtReceiver",
     "QmtReadModel",
     "QmtSnapshotView",
+    "BrokerEvidenceCandidate",
+    "EvidenceMapper",
+    "EvidenceSink",
+    "HostIngestResult",
+    "QmtHostIngestion",
+    "observed_at_from_event",
 ]
