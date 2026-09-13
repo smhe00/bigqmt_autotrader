@@ -11,7 +11,7 @@ BRIDGE = Path(__file__).resolve().parents[2] / "qmt_side" / "BIGQMT_EXECUTION_BR
 
 
 def load_bridge():
-    spec = importlib.util.spec_from_file_location("bigqmt_bridge_p0", BRIDGE)
+    spec = importlib.util.spec_from_file_location("bigqmt_bridge_p3", BRIDGE)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -23,14 +23,18 @@ def test_bridge_source_is_python36_syntax_compatible():
     ast.parse(source, filename=str(BRIDGE), feature_version=(3, 6))
 
 
-def test_bridge_advertises_no_trading_capability():
+def test_bridge_advertises_read_only_without_trading_capability():
     bridge = load_bridge()
     caps = bridge.capabilities()
     assert bridge.TRADING_ENABLED is False
+    assert bridge.READ_ONLY_ENABLED is True
+    assert caps["read_only_enabled"] is True
     assert caps["trading_enabled"] is False
     assert caps["live_submit"] is False
     assert caps["live_cancel"] is False
-    assert caps["methods"] == ["ping", "capabilities"]
+    assert caps["query_types"] == ["ACCOUNT", "POSITION", "ORDER", "DEAL"]
+    assert caps["callbacks"] == ["account", "position", "order", "deal"]
+    assert caps["methods"] == ["ping", "capabilities", "read_snapshot", "drain_events"]
 
 
 def test_submit_and_cancel_fail_closed():
