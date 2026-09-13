@@ -5,19 +5,24 @@ Updated: 2026-09-13
 | Item | State |
 | --- | --- |
 | Product target | Personal production-grade Big QMT execution platform |
+| Host Python baseline | **CPython 3.12** |
+| QMT-side syntax target | **Built-in Python 3.6 compatible** |
 | P0 / G0 | **PASS** |
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
-| P3 Big QMT read-only | **NOT STARTED — STOP BOUNDARY** |
+| P3 Big QMT read-only | **IN PROGRESS — QMT adapter implemented; Guojin 2.1.19.0 field/runtime calibration pending** |
 | P4 Big QMT trading bridge | NOT STARTED |
 | P5 Shadow / simulation / live canary | NOT STARTED |
 | Live trading allowed | **NO** |
 | Real QMT submit implemented | **NO** |
 | Real QMT cancel implemented | **NO** |
-| Big QMT read-only adapter implemented | **NO** |
+| Big QMT read-only adapter implemented | **YES — active query + callback normalization, in-memory queue only** |
+| QMT-side transport to host | NOT IMPLEMENTED — pending P3 calibration |
 | P2 execution-authority policy | **SIMULATION only** |
 | SQLite schema | v4 forward-only migrations |
-| Latest verified Python tests | **112 passed** on Python 3.11 and 3.12 |
+| Latest verified Python tests | **117 passed on Python 3.12** |
+| QMT-side Python 3.6 syntax contract | **PASS** |
+| P3 QMT mutation-call static contract | **PASS — no passorder/cancel/order mutation calls** |
 | FSM implementation/formal conformance | **196 / 196** state-request pairs PASS |
 | Static side-effect/risk-bypass/evidence audit | **PASS** |
 | TLC OrderFSM | **PASS** — 14 distinct states |
@@ -40,4 +45,6 @@ P1 Gate evidence: `docs/P1_GATE_RESULT_20260912.md`.
 
 P2 Gate evidence: `docs/P2_GATE_RESULT_20260913.md`.
 
-Current checkpoint: **P2 COMPLETE / PASS. P3 has not been started.** The next phase, when explicitly resumed, is Big QMT read-only query/callback integration and field calibration; it must not imply live submit/cancel authorization.
+Current checkpoint: **P0/P1/P2 PASS. P3 has started.** The QMT-side read-only adapter now consumes the model-trading `account` / `accountType` globals, calls `ContextInfo.set_account(account)` for account event subscriptions, queries `ACCOUNT` / `POSITION` / `ORDER` / `DEAL` through `get_trade_detail_data`, normalizes callbacks and query results, and stores full normalized events in a bounded in-memory queue. QMT logs contain only safe summaries without raw account IDs, balances, quantities, order IDs or trade IDs.
+
+P3 is **not yet PASS**. Remaining work requires Guojin QMT 2.1.19.0 runtime calibration and then localhost host transport / host ingestion. This phase still does not authorize or implement real submit/cancel.
