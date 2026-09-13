@@ -6,7 +6,7 @@ from typing import Any, Callable, Mapping, Protocol
 
 from bigqmt_autotrader.domain import OrderStatus
 
-from .protocol import QmtEvent
+from .protocol import IngressDisposition, QmtEvent
 from .read_model import QmtReadModel, QmtSnapshotView
 from .receiver import IngressResult
 
@@ -79,6 +79,13 @@ class QmtHostIngestion:
         self.quarantine_dropped = 0
 
     def handle(self, result: IngressResult) -> HostIngestResult:
+        if result.disposition is IngressDisposition.DUPLICATE:
+            return HostIngestResult(
+                view=self.read_model.view,
+                evidence_ingested=False,
+                quarantined=False,
+            )
+
         view = self.read_model.apply(result)
         event = result.event
 
