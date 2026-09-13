@@ -25,8 +25,13 @@ def default_spool_root() -> Path:
 @dataclass(frozen=True)
 class SpoolPollResult:
     processed: int
-    rejected: int
+    quarantined: int
     pending: int
+
+    @property
+    def rejected(self) -> int:
+        """Backward-compatible alias for the old pre-V05 name."""
+        return self.quarantined
 
 
 class FileSpoolReceiver:
@@ -34,7 +39,8 @@ class FileSpoolReceiver:
 
     QMT writes one complete transport frame to a temporary file and atomically
     renames it into ``inbox/*.json``. The host validates/ingests each file and
-    then moves it to ``processed``. Malformed frames move to ``rejected``.
+    then moves it to ``processed``. Malformed or protocol-invalid frames move to
+    ``quarantine`` and are never silently deleted.
 
     The transport is deliberately one-way and read-only. It conveys broker facts
     but carries no command channel and therefore cannot grant execution authority.
@@ -51,9 +57,11 @@ class FileSpoolReceiver:
         self.root = Path(spool_root) if spool_root is not None else default_spool_root()
         self.inbox = self.root / "inbox"
         self.processed = self.root / "processed"
-        self.rejected = self.root / "rejected"
+        self.quarantine = self.root / "quarantine"
+        # Compatibility alias only. New code and documentation use quarantine.
+        self.rejected = self.quarantine
         self.on_event = on_event
-        for directory in (self.inbox, self.processed, self.rejected):
+        for directory in (self.inbox, self.processed, self.quarantine):
             directory.mkdir(parents=True, exist_ok=True)
 
     def poll_once(self, *, max_files: int = 256) -> SpoolPollResult:
@@ -61,7 +69,7 @@ class FileSpoolReceiver:
             raise ValueError("max_files must be positive")
 
         processed = 0
-        rejected = 0
+        quarantined = 0
         candidates = sorted(self.inbox.glob("*.json"))[:max_files]
         for path in candidates:
             try:
@@ -72,8 +80,8 @@ class FileSpoolReceiver:
                 if self.on_event is not None:
                     self.on_event(result)
             except QmtProtocolError:
-                self._move_unique(path, self.rejected)
-                rejected += 1
+                self._move_unique(path, self.quarantine)
+                quarantined += 1
                 continue
             except Exception:
                 # Downstream ingestion failed. Leave the durable event in the
@@ -84,7 +92,11 @@ class FileSpoolReceiver:
                 processed += 1
 
         pending = sum(1 for _ in self.inbox.glob("*.json"))
-        return SpoolPollResult(processed=processed, rejected=rejected, pending=pending)
+        return SpoolPollResult(
+            processed=processed,
+            quarantined=quarantined,
+            pending=pending,
+        )
 
     def serve_forever(self, *, poll_interval_seconds: float = 0.2) -> None:
         if poll_interval_seconds <= 0:
