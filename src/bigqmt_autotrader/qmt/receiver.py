@@ -27,6 +27,7 @@ class QmtIngressBuffer:
 
     def __init__(self, *, expected_account_fingerprint: str | None = None) -> None:
         self.expected_account_fingerprint = expected_account_fingerprint
+        self.pinned_account_fingerprint = expected_account_fingerprint
         self.session_id: str | None = None
         self.last_sequence = 0
         self.needs_resync = True
@@ -35,10 +36,9 @@ class QmtIngressBuffer:
 
     def ingest(self, event: QmtEvent) -> IngressResult:
         with self._lock:
-            if (
-                self.expected_account_fingerprint is not None
-                and event.account_fingerprint != self.expected_account_fingerprint
-            ):
+            if self.pinned_account_fingerprint is None:
+                self.pinned_account_fingerprint = event.account_fingerprint
+            elif event.account_fingerprint != self.pinned_account_fingerprint:
                 raise QmtProtocolError("unexpected account_fingerprint")
 
             if self.session_id != event.session_id:
