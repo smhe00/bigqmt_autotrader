@@ -18,6 +18,7 @@ from .protocol import (
 )
 from .read_model import QmtReadModel, QmtSnapshotView
 from .receiver import IngressResult, LocalQmtReceiver, QmtIngressBuffer
+from .spool import FileSpoolReceiver, SpoolPollResult, default_spool_root
 
 __all__ = [
     "BRIDGE_PROTOCOL_VERSION",
@@ -31,6 +32,9 @@ __all__ = [
     "IngressResult",
     "QmtIngressBuffer",
     "LocalQmtReceiver",
+    "FileSpoolReceiver",
+    "SpoolPollResult",
+    "default_spool_root",
     "QmtReadModel",
     "QmtSnapshotView",
     "BrokerEvidenceCandidate",
