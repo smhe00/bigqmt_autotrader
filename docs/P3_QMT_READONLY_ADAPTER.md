@@ -1,6 +1,6 @@
 # P3 QMT Read-Only Adapter — Guojin QMT 2.1.19.0
 
-Date: 2026-09-13
+Date: 2026-09-14
 
 Target terminal: **Guojin QMT 2.1.19.0**
 
@@ -129,6 +129,7 @@ BIGQMT_RO_STATUS=
 
 These log lines contain only safe diagnostics such as:
 
+- module-load environment detection;
 - bridge readiness;
 - embedded Python version;
 - whether callback subscription succeeded;
@@ -139,35 +140,87 @@ These log lines contain only safe diagnostics such as:
 
 They do not contain the normalized financial values themselves.
 
+### Module-load diagnostic
+
+The bridge now emits `module_loaded` immediately when QMT executes the source file, before `init()` is required. Its payload includes only:
+
+```text
+python_version
+account_injected
+account_type_injected
+query_available
+model_lifecycle_entered
+```
+
+Interpretation:
+
+- all three injection flags false: ordinary script/editor load, not a usable model-trading account environment;
+- account/accountType true but query false: model environment partially injected, QMT build/runtime difference must be calibrated;
+- all three true: active read-only query is possible immediately, even before `init()`;
+- later `bridge_ready`: `init()` has entered and callback subscription has been attempted.
+
+If all three are true at module load, the bridge performs one read-only `ACCOUNT/POSITION/ORDER/DEAL` snapshot immediately. It still does not subscribe callbacks until `init(ContextInfo)` provides a ContextInfo object.
+
 ## Guojin 2.1.19.0 calibration procedure
 
-1. Open the QMT strategy editor and create a temporary model.
-2. Replace the model source with the complete contents of `qmt_side/BIGQMT_EXECUTION_BRIDGE.py`.
-3. Save/compile the strategy.
-4. In **Model Trading**, add this model and select the normal A-share `STOCK` account using the QMT UI. Do not hard-code the account ID in source.
-5. Select a normal main-chart stock, for example `000001.SZ`. The exact symbol is not important for this read-only bridge.
-6. Select **simulation-signal mode** rather than real-trading mode for the calibration run. The script itself contains no order mutation calls, but this keeps the terminal-side run mode conservative as well.
-7. Start the model.
-8. Copy only log lines beginning with `BIGQMT_RO_STATUS=` and return them for review.
-9. Stop the model after the initial `bridge_ready` and `snapshot` lines have appeared. On a non-trading day, account/order/position snapshots can still be useful; naturally occurring callbacks are not required for the first calibration.
+### A. Editor/load sanity check
 
-## Expected first-run output
+1. Replace the strategy source with the latest `qmt_side/BIGQMT_EXECUTION_BRIDGE.py`.
+2. Save/compile.
+3. If you use the editor's ordinary Run action, expect at least one `BIGQMT_RO_STATUS=...module_loaded...` line.
+4. This run is diagnostic only. It is not sufficient to validate P3 model-trading integration.
 
-A successful run should normally produce at least:
+### B. Model Trading calibration
+
+The official QMT documentation states that live/model strategies must be run from the **Model Trading** interface.
+
+1. Open **Model Trading**.
+2. Create/add a strategy-trading instance using this model.
+3. Select the normal A-share `STOCK` account using the QMT UI. Do not hard-code the account ID in source.
+4. Select a normal main-chart stock, for example `000001.SZ`, and an ordinary period such as `1m` or `1d`.
+5. Select **simulation-signal mode** rather than real-trading mode for calibration.
+6. Start the model-trading instance.
+7. Copy only log lines beginning with `BIGQMT_RO_STATUS=` and return them for review.
+8. Stop after `module_loaded` plus either `snapshot`/`top_level_snapshot_ok`, or `bridge_ready` plus `snapshot`, have appeared.
+
+A model-trading run should expose `account` and `accountType`. The documented `handlebar` mechanism is driven by the selected main-chart historical bars and live quote updates.
+
+## Expected output patterns
+
+### Ordinary editor load
+
+Typical diagnostic result:
+
+```text
+BIGQMT_RO_STATUS={..."status":"module_loaded"..."account_injected":false...}
+```
+
+### Model Trading with globals available before init
+
+Possible result:
+
+```text
+BIGQMT_RO_STATUS={..."status":"module_loaded"..."account_injected":true..."query_available":true...}
+BIGQMT_RO_STATUS={..."status":"snapshot"...}
+BIGQMT_RO_STATUS={..."status":"top_level_snapshot_ok"...}
+```
+
+### Full model lifecycle
+
+Once `init()` runs, expect additionally:
 
 ```text
 BIGQMT_RO_STATUS={..."status":"bridge_ready"...}
-BIGQMT_RO_STATUS={..."status":"snapshot"...}
 ```
 
-`bridge_ready` should report:
+`bridge_ready` reports:
 
 - Python runtime version;
 - `callback_subscription: true` if `ContextInfo.set_account(account)` succeeds;
 - read-only capabilities;
 - `trading_enabled: false`.
 
-`snapshot` should report row counts and normalized field names for the four query families.
+`snapshot` reports row counts and normalized field names for the four query families.
 
 ## Fail-closed behavior
 
@@ -179,6 +232,7 @@ Examples include:
 - `SET_ACCOUNT_UNAVAILABLE`;
 - `SET_ACCOUNT_FAILED`;
 - `INITIAL_SNAPSHOT_FAILED`;
+- `TOP_LEVEL_SNAPSHOT_FAILED`;
 - per-query `query_errors` entries with `data_type` and `error_type` only.
 
 ## P3 exit boundary
