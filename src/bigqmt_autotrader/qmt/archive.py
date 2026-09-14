@@ -150,9 +150,6 @@ class DailySpoolArchiver:
             )
 
         records.sort(key=lambda item: (item.event.timestamp_ms, item.event.session_id, item.event.sequence))
-        latest_ms = max(item.event.timestamp_ms for item in records)
-        if now_ms < latest_ms + int(quiet_seconds * 1000):
-            reasons.append("quiet_period")
 
         account_fingerprints = {item.event.account_fingerprint for item in records}
         if len(account_fingerprints) != 1:
@@ -163,6 +160,7 @@ class DailySpoolArchiver:
             reasons.append("sequence_gap")
 
         final_snapshot: QmtEvent | None = None
+        final_reason: str | None = None
         if require_final_snapshot:
             final_snapshot, final_reason = self._find_final_snapshot(records)
             if final_reason is not None:
@@ -170,6 +168,16 @@ class DailySpoolArchiver:
         else:
             snapshots = [record.event for record in records if record.event.event_type == "snapshot"]
             final_snapshot = snapshots[-1] if snapshots else None
+
+        # Identical ACCOUNT heartbeats after a clean snapshot carry no new broker
+        # state and therefore must not keep resetting the archive quiet timer.
+        # Any non-identical or non-ACCOUNT trailing event makes final_reason non-null,
+        # in which case the latest event remains the conservative quiet anchor.
+        quiet_anchor_ms = max(item.event.timestamp_ms for item in records)
+        if require_final_snapshot and final_snapshot is not None and final_reason is None:
+            quiet_anchor_ms = final_snapshot.timestamp_ms
+        if now_ms < quiet_anchor_ms + int(quiet_seconds * 1000):
+            reasons.append("quiet_period")
 
         if reasons:
             return DailyArchiveResult(
@@ -192,6 +200,7 @@ class DailySpoolArchiver:
             "event_count": len(records),
             "first_timestamp_ms": records[0].event.timestamp_ms,
             "last_timestamp_ms": records[-1].event.timestamp_ms,
+            "quiet_anchor_timestamp_ms": quiet_anchor_ms,
             "sessions": sessions,
             "final_snapshot": (
                 {
