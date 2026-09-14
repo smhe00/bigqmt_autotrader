@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, time as wall_time
 import json
+import os
 import time
 from typing import Any
 
@@ -37,6 +38,7 @@ def _event_summary(result: IngressResult, ingestion: QmtHostIngestion) -> dict[s
         "read_model_healthy": ingestion.read_model.healthy,
         "quarantine_depth": len(ingestion.quarantine),
         "quarantine_dropped": ingestion.quarantine_dropped,
+        "account_semantic_duplicates": ingestion.account_semantic_duplicates,
     }
     if event.event_type == "snapshot":
         payload.update(
@@ -83,6 +85,14 @@ def _archive_due_days(
         elif day == today and now.timetz().replace(tzinfo=None) >= archive_after:
             due.append(day)
     return tuple(due)
+
+
+def _spool_dir_source(explicit_cli: str | None) -> str:
+    if explicit_cli:
+        return "cli"
+    if os.environ.get("BIGQMT_SPOOL_DIR"):
+        return "environment"
+    return "temp"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -141,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
                 **_event_summary(result, ingestion),
                 "evidence_ingested": ingest_result.evidence_ingested,
                 "quarantined": ingest_result.quarantined,
+                "deduplicated": ingest_result.deduplicated,
             },
         )
 
@@ -180,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         on_event=on_event,
     )
     archiver = DailySpoolArchiver(spool_root=spool.root)
+    resolved_spool_root = str(spool.root.expanduser().resolve())
     _safe_status(
         "ready",
         {
@@ -188,11 +200,14 @@ def main(argv: list[str] | None = None) -> int:
             "account_pin_mode": (
                 "explicit" if args.expected_account_fingerprint else "first_valid_event"
             ),
-            "spool_dir_source": "explicit" if args.spool_dir else "default_temp",
+            "spool_root": resolved_spool_root,
+            "spool_inbox": str(spool.inbox.resolve()),
+            "spool_dir_source": _spool_dir_source(args.spool_dir),
             "auto_archive": args.auto_archive,
             "archive_after": args.archive_after.strftime("%H:%M"),
             "archive_quiet_seconds": args.archive_quiet_seconds,
             "archive_timezone": "UTC+08:00",
+            "host_account_semantic_dedup": True,
         },
     )
 
