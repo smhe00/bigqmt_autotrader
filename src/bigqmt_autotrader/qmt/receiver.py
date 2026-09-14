@@ -15,6 +15,14 @@ from .protocol import (
 )
 
 
+class QmtIngressIdentityError(ValueError):
+    """A valid QMT event conflicts with the Host's pinned broker identity.
+
+    This is deliberately distinct from ``QmtProtocolError``. The transport frame
+    is valid evidence and must not be mislabeled as malformed protocol data.
+    """
+
+
 @dataclass(frozen=True)
 class IngressResult:
     disposition: IngressDisposition
@@ -40,7 +48,7 @@ class QmtIngressBuffer:
                 # host ingress instance. A later account switch is rejected.
                 self.expected_account_fingerprint = event.account_fingerprint
             elif event.account_fingerprint != self.expected_account_fingerprint:
-                raise QmtProtocolError("unexpected account_fingerprint")
+                raise QmtIngressIdentityError("unexpected account_fingerprint")
 
             if self.session_id != event.session_id:
                 self.session_id = event.session_id
