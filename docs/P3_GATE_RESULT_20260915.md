@@ -2,28 +2,31 @@
 
 ## Decision
 
-**CODE GATE: PASS**
+**P3 GATE: PASS**
 
-**Guojin V05 deployment calibration: PENDING** — the V04 read-only path has already passed multi-hour real-QMT calibration; V05 changes only timer scheduling and adds a disabled-live-trading shadow command plane. The V05 `run_time` registrations must be observed once in Guojin QMT before the deployment checkpoint is closed.
+The Guojin V05 deployment calibration is now complete. The real QMT runtime has verified the independent `run_time` timers, read-only active reconciliation, the durable Host→QMT command path, and QMT→Host `command_result` return path while live broker mutation remains disabled.
 
-## Real-QMT evidence already observed
-
-Environment:
+## Environment
 
 - Guojin QMT 2.1.19.0
 - built-in CPython 3.6.8
 - fixed spool root `D:\BigQMTData\spool`
-- QMT build `p3-file-spool-2`
+- QMT V05 build `p4-shadow-command-spool-1`
 - Host Python 3.12
-- trading disabled
+- `execution_mode=SHADOW`
+- `trading_enabled=false`
+- `live_submit=false`
+- `live_cancel=false`
 
-Long-run observation from approximately 23:17 to 04:51:
+## Long-run read-plane evidence
+
+Earlier V04/V05-compatible read-plane calibration established:
 
 - initial active snapshot: 1 ACCOUNT, 8 POSITION, 1 ORDER, 2 DEAL, `query_errors=[]`
 - ACCOUNT raw callbacks continued overnight and edge dedup remained stable
-- at 04:51: `account_callbacks_emitted=66`, `account_callbacks_suppressed=3869`
+- at the end of the multi-hour run: `account_callbacks_emitted=66`, `account_callbacks_suppressed=3869`
 - QMT `dropped_events=0`
-- latest observed full snapshot: `transport_failures=0`, `transport_persisted=72`
+- QMT `transport_failures=0`
 - Host remained `read_model_healthy=true`
 - Host `spool_pending=0`
 - filesystem quarantine and semantic quarantine remained zero
@@ -31,24 +34,62 @@ Long-run observation from approximately 23:17 to 04:51:
 - Host-only restart recovery found the clean snapshot, replayed the coherent current stream and returned healthy
 - daily archive committed 28 events with no reasons and SHA-256 integrity checkpoint
 
+## V05 real-QMT deployment evidence
+
+At 06:24:49 the Guojin model reported:
+
+- `bridge_build=p4-shadow-command-spool-1`
+- `command_timer_registered=true`
+- `snapshot_timer_registered=true`
+- `command_tick_period=1nSecond`
+- `snapshot_timer_period=300nSecond`
+- `callback_subscription=true`
+- `query_errors=[]`
+- `dropped_events=0`
+- `transport_failures=0`
+- `live_submit=false`
+- `live_cancel=false`
+
+The periodic active-query timer then emitted snapshots exactly five minutes apart (for example 06:29:49 and 06:34:49), proving the 300-second reconciliation timer is independent of daily-bar `handlebar` activity.
+
+### Read-only command round-trip
+
+A Host-side `REQUEST_SNAPSHOT` probe was durably published with command id:
+
+`b9c49e1b324e4445bb7b0f520fbb7835`
+
+QMT consumed it on the 1-second command timer, emitted a fresh snapshot, then returned:
+
+- `command_type=REQUEST_SNAPSHOT`
+- `result_status=SNAPSHOT_EMITTED`
+- `execution_mode=SHADOW`
+- `live_side_effect=false`
+
+Host ingested the resulting snapshot and `command_result` with `needs_resync=false`, `read_model_healthy=true`, zero quarantine and zero pending spool backlog.
+
+### SHADOW submit transport round-trip
+
+A `SUBMIT_LIMIT` SHADOW probe used:
+
+- `client_order_id=shadow-test-001`
+- `broker_token=BQ705de59e1227a73471cb`
+- `command_id=c6b9fde28ac04f8a998b28fae39d1ec1`
+
+QMT returned `SHADOW_ACCEPTED` in the same second with `live_side_effect=false`. Host ingested the command result while remaining healthy. No ORDER or DEAL callback was produced, which is the correct result because V05 contains no broker mutation call.
+
 ## P3 closeout changes
 
 ### Archive finalization
 
-Automatic archive now handles only calendar days strictly earlier than the current UTC+08 date. Same-day 16:10 finalization was removed because QMT can continue publishing valid account heartbeats and reconciliation snapshots after market close. This avoids late-event races against an immutable archive.
+Automatic archive handles only calendar days strictly earlier than the current UTC+08 date. Same-day finalization is forbidden while QMT may still publish valid heartbeats or reconciliation snapshots.
 
 ### Host status logging
 
-Status summary is now change-driven:
-
-- any summary-state change emits immediately
-- an unchanged healthy state emits a heartbeat at most every 300 seconds by default
-
-This removes repeated one-minute log noise without reducing anomaly visibility.
+Status summary is change-driven, with an unchanged healthy heartbeat at most every 300 seconds by default.
 
 ### Active reconciliation scheduling
 
-The replacement QMT bridge V05 no longer treats `handlebar` as a timer. It registers an independent `run_time` task for a full read-only snapshot every 300 seconds. `handlebar` is retained only for non-blocking transport flush compatibility.
+V05 uses an independent `run_time` task for a full read-only snapshot every 300 seconds. `handlebar` is not used as a timer.
 
 ## Safety result
 
@@ -65,11 +106,6 @@ P3/P4-shadow code continues to satisfy:
 
 ## Gate boundary
 
-P3 establishes the authoritative broker read plane and durable recovery/reconciliation substrate. It does **not** authorize or implement live trading.
+P3 is closed as **PASS**. It establishes the authoritative broker read plane, periodic reconciliation, and durable recovery substrate. It does **not** authorize or implement live trading.
 
-The next runtime checkpoint is V05 real-QMT calibration:
-
-1. both `run_time` registrations succeed;
-2. 300-second periodic snapshots are observed independently of daily-bar `handlebar` activity;
-3. the 1-second command timer consumes a read-only `REQUEST_SNAPSHOT` shadow command;
-4. QMT emits `command_result` and Host ingests it while remaining healthy.
+P4 may continue with OMS command-result reconciliation and ORDER/DEAL correlation calibration. Any future broker mutation requires a separate explicit gate and separate authorization.
