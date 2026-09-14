@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 import gzip
 import hashlib
 import json
@@ -286,6 +287,43 @@ class DailySpoolArchiver:
             indexed[symbol] = dict(row)
         return indexed
 
+    @staticmethod
+    def _decimal_text_value(value: Any) -> Decimal | None:
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = Decimal(value)
+        except (InvalidOperation, ValueError):
+            return None
+        return parsed if parsed.is_finite() else None
+
+    @classmethod
+    def _position_matches_snapshot(
+        cls,
+        snapshot_position: dict[str, Any],
+        callback_position: dict[str, Any],
+    ) -> bool:
+        if snapshot_position == callback_position:
+            return True
+        if set(snapshot_position) != set(callback_position):
+            return False
+
+        # Guojin QMT 2.1.19.0 can replay a POSITION callback for an otherwise
+        # unchanged holding with m_dOpenPrice reported as 0.0 even though the
+        # active-query snapshot contains the real non-zero open price. Treat that
+        # single zero callback value as "unavailable", never as a position change.
+        # No other field is relaxed.
+        callback_open = cls._decimal_text_value(callback_position.get("open_price"))
+        snapshot_open = cls._decimal_text_value(snapshot_position.get("open_price"))
+        if callback_open != 0 or snapshot_open is None or snapshot_open <= 0:
+            return False
+
+        snapshot_other = dict(snapshot_position)
+        callback_other = dict(callback_position)
+        snapshot_other.pop("open_price", None)
+        callback_other.pop("open_price", None)
+        return snapshot_other == callback_other
+
     @classmethod
     def _is_identical_snapshot_fact(cls, snapshot: QmtEvent, event: QmtEvent) -> bool:
         if (
@@ -302,7 +340,13 @@ class DailySpoolArchiver:
                 return False
             payload = dict(event.payload)
             symbol = payload.get("symbol")
-            return isinstance(symbol, str) and positions.get(symbol) == payload
+            if not isinstance(symbol, str):
+                return False
+            snapshot_position = positions.get(symbol)
+            return snapshot_position is not None and cls._position_matches_snapshot(
+                snapshot_position,
+                payload,
+            )
         return False
 
     @classmethod
