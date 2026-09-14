@@ -15,11 +15,12 @@ from .protocol import (
 )
 
 
-class QmtIngressIdentityError(ValueError):
+class QmtIngressIdentityError(QmtProtocolError):
     """A valid QMT event conflicts with the Host's pinned broker identity.
 
-    This is deliberately distinct from ``QmtProtocolError``. The transport frame
-    is valid evidence and must not be mislabeled as malformed protocol data.
+    Identity conflicts remain a specific ingress-validation subtype so callers
+    can distinguish them from malformed transport data. File-spool routing catches
+    this subtype first and preserves valid conflicting evidence in ``conflicts/``.
     """
 
 
