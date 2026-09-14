@@ -28,6 +28,11 @@ from .service import (
     RecoveryInvariantViolation,
     SubmitResult,
 )
+from .qmt_bridge import (
+    OmsQmtCommandResultSink,
+    QmtCommandResultIngestResult,
+    QmtCommandResultInvariantViolation,
+)
 
 __all__ = [
     "BrokerEvidenceConflict",
@@ -45,8 +50,11 @@ __all__ = [
     "OmsLeaderLost",
     "OmsLeaderUnavailable",
     "OmsNotReconciled",
+    "OmsQmtCommandResultSink",
     "OmsRepository",
     "OrderNotFound",
+    "QmtCommandResultIngestResult",
+    "QmtCommandResultInvariantViolation",
     "RecoveryInvariantViolation",
     "SUPPORTED_SCHEMA_VERSION",
     "SubmitAlreadyStarted",
