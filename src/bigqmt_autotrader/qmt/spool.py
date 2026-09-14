@@ -9,7 +9,7 @@ import time
 from typing import Callable
 
 from .protocol import MAX_FRAME_BYTES, QmtEvent, QmtProtocolError, decode_transport_frame
-from .receiver import IngressResult, QmtIngressBuffer
+from .receiver import IngressResult, QmtIngressBuffer, QmtIngressIdentityError
 
 
 DEFAULT_SPOOL_DIRNAME = "bigqmt_autotrader_spool"
@@ -26,6 +26,7 @@ def default_spool_root() -> Path:
 class SpoolPollResult:
     processed: int
     quarantined: int
+    conflicted: int
     pending: int
 
     @property
@@ -48,6 +49,17 @@ class SpoolReplayResult:
 
 
 @dataclass(frozen=True)
+class LegacyQuarantineInspection:
+    valid_frames: int
+    invalid_frames: int
+    matching_target_frames: int
+    matching_sequence_min: int | None = None
+    matching_sequence_max: int | None = None
+    matching_event_types: tuple[str, ...] = ()
+    matching_clean_snapshot_sequences: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
 class _DecodedSpoolEvent:
     path: Path
     raw: bytes
@@ -60,7 +72,9 @@ class FileSpoolReceiver:
     QMT writes one complete transport frame to a temporary file and atomically
     renames it into ``inbox/*.json``. The host validates/ingests each file and
     then moves it to ``processed``. Malformed or protocol-invalid frames move to
-    ``quarantine`` and are never silently deleted.
+    ``quarantine`` and are never silently deleted. Valid transport frames that
+    conflict with the Host's pinned account identity move to ``conflicts`` so
+    they remain distinguishable from malformed data.
 
     ``processed`` also acts as the restart journal for the current unarchived
     day. A restarted Host may replay the coherent current session from its most
@@ -83,10 +97,11 @@ class FileSpoolReceiver:
         self.inbox = self.root / "inbox"
         self.processed = self.root / "processed"
         self.quarantine = self.root / "quarantine"
+        self.conflicts = self.root / "conflicts"
         # Compatibility alias only. New code and documentation use quarantine.
         self.rejected = self.quarantine
         self.on_event = on_event
-        for directory in (self.inbox, self.processed, self.quarantine):
+        for directory in (self.inbox, self.processed, self.quarantine, self.conflicts):
             directory.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
@@ -104,6 +119,58 @@ class FileSpoolReceiver:
         if not raw or len(raw) > MAX_FRAME_BYTES:
             raise QmtProtocolError("invalid transport frame size")
         return _DecodedSpoolEvent(path=path, raw=raw, event=decode_transport_frame(raw))
+
+    def inspect_legacy_quarantine(
+        self,
+        *,
+        session_id: str | None,
+        account_fingerprint: str | None,
+    ) -> LegacyQuarantineInspection:
+        """Classify legacy quarantine without moving or trusting any file.
+
+        Older Host builds conflated protocol errors with account identity
+        conflicts, so ``quarantine`` may contain fully decodable events. This
+        inspection is intentionally read-only: it only reports whether valid
+        frames exist, and whether they belong to the current recovery target.
+        """
+
+        valid = 0
+        invalid = 0
+        matching: list[QmtEvent] = []
+        for path in sorted(self.quarantine.glob("*.json")):
+            try:
+                item = self._read_decoded(path)
+            except (OSError, QmtProtocolError):
+                invalid += 1
+                continue
+            valid += 1
+            event = item.event
+            if (
+                session_id is not None
+                and account_fingerprint is not None
+                and event.session_id == session_id
+                and event.account_fingerprint == account_fingerprint
+            ):
+                matching.append(event)
+
+        sequences = sorted(event.sequence for event in matching)
+        event_types = tuple(sorted({event.event_type for event in matching}))
+        clean_snapshots = tuple(
+            sorted(
+                event.sequence
+                for event in matching
+                if event.event_type == "snapshot" and not event.payload.get("query_errors")
+            )
+        )
+        return LegacyQuarantineInspection(
+            valid_frames=valid,
+            invalid_frames=invalid,
+            matching_target_frames=len(matching),
+            matching_sequence_min=sequences[0] if sequences else None,
+            matching_sequence_max=sequences[-1] if sequences else None,
+            matching_event_types=event_types,
+            matching_clean_snapshot_sequences=clean_snapshots,
+        )
 
     def replay_processed_from_latest_clean_snapshot(self) -> SpoolReplayResult:
         """Rebuild Host state from the coherent current spool stream.
@@ -179,7 +246,7 @@ class FileSpoolReceiver:
         for item in coherent_processed:
             if item.event.sequence < snapshot.event.sequence:
                 continue
-            result = self.ingress.ingest_frame(item.raw)
+            result = self.ingress.ingest(item.event)
             if self.on_event is not None:
                 self.on_event(result)
             replayed += 1
@@ -202,18 +269,23 @@ class FileSpoolReceiver:
 
         processed = 0
         quarantined = 0
+        conflicted = 0
         candidates = sorted(self.inbox.glob("*.json"))[:max_files]
         for path in candidates:
             try:
-                raw = path.read_bytes()
-                if not raw or len(raw) > MAX_FRAME_BYTES:
-                    raise QmtProtocolError("invalid transport frame size")
-                result = self.ingress.ingest_frame(raw)
-                if self.on_event is not None:
-                    self.on_event(result)
-            except QmtProtocolError:
+                item = self._read_decoded(path)
+            except (OSError, QmtProtocolError):
                 self._move_unique(path, self.quarantine)
                 quarantined += 1
+                continue
+
+            try:
+                result = self.ingress.ingest(item.event)
+                if self.on_event is not None:
+                    self.on_event(result)
+            except QmtIngressIdentityError:
+                self._move_unique(path, self.conflicts)
+                conflicted += 1
                 continue
             except Exception:
                 # Downstream ingestion failed. Leave the durable event in the
@@ -227,6 +299,7 @@ class FileSpoolReceiver:
         return SpoolPollResult(
             processed=processed,
             quarantined=quarantined,
+            conflicted=conflicted,
             pending=pending,
         )
 
