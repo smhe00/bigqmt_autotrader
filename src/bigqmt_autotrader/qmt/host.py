@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, time as wall_time
+from datetime import datetime
 import json
 import os
 import time
@@ -62,19 +62,11 @@ def _should_log_event(
     event_type = result.event.event_type
     if result.needs_resync or quarantined:
         return True
-    if event_type in {"bridge_ready", "bridge_error", "snapshot", "order", "deal"}:
+    if event_type in {"bridge_ready", "bridge_error", "snapshot", "order", "deal", "command_result"}:
         return True
     if event_type == "account" and not deduplicated:
         return True
     return False
-
-
-def _parse_hhmm(value: str) -> wall_time:
-    try:
-        hour_text, minute_text = value.split(":", 1)
-        return wall_time(hour=int(hour_text), minute=int(minute_text))
-    except (TypeError, ValueError) as exc:
-        raise argparse.ArgumentTypeError("expected HH:MM") from exc
 
 
 def _archive_result_payload(result: DailyArchiveResult) -> dict[str, Any]:
@@ -91,16 +83,17 @@ def _archive_due_days(
     archiver: DailySpoolArchiver,
     *,
     now: datetime,
-    archive_after: wall_time,
 ) -> tuple[str, ...]:
+    """Return only closed calendar days.
+
+    QMT can keep emitting account heartbeats and reconciliation snapshots long
+    after the A-share close. Same-day finalization therefore races a live
+    producer. Automatic archive commit is deliberately delayed until the next
+    UTC+08 calendar day; this makes the archive immutable without late-event
+    ambiguity.
+    """
     today = now.date().isoformat()
-    due: list[str] = []
-    for day in archiver.discover_processed_days():
-        if day < today:
-            due.append(day)
-        elif day == today and now.timetz().replace(tzinfo=None) >= archive_after:
-            due.append(day)
-    return tuple(due)
+    return tuple(day for day in archiver.discover_processed_days() if day < today)
 
 
 def _spool_dir_source(explicit_cli: str | None) -> str:
@@ -125,6 +118,7 @@ def _status_summary_payload(
         "position_events_seen": stats["position_events_seen"],
         "order_events_seen": stats["order_events_seen"],
         "deal_events_seen": stats["deal_events_seen"],
+        "command_results_seen": stats.get("command_results_seen", 0),
         "semantic_quarantine_depth": len(ingestion.quarantine),
         "semantic_quarantine_dropped": ingestion.quarantine_dropped,
         "spool_processed_total": stats["spool_processed_total"],
@@ -134,13 +128,26 @@ def _status_summary_payload(
     }
 
 
+def _summary_should_emit(
+    payload: dict[str, Any],
+    *,
+    previous_payload: dict[str, Any] | None,
+    monotonic_now: float,
+    last_emit_monotonic: float,
+    heartbeat_seconds: float,
+) -> bool:
+    if previous_payload is None or payload != previous_payload:
+        return True
+    return monotonic_now - last_emit_monotonic >= heartbeat_seconds
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Big QMT P3 read-only host receiver")
+    parser = argparse.ArgumentParser(description="Big QMT P3/P4 host receiver")
     parser.add_argument(
         "--transport",
         choices=("spool", "tcp"),
         default="spool",
-        help="spool is the Guojin QMT 2.1.19.0 production P3 path; tcp is retained for tests/future runtimes",
+        help="spool is the Guojin QMT production path; tcp is retained for tests/future runtimes",
     )
     parser.add_argument("--spool-dir", default=None)
     parser.add_argument("--poll-interval", type=float, default=0.2)
@@ -155,21 +162,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--auto-archive",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Automatically compact processed spool files into daily archives.",
-    )
-    parser.add_argument(
-        "--archive-after",
-        type=_parse_hhmm,
-        default=wall_time(hour=16, minute=10),
-        help="A-share local time after which today's archive may commit (default 16:10).",
+        help="Automatically compact closed-day processed spool files into daily archives.",
     )
     parser.add_argument("--archive-quiet-seconds", type=float, default=300.0)
     parser.add_argument("--archive-check-interval", type=float, default=30.0)
     parser.add_argument(
         "--status-summary-interval",
         type=float,
-        default=60.0,
-        help="Seconds between compact host status summaries (default 60).",
+        default=300.0,
+        help="Maximum seconds between unchanged status heartbeat summaries (default 300); changes emit immediately.",
     )
     return parser
 
@@ -197,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         "position_events_seen": 0,
         "order_events_seen": 0,
         "deal_events_seen": 0,
+        "command_results_seen": 0,
         "spool_processed_total": 0,
         "spool_quarantined_total": 0,
     }
@@ -217,6 +219,8 @@ def main(argv: list[str] | None = None) -> int:
             stats["order_events_seen"] += 1
         elif event_type == "deal":
             stats["deal_events_seen"] += 1
+        elif event_type == "command_result":
+            stats["command_results_seen"] += 1
 
         if _should_log_event(
             result,
@@ -282,11 +286,12 @@ def main(argv: list[str] | None = None) -> int:
             "spool_inbox": str(spool.inbox.resolve()),
             "spool_dir_source": _spool_dir_source(args.spool_dir),
             "auto_archive": args.auto_archive,
-            "archive_after": args.archive_after.strftime("%H:%M"),
+            "archive_policy": "past_days_only",
             "archive_quiet_seconds": args.archive_quiet_seconds,
             "archive_timezone": "UTC+08:00",
             "host_account_semantic_dedup": True,
             "event_log_mode": "important_only",
+            "status_summary_mode": "change_driven_with_heartbeat",
             "status_summary_interval": args.status_summary_interval,
             "restart_replay": "coherent_current_session_from_latest_spool_tail",
         },
@@ -319,9 +324,10 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     last_archive_check = 0.0
-    last_summary = time.monotonic()
     last_pending = sum(1 for _ in spool.inbox.glob("*.json"))
     last_archive_signature: dict[str, tuple[str, tuple[str, ...]]] = {}
+    last_summary_emit = time.monotonic()
+    last_summary_payload = _status_summary_payload(stats, ingestion, pending=last_pending)
     try:
         while True:
             try:
@@ -341,21 +347,22 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             monotonic_now = time.monotonic()
-            if monotonic_now - last_summary >= args.status_summary_interval:
-                last_summary = monotonic_now
-                _safe_status(
-                    "summary",
-                    _status_summary_payload(stats, ingestion, pending=last_pending),
-                )
+            summary_payload = _status_summary_payload(stats, ingestion, pending=last_pending)
+            if _summary_should_emit(
+                summary_payload,
+                previous_payload=last_summary_payload,
+                monotonic_now=monotonic_now,
+                last_emit_monotonic=last_summary_emit,
+                heartbeat_seconds=args.status_summary_interval,
+            ):
+                _safe_status("summary", summary_payload)
+                last_summary_payload = summary_payload
+                last_summary_emit = monotonic_now
 
             if args.auto_archive and monotonic_now - last_archive_check >= args.archive_check_interval:
                 last_archive_check = monotonic_now
                 now = datetime.now(tz=SHANGHAI_TZ)
-                for day in _archive_due_days(
-                    archiver,
-                    now=now,
-                    archive_after=args.archive_after,
-                ):
+                for day in _archive_due_days(archiver, now=now):
                     try:
                         archive_result = archiver.archive_day(
                             day,
