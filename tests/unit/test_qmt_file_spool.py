@@ -143,6 +143,8 @@ def test_restart_replays_latest_clean_snapshot_and_continues_sequence(tmp_path: 
     assert replay.replayed == 2
     assert replay.session_id == "session-a"
     assert replay.last_sequence == 3
+    assert replay.snapshot_sequence == 2
+    assert replay.target_sequence == 3
     assert replay.account_fingerprint == ACCOUNT
     assert restarted_ingress.last_sequence == 3
     assert restarted_host.read_model.healthy is True
@@ -188,6 +190,66 @@ def test_restart_replay_uses_newest_clean_snapshot_not_older_account(tmp_path: P
     assert ingress.expected_account_fingerprint == ACCOUNT
     assert ingress.session_id == "session-a"
     assert ingress.last_sequence == 3
+    assert host.read_model.healthy is True
+
+
+def test_restart_replay_targets_current_tail_not_globally_newest_historical_snapshot(tmp_path: Path) -> None:
+    ingress = QmtIngressBuffer()
+    host = QmtHostIngestion()
+    receiver = FileSpoolReceiver(ingress, spool_root=tmp_path, on_event=host.handle)
+
+    current_snapshot = _event(sequence=2, account=ACCOUNT, session_id="current-session")
+    current_snapshot["timestamp_ms"] = 1_700_000_001_000
+    _write_processed(
+        receiver.processed,
+        "1700000001000_current_00000000000000000002.json",
+        current_snapshot,
+    )
+
+    # Historical calibration snapshot is newer than the current session snapshot.
+    # The old recovery algorithm selected this and then crossed accounts/sessions.
+    historical_snapshot = _event(
+        sequence=1718,
+        account=OTHER_ACCOUNT,
+        session_id="historical-session",
+    )
+    historical_snapshot["timestamp_ms"] = 1_700_000_002_000
+    _write_processed(
+        receiver.processed,
+        "1700000002000_historical_00000000000000001718.json",
+        historical_snapshot,
+    )
+
+    # A still newer live heartbeat identifies the actual current coherent stream.
+    current_tail = _event(
+        sequence=3,
+        event_type="account",
+        account=ACCOUNT,
+        session_id="current-session",
+    )
+    current_tail["timestamp_ms"] = 1_700_000_003_000
+    _publish(
+        receiver.inbox,
+        "1700000003000_current_00000000000000000003.json",
+        current_tail,
+    )
+
+    replay = receiver.replay_processed_from_latest_clean_snapshot()
+
+    assert replay.snapshot_found is True
+    assert replay.replayed == 1
+    assert replay.session_id == "current-session"
+    assert replay.snapshot_sequence == 2
+    assert replay.target_sequence == 3
+    assert replay.last_sequence == 2
+    assert ingress.expected_account_fingerprint == ACCOUNT
+    assert host.read_model.healthy is True
+
+    resumed = receiver.poll_once()
+    assert resumed.processed == 1
+    assert ingress.session_id == "current-session"
+    assert ingress.last_sequence == 3
+    assert ingress.needs_resync is False
     assert host.read_model.healthy is True
 
 
