@@ -50,6 +50,7 @@ class HostIngestResult:
     view: QmtSnapshotView | None
     evidence_ingested: bool
     quarantined: bool
+    deduplicated: bool = False
 
 
 class QmtHostIngestion:
@@ -59,6 +60,10 @@ class QmtHostIngestion:
     never translated to OMS state by guesswork: an explicit calibrated mapper
     must produce a BrokerEvidenceCandidate first. Without one they are retained
     in quarantine for later reconciliation/calibration.
+
+    Repeated ACCOUNT callbacks with content identical to the current read-model
+    account are marked as semantic duplicates. The sequence/timestamp still
+    advance through the read model so protocol continuity is never hidden.
     """
 
     def __init__(
@@ -77,6 +82,7 @@ class QmtHostIngestion:
         self.max_quarantine = max_quarantine
         self.quarantine: list[QmtEvent] = []
         self.quarantine_dropped = 0
+        self.account_semantic_duplicates = 0
 
     def handle(self, result: IngressResult) -> HostIngestResult:
         if result.disposition is IngressDisposition.DUPLICATE:
@@ -84,22 +90,41 @@ class QmtHostIngestion:
                 view=self.read_model.view,
                 evidence_ingested=False,
                 quarantined=False,
+                deduplicated=True,
             )
 
-        view = self.read_model.apply(result)
         event = result.event
+        semantic_duplicate = self._is_repeated_account(event)
+        view = self.read_model.apply(result)
+        if semantic_duplicate:
+            self.account_semantic_duplicates += 1
 
         if event.event_type not in {"order", "deal"}:
-            return HostIngestResult(view=view, evidence_ingested=False, quarantined=False)
+            return HostIngestResult(
+                view=view,
+                evidence_ingested=False,
+                quarantined=False,
+                deduplicated=semantic_duplicate,
+            )
 
         if self.evidence_sink is None or self.evidence_mapper is None:
             self._quarantine(event)
-            return HostIngestResult(view=view, evidence_ingested=False, quarantined=True)
+            return HostIngestResult(
+                view=view,
+                evidence_ingested=False,
+                quarantined=True,
+                deduplicated=False,
+            )
 
         candidate = self.evidence_mapper(event)
         if candidate is None:
             self._quarantine(event)
-            return HostIngestResult(view=view, evidence_ingested=False, quarantined=True)
+            return HostIngestResult(
+                view=view,
+                evidence_ingested=False,
+                quarantined=True,
+                deduplicated=False,
+            )
 
         if candidate.account_fingerprint != event.account_fingerprint:
             raise ValueError("evidence mapper changed account identity")
@@ -122,7 +147,20 @@ class QmtHostIngestion:
             payload=candidate.payload,
             observed_at=candidate.observed_at,
         )
-        return HostIngestResult(view=view, evidence_ingested=True, quarantined=False)
+        return HostIngestResult(
+            view=view,
+            evidence_ingested=True,
+            quarantined=False,
+            deduplicated=False,
+        )
+
+    def _is_repeated_account(self, event: QmtEvent) -> bool:
+        if event.event_type != "account":
+            return False
+        view = self.read_model.view
+        if view is None or len(view.account) != 1:
+            return False
+        return dict(view.account[0]) == dict(event.payload)
 
     def _quarantine(self, event: QmtEvent) -> None:
         if len(self.quarantine) >= self.max_quarantine:
