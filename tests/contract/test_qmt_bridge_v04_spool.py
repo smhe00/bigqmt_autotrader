@@ -103,6 +103,8 @@ def test_v04_atomically_spools_bridge_ready_and_snapshot(tmp_path, monkeypatch):
     assert all("SECRET_ACCOUNT" not in path.read_text(encoding="utf-8") for path in files)
     assert bridge._STATE.transport_persisted == 2
     assert bridge._STATE.transport_failures == 0
+    assert bridge._STATE.spool_root == str(tmp_path.resolve())
+    assert bridge._spool_inbox() == str((tmp_path / "inbox").resolve())
     assert bridge.drain_events() == []
 
 
@@ -120,3 +122,68 @@ def test_v04_keeps_event_in_memory_if_spool_publish_fails(monkeypatch):
     assert len(bridge._STATE.events) == 1
     assert bridge._STATE.transport_failures == 1
     assert bridge._STATE.last_transport_error_type == "OSError"
+
+
+def test_v04_suppresses_identical_account_callbacks_but_keeps_changes_and_heartbeat(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("BIGQMT_SPOOL_DIR", str(tmp_path))
+    bridge = load_bridge()
+    bridge.account = "SECRET_ACCOUNT"
+    bridge.accountType = "STOCK"
+
+    account = Obj()
+    account.m_dBalance = 1000.0
+    account.m_dAvailable = 900.0
+    account.m_dInstrumentValue = 100.0
+    account.m_dStockValue = 100.0
+    account.m_strStatus = "OK"
+    account.m_strTradingDate = "20260914"
+
+    def query(_account_id, _account_type, data_type):
+        return {
+            "account": [account],
+            "position": [],
+            "order": [],
+            "deal": [],
+        }[data_type]
+
+    bridge.get_trade_detail_data = query
+
+    class Context:
+        def set_account(self, _account_id):
+            return None
+
+    context = Context()
+    bridge.init(context)
+    bridge.after_init(context)
+
+    inbox = tmp_path / "inbox"
+    assert len(list(inbox.glob("*.json"))) == 2
+    sequence_after_snapshot = bridge._STATE.sequence
+
+    for _ in range(3):
+        bridge.account_callback(context, account)
+
+    assert bridge._STATE.sequence == sequence_after_snapshot
+    assert bridge._STATE.account_callbacks_suppressed == 3
+    assert bridge._STATE.account_callbacks_emitted == 0
+    assert len(list(inbox.glob("*.json"))) == 2
+
+    account.m_dAvailable = 850.0
+    bridge.account_callback(context, account)
+    assert bridge._STATE.sequence == sequence_after_snapshot + 1
+    assert bridge._STATE.account_callbacks_emitted == 1
+    assert len(list(inbox.glob("*.json"))) == 3
+
+    bridge._STATE.last_account_state_monotonic -= bridge.ACCOUNT_CALLBACK_HEARTBEAT_SECONDS + 1.0
+    bridge.account_callback(context, account)
+    assert bridge._STATE.sequence == sequence_after_snapshot + 2
+    assert bridge._STATE.account_callbacks_emitted == 2
+    assert len(list(inbox.glob("*.json"))) == 4
+
+    frames = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(inbox.glob("*.json"))]
+    account_events = [frame["event"] for frame in frames if frame["event"]["event_type"] == "account"]
+    assert len(account_events) == 2
+    assert account_events[0]["payload"]["available_cash"] == "850.0"
+    assert account_events[1]["payload"]["available_cash"] == "850.0"
