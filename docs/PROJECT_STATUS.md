@@ -11,8 +11,8 @@ Updated: 2026-09-15
 | P0 / G0 | **PASS** |
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
-| P3 Big QMT read-only | **CODE GATE PASS — multi-hour V04 real-QMT read/recovery/archive calibration PASS; V05 run_time deployment calibration pending** |
-| P4 Big QMT execution bridge | **IN PROGRESS — durable SHADOW command round-trip implemented; no live broker mutation** |
+| P3 Big QMT read-only | **PASS — multi-hour read/recovery/archive + V05 run_time deployment calibration complete** |
+| P4 Big QMT execution bridge | **IN PROGRESS — SHADOW command round-trip + OMS control-plane reconciliation implemented; ORDER/DEAL token/status calibration next** |
 | P5 Shadow / simulation / live canary | NOT STARTED |
 | Live trading allowed | **NO** |
 | Real QMT submit implemented | **NO** |
@@ -24,34 +24,38 @@ Updated: 2026-09-15
 | Capability | State |
 | --- | --- |
 | Fixed spool root | **PASS — `D:\BigQMTData\spool`** |
-| ACCOUNT/POSITION/ORDER/DEAL active query | **PASS at query/schema level — latest calibrated snapshot: 1 / 8 / 1 / 2 rows, `query_errors=[]`** |
+| ACCOUNT/POSITION/ORDER/DEAL active query | **PASS at query/schema level — calibrated snapshot: 1 / 8 / 1 / 2 rows, `query_errors=[]`** |
 | Callback subscription | **PASS — `ContextInfo.set_account(account)`** |
 | ACCOUNT callback | **PASS** |
-| POSITION callback | **PASS — 8-position initial callback replay observed and semantically calibrated** |
-| ORDER/DEAL callback status semantics | **PENDING P4 calibration** |
-| QMT edge ACCOUNT dedup | **PASS — change immediate; unchanged heartbeat 300 s** |
+| POSITION callback | **PASS** |
+| 300 s independent active reconcile | **PASS — real QMT observations exactly 5 minutes apart** |
 | QMT event transport | **PASS — atomic file publication; observed `dropped_events=0`, `transport_failures=0`** |
 | Host ingestion/read model | **PASS — account/session/sequence validation; gap/session change fail-close** |
 | Host-only restart recovery | **PASS — coherent current session/account replay from clean snapshot** |
-| Filesystem/semantic quarantine | **PASS — zero in clean long-run calibration** |
+| Filesystem/semantic quarantine | **PASS — zero in clean long-run and V05 calibration** |
 | Archive integrity | **PASS — clean snapshot convergence + manifest/checkpoint + SHA-256 + post-commit exact cleanup** |
-| Auto archive policy | **HARDENED — only past UTC+08 calendar days; never finalizes a still-live same-day producer** |
-| Host status logging | **HARDENED — change-driven + unchanged heartbeat every 300 s by default** |
+| Auto archive policy | **HARDENED — only past UTC+08 calendar days** |
+| Host status logging | **HARDENED — change-driven + 300 s healthy heartbeat; session-aware diagnostics** |
 
-Multi-hour real-QMT evidence (23:17–04:51 calibration):
+Multi-hour real-QMT evidence:
 
 - QMT remained healthy with 66 emitted ACCOUNT heartbeats and 3869 suppressed duplicate callbacks;
 - no QMT event drops or transport failures were observed;
 - Host remained `read_model_healthy=true`, `spool_pending=0`, with zero filesystem or semantic quarantine;
-- Host event accounting reconciled with QMT: 2 snapshots + 8 position callbacks + 66 account callbacks = 76;
+- Host event accounting reconciled exactly;
 - Host restart replay recovered the clean current stream;
-- the closed-day archive committed 28 source events with no reasons and an integrity SHA-256 checkpoint.
+- the closed-day archive committed 28 events with no reasons and an integrity SHA-256 checkpoint.
 
-P3 code closeout replaces `handlebar`-driven pseudo-periodic snapshot timing with an independent QMT `run_time` full-snapshot timer in V05. The new timer still requires one real Guojin deployment observation before the deployment checkpoint is marked complete.
+V05 deployment calibration additionally proved:
+
+- `command_timer_registered=true` with `1nSecond` command cadence;
+- `snapshot_timer_registered=true` with `300nSecond` reconciliation cadence;
+- `REQUEST_SNAPSHOT` Host→QMT→Host round-trip completed with `SNAPSHOT_EMITTED`, `live_side_effect=false`;
+- the read model remained healthy with zero quarantine/backlog.
 
 ## P4 shadow execution plane
 
-New bridge: `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py`
+Bridge: `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py`
 
 Build: `p4-shadow-command-spool-1`
 
@@ -80,7 +84,7 @@ commands/claimed
     -> processed | rejected | unknown
 ```
 
-A command found orphaned in `claimed` after restart is moved to `unknown` and emits `UNKNOWN_ORPHANED`; it is never blindly replayed.
+An orphaned claimed command becomes `UNKNOWN_ORPHANED`; it is never blindly replayed.
 
 Implemented command types:
 
@@ -95,25 +99,38 @@ Order identity:
 - token fits calibrated QMT `userOrderId` / `m_strRemark` `<24` constraint
 - raw broker account ID is not present in Host command frames
 
-Host accepts `command_result` events but does not treat `SHADOW_ACCEPTED` as broker evidence. `QmtShadowDriver` publishes the durable command then intentionally returns outcome-unknown semantics to the OMS, preserving the no-blind-resend model until actual broker callback/query evidence exists.
+Real-QMT SHADOW submit calibration proved:
 
-Safe probe CLI:
+- `client_order_id=shadow-test-001`
+- `broker_token=BQ705de59e1227a73471cb`
+- QMT returned `SHADOW_ACCEPTED` within the 1-second command cadence
+- `live_side_effect=false`
+- Host ingested the `command_result` while remaining healthy
+- no ORDER/DEAL callback was produced, as expected because no broker mutation exists
 
-```text
-python -m bigqmt_autotrader.qmt.shadow_probe ... snapshot
-python -m bigqmt_autotrader.qmt.shadow_probe ... submit ...
-```
+### OMS command-result semantics
 
-Both operate against the command spool; V05 has no live trading call.
+`command_result` now has a dedicated OMS control-plane sink. It is explicitly **not broker evidence**:
+
+- `SHADOW_ACCEPTED` never creates `ACKNOWLEDGED`;
+- if a result races a durable `SUBMITTING` or `CANCEL_PENDING` reservation, it can only converge that ambiguous boundary to `UNKNOWN`;
+- if the OMS is already `UNKNOWN`, the result is retained as an audit event without lifecycle promotion;
+- actual `ACKNOWLEDGED / PARTIALLY_FILLED / FILLED / CANCELLED / REJECTED` transitions remain reserved for calibrated broker ORDER/DEAL/query evidence.
+
+Host diagnostics now expose `session_id`; `command_result` logs include command/client/token/result/mode/live-side-effect fields, while bridge errors expose their code. This removes ambiguity after QMT restarts.
+
+### ORDER/DEAL calibration boundary
+
+A read-only calibration projection now recognizes broker tokens only when QMT `remark` exactly matches `BQ[0-9a-f]{20}`. It records raw `broker_order_id`, `order_ref`, `trade_id`, QMT status/submit-status codes and quantities. It deliberately performs **no QMT-status → OMS-status mapping yet**. That mapping requires observed Guojin ORDER/DEAL broker evidence before it can be trusted.
 
 ## Verification
 
 | Verification | State |
 | --- | --- |
-| Latest verified Python suite | **184 passed on Python 3.12** |
+| Latest verified Python suite | **189 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | Broker mutation-call static audit | **PASS** |
-| FSM implementation/formal conformance | **196 / 196** state-request pairs PASS |
+| FSM implementation/formal conformance | **PASS** |
 | TLC OrderFSM | **PASS** |
 | TLC SubmitProtocol | **PASS** |
 | TLC LeaderLease | **PASS** |
@@ -132,6 +149,6 @@ Both operate against the command spool; V05 has no live trading call.
 
 ## Current checkpoint
 
-**P0/P1/P2 PASS. P3 code gate PASS, V05 deployment calibration pending. P4 SHADOW bridge IN PROGRESS. Live trading remains disabled and unimplemented.**
+**P0/P1/P2/P3 PASS. P4 SHADOW execution/control-plane integration IN PROGRESS. Live trading remains disabled and unimplemented.**
 
-The next required real-QMT test is intentionally side-effect-free: deploy V05 in Model Trading, confirm both `run_time` timers register, issue `REQUEST_SNAPSHOT` through the shadow probe, verify consumption within the 1-second command cadence, and verify `snapshot + command_result` arrive at Host with `read_model_healthy=true`. Only after that round-trip passes should the project design a separate P4 broker-mutation gate.
+The next technical checkpoint is ORDER/DEAL correlation and Guojin status-code calibration. No real broker mutation is authorized by this checkpoint.
