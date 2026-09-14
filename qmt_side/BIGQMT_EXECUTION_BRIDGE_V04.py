@@ -15,11 +15,12 @@ import uuid
 
 PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p3-file-spool-1"
+BRIDGE_BUILD = "p3-file-spool-2"
 TRADING_ENABLED = False
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 SNAPSHOT_INTERVAL_SECONDS = 60.0
+ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
 MAX_QUEUED_EVENTS = 512
 QUERY_TYPES = ("ACCOUNT", "POSITION", "ORDER", "DEAL")
 TRANSPORT_MAX_FRAME_BYTES = 1024 * 1024
@@ -59,19 +60,34 @@ class _RuntimeState(object):
         self.transport_failures = 0
         self.last_transport_error_type = None
         self.spool_ready = False
+        self.spool_root = None
+        self.last_account_payload_digest = None
+        self.last_account_state_monotonic = 0.0
+        self.account_callbacks_suppressed = 0
+        self.account_callbacks_emitted = 0
 
 
 _STATE = _RuntimeState()
 
 
+def _spool_dir_source():
+    if os.environ.get("BIGQMT_SPOOL_DIR"):
+        return "environment"
+    if os.environ.get("TEMP") or os.environ.get("TMP"):
+        return "temp"
+    return "cwd"
+
+
 def _spool_root():
     explicit = os.environ.get("BIGQMT_SPOOL_DIR")
     if explicit:
-        return explicit
-    base = os.environ.get("TEMP") or os.environ.get("TMP")
-    if not base:
-        base = os.getcwd()
-    return os.path.join(base, SPOOL_DIRNAME)
+        base = os.path.expanduser(explicit)
+    else:
+        base = os.environ.get("TEMP") or os.environ.get("TMP")
+        if not base:
+            base = os.getcwd()
+        base = os.path.join(base, SPOOL_DIRNAME)
+    return os.path.abspath(os.path.normpath(base))
 
 
 def _spool_inbox():
@@ -79,7 +95,8 @@ def _spool_inbox():
 
 
 def _ensure_spool():
-    inbox = _spool_inbox()
+    root = _spool_root()
+    inbox = os.path.join(root, "inbox")
     try:
         if not os.path.isdir(inbox):
             os.makedirs(inbox)
@@ -87,6 +104,7 @@ def _ensure_spool():
         if not os.path.isdir(inbox):
             raise
     _STATE.spool_ready = True
+    _STATE.spool_root = root
     return inbox
 
 
@@ -113,6 +131,8 @@ def capabilities():
         "query_types": list(QUERY_TYPES),
         "callbacks": ["account", "position", "order", "deal"],
         "transport": "file_spool_atomic_rename",
+        "account_callback_dedup": True,
+        "account_callback_heartbeat_seconds": ACCOUNT_CALLBACK_HEARTBEAT_SECONDS,
         "methods": ["ping", "capabilities", "read_snapshot", "drain_events", "flush_transport"],
     }
 
@@ -246,6 +266,18 @@ _NORMALIZERS = {
     "ORDER": _normalize_order,
     "DEAL": _normalize_deal,
 }
+
+
+def _payload_digest(payload):
+    raw = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _remember_account_state(payload, now=None):
+    if now is None:
+        now = time.monotonic()
+    _STATE.last_account_payload_digest = _payload_digest(payload)
+    _STATE.last_account_state_monotonic = now
 
 
 def _event(event_type, source, payload):
@@ -384,6 +416,8 @@ def _snapshot_summary(snapshot):
         "dropped_events": _STATE.dropped_events,
         "transport_persisted": _STATE.transport_persisted,
         "transport_failures": _STATE.transport_failures,
+        "account_callbacks_suppressed": _STATE.account_callbacks_suppressed,
+        "account_callbacks_emitted": _STATE.account_callbacks_emitted,
     }
 
 
@@ -431,6 +465,8 @@ def read_snapshot(account_id=None, account_type=None, query_fn=None, emit=True):
             snapshot[keys[data_type]] = [_NORMALIZERS[data_type](row) for row in list(rows)]
         except Exception as exc:
             snapshot["query_errors"].append({"data_type": data_type, "error_type": type(exc).__name__})
+    if snapshot["account"]:
+        _remember_account_state(snapshot["account"][0])
     if emit:
         _enqueue("snapshot", "active_query", snapshot)
         _safe_log("snapshot", _snapshot_summary(snapshot))
@@ -451,7 +487,7 @@ def _bind_runtime(ContextInfo):
         return False
     _set_account_state(account_id, account_type)
     try:
-        _ensure_spool()
+        inbox = _ensure_spool()
     except Exception as exc:
         _runtime_error("SPOOL_INIT_FAILED", exc)
         return False
@@ -467,14 +503,22 @@ def _bind_runtime(ContextInfo):
         _STATE.callback_subscription = False
         _runtime_error("SET_ACCOUNT_UNAVAILABLE")
     _STATE.initialized = True
-    ready_payload = {
+    ready_event_payload = {
         "python_version": sys.version.split()[0],
         "callback_subscription": _STATE.callback_subscription,
         "spool_ready": _STATE.spool_ready,
         "capabilities": capabilities(),
     }
-    _enqueue("bridge_ready", "init", ready_payload)
-    _safe_log("bridge_ready", ready_payload)
+    ready_log_payload = dict(ready_event_payload)
+    ready_log_payload.update(
+        {
+            "spool_root": _STATE.spool_root,
+            "spool_inbox": inbox,
+            "spool_dir_source": _spool_dir_source(),
+        }
+    )
+    _enqueue("bridge_ready", "init", ready_event_payload)
+    _safe_log("bridge_ready", ready_log_payload)
     flush_transport()
     return True
 
@@ -518,22 +562,51 @@ def handlebar(ContextInfo):
         _runtime_error("PERIODIC_SNAPSHOT_FAILED", exc)
 
 
-def _callback_event(event_type, payload):
+def _callback_event(event_type, payload, log_extra=None):
     _enqueue(event_type, "callback", payload)
-    _safe_log(
-        "callback",
-        {
-            "event_type": event_type,
-            "fields": _present_fields(payload),
-            "queued_events": len(_STATE.events),
-            "dropped_events": _STATE.dropped_events,
-        },
-    )
+    log_payload = {
+        "event_type": event_type,
+        "fields": _present_fields(payload),
+        "queued_events": len(_STATE.events),
+        "dropped_events": _STATE.dropped_events,
+    }
+    if log_extra:
+        log_payload.update(log_extra)
+    _safe_log("callback", log_payload)
     flush_transport()
 
 
 def account_callback(ContextInfo, accountInfo):
-    _callback_event("account", _normalize_account(accountInfo))
+    payload = _normalize_account(accountInfo)
+    now = time.monotonic()
+    digest = _payload_digest(payload)
+    same_payload = digest == _STATE.last_account_payload_digest
+    heartbeat_due = (
+        _STATE.last_account_state_monotonic <= 0.0
+        or now - _STATE.last_account_state_monotonic >= ACCOUNT_CALLBACK_HEARTBEAT_SECONDS
+    )
+    if same_payload and not heartbeat_due:
+        _STATE.account_callbacks_suppressed += 1
+        return
+
+    if _STATE.last_account_payload_digest is None:
+        reason = "first"
+    elif same_payload:
+        reason = "heartbeat"
+    else:
+        reason = "changed"
+    _remember_account_state(payload, now)
+    _STATE.account_callbacks_emitted += 1
+    _callback_event(
+        "account",
+        payload,
+        {
+            "dedup_reason": reason,
+            "account_callbacks_suppressed": _STATE.account_callbacks_suppressed,
+            "account_callbacks_emitted": _STATE.account_callbacks_emitted,
+            "heartbeat_seconds": ACCOUNT_CALLBACK_HEARTBEAT_SECONDS,
+        },
+    )
 
 
 def position_callback(ContextInfo, positionInfo):
@@ -569,11 +642,20 @@ def _top_level_bootstrap():
     if not (account_id and account_type and query_available):
         return
     try:
-        _ensure_spool()
+        inbox = _ensure_spool()
         read_snapshot(account_id, account_type)
         _STATE.last_snapshot_monotonic = time.monotonic()
         flush_transport()
-        _safe_log("top_level_snapshot_ok", {"callback_subscription": False, "spool_ready": True})
+        _safe_log(
+            "top_level_snapshot_ok",
+            {
+                "callback_subscription": False,
+                "spool_ready": True,
+                "spool_root": _STATE.spool_root,
+                "spool_inbox": inbox,
+                "spool_dir_source": _spool_dir_source(),
+            },
+        )
     except Exception as exc:
         _runtime_error("TOP_LEVEL_SNAPSHOT_FAILED", exc)
 
