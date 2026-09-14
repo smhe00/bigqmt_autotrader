@@ -11,6 +11,7 @@ BRIDGE_PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 MAX_FRAME_BYTES = 1024 * 1024
 _ACCOUNT_FINGERPRINT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_BROKER_TOKEN_RE = re.compile(r"^BQ[0-9a-f]{20}$")
 _ALLOWED_EVENT_TYPES = frozenset(
     {
         "snapshot",
@@ -123,15 +124,40 @@ def _validate_command_result_payload(payload: Mapping[str, Any]) -> None:
     command_id = payload.get("command_id")
     command_type = payload.get("command_type")
     result_status = payload.get("result_status")
+    execution_mode = payload.get("execution_mode")
     live_side_effect = payload.get("live_side_effect")
     if not isinstance(command_id, str) or not command_id:
         raise QmtProtocolError("command_result command_id must be non-empty text")
     if command_type not in {"SUBMIT_LIMIT", "CANCEL_ORDER", "REQUEST_SNAPSHOT"}:
         raise QmtProtocolError("command_result has unsupported command_type")
-    if not isinstance(result_status, str) or not result_status:
-        raise QmtProtocolError("command_result result_status must be non-empty text")
+    allowed_by_command = {
+        "SUBMIT_LIMIT": {"SHADOW_ACCEPTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"},
+        "CANCEL_ORDER": {"SHADOW_ACCEPTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"},
+        "REQUEST_SNAPSHOT": {
+            "SNAPSHOT_EMITTED",
+            "REJECTED_EXPIRED",
+            "UNKNOWN_ORPHANED",
+        },
+    }
+    if result_status not in allowed_by_command.get(command_type, set()):
+        raise QmtProtocolError("command_result status is invalid for command_type")
+    if execution_mode != "SHADOW":
+        raise QmtProtocolError("P4 command_result execution_mode must be SHADOW")
     if not isinstance(live_side_effect, bool):
         raise QmtProtocolError("command_result live_side_effect must be boolean")
+    if live_side_effect:
+        raise QmtProtocolError("P4 command_result cannot claim a live side effect")
+
+    client_order_id = payload.get("client_order_id")
+    broker_token = payload.get("broker_token")
+    if command_type == "REQUEST_SNAPSHOT":
+        if client_order_id is not None or broker_token is not None:
+            raise QmtProtocolError("snapshot command_result cannot carry order identity")
+    else:
+        if not isinstance(client_order_id, str) or not client_order_id:
+            raise QmtProtocolError("order command_result requires client_order_id")
+        if not isinstance(broker_token, str) or not _BROKER_TOKEN_RE.fullmatch(broker_token):
+            raise QmtProtocolError("order command_result requires a 22-character broker_token")
 
 
 def encode_transport_frame(event: QmtEvent | Mapping[str, Any]) -> bytes:

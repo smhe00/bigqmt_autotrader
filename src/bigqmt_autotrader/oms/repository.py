@@ -288,6 +288,39 @@ class OmsRepository:
             cancel_outcome_resolved=cancel_outcome_resolved,
         )
 
+    def record_command_reconciliation_in_tx(
+        self,
+        account_fingerprint: str,
+        client_order_id: str,
+        *,
+        event_type: str,
+        evidence: dict[str, Any],
+        begin_reconciling: bool,
+    ):
+        """Record execution-plane evidence without inventing a broker fact.
+
+        A SHADOW command result may move an ambiguous order from UNKNOWN to
+        RECONCILING, but it can never select ACKNOWLEDGED or another broker
+        lifecycle state. The caller owns the surrounding write transaction.
+        """
+        if not self.conn.in_transaction:
+            raise RuntimeError("record_command_reconciliation_in_tx requires an active transaction")
+        self._guard_write_in_tx()
+        current = self._get_status_in_tx(account_fingerprint, client_order_id)
+        target = current
+        if begin_reconciling:
+            if current in {OrderStatus.SUBMITTING, OrderStatus.CANCEL_PENDING}:
+                target = OrderStatus.UNKNOWN
+            elif current is OrderStatus.UNKNOWN:
+                target = OrderStatus.RECONCILING
+        return self._transition_in_tx(
+            account_fingerprint,
+            client_order_id,
+            target,
+            event_type=event_type,
+            evidence=evidence,
+        )
+
     def _transition_in_tx(
         self,
         account_fingerprint: str,

@@ -17,12 +17,17 @@ from bigqmt_autotrader.oms import (
     connect_database,
     initialize_database,
 )
-from bigqmt_autotrader.qmt import QmtHostIngestion, QmtIngressBuffer, encode_transport_frame
+from bigqmt_autotrader.qmt import (
+    QmtHostIngestion,
+    QmtIngressBuffer,
+    broker_token_for,
+    encode_transport_frame,
+)
 
 
 FP = "sha256:" + "e" * 64
 CID = "cid-p4-oms-001"
-TOKEN = "BQ" + "1" * 20
+TOKEN = broker_token_for(FP, CID)
 
 
 def order_intent() -> OrderIntent:
@@ -100,7 +105,7 @@ def command_result_payload():
     }
 
 
-def test_shadow_command_result_is_audited_but_never_promotes_unknown_to_ack(tmp_path):
+def test_shadow_command_result_begins_reconciliation_but_never_promotes_to_ack(tmp_path):
     repo, oms = make_oms(tmp_path)
     intent = order_intent()
     repo.create_intent(intent)
@@ -124,7 +129,7 @@ def test_shadow_command_result_is_audited_but_never_promotes_unknown_to_ack(tmp_
 
     assert result.command_result_ingested is True
     assert result.evidence_ingested is False
-    assert repo.get_status(FP, CID) is OrderStatus.UNKNOWN
+    assert repo.get_status(FP, CID) is OrderStatus.RECONCILING
     assert repo.get_order_row(FP, CID)["broker_order_id"] is None
 
     events = repo.list_events(FP, CID)
@@ -134,6 +139,28 @@ def test_shadow_command_result_is_audited_but_never_promotes_unknown_to_ack(tmp_
     assert evidence["broker_evidence"] is False
     assert evidence["live_side_effect"] is False
     assert evidence["command_id"] == "submit-" + TOKEN
+
+    replay_ingress = QmtIngressBuffer(expected_account_fingerprint=FP)
+    replay_host = QmtHostIngestion(command_result_sink=OmsQmtCommandResultSink(oms))
+    replay_host.handle(
+        replay_ingress.ingest_frame(
+            encode_transport_frame(event(1, "snapshot", snapshot_payload()))
+        )
+    )
+    replayed = replay_host.handle(
+        replay_ingress.ingest_frame(
+            encode_transport_frame(event(2, "command_result", command_result_payload()))
+        )
+    )
+    assert replayed.command_result_ingested is True
+    assert repo.get_status(FP, CID) is OrderStatus.RECONCILING
+    assert len(
+        [
+            row
+            for row in repo.list_events(FP, CID)
+            if row["event_type"] == "QMT_COMMAND_RESULT_SHADOW_ACCEPTED"
+        ]
+    ) == 1
 
 
 def test_shadow_command_result_racing_submit_reservation_can_only_move_to_unknown(tmp_path):

@@ -2,7 +2,7 @@
 
 ## Current state
 
-**P4: IN PROGRESS — shadow command round-trip implemented; live broker mutation not implemented.**
+**P4: SHADOW CODE GATE PASS — round-trip and OMS reconciliation implemented; live broker mutation not implemented.**
 
 The purpose of the first P4 checkpoint is to calibrate the asynchronous execution plumbing against Guojin QMT without creating broker side effects.
 
@@ -81,11 +81,33 @@ live_side_effect = false
 
 A `command_result` is transport/execution-plane evidence only. It is **not** broker order evidence and cannot promote an OMS order to ACKNOWLEDGED or CANCELLED.
 
+Command results are durably journaled by `QmtCommandResultJournal`, keyed by both `command_id` and QMT `(session_id, sequence)`. Conflicting identity reuse fails closed. For an order already in `UNKNOWN`, `SHADOW_ACCEPTED` may only begin conservative `RECONCILING`; all broker lifecycle selection still requires calibrated ORDER/DEAL callback or query evidence.
+
 ## OMS integration
 
-`QmtShadowDriver` publishes a durable command after the OMS has reserved the submit/cancel attempt. A successful publication deliberately raises the existing outcome-unknown signal back to the OMS, causing the OMS to retain conservative UNKNOWN semantics until calibrated broker callback/query evidence arrives.
+`QmtShadowDriver` publishes a durable command after the OMS has reserved the submit/cancel attempt. A successful publication deliberately raises the existing outcome-unknown signal back to the OMS. A later `SHADOW_ACCEPTED` command result may begin `RECONCILING`, but only calibrated broker callback/query evidence can select a broker lifecycle state.
 
 This prevents `SHADOW_ACCEPTED` from being mistaken for a broker acknowledgement and preserves the existing no-blind-resend recovery model.
+
+The Host composition point is explicit:
+
+```python
+QmtHostIngestion(command_result_sink=OmsQmtCommandResultSink(oms))
+```
+
+The command-result API does not accept a requested broker status, so there is no execution-plane route to `ACKNOWLEDGED`.
+
+## ORDER/DEAL broker-token calibration layer
+
+`QmtBrokerTokenCalibration` provides a non-mutating observation layer for the next real-QMT calibration:
+
+- register only durable `(account_fingerprint, client_order_id)` identities;
+- recompute the deterministic 22-character `BQ...` token locally;
+- match only an exact callback/query `remark` value;
+- classify missing, malformed, unregistered and cross-account tokens without guessing;
+- retain ORDER/DEAL in semantic quarantine because calibration records never become broker evidence.
+
+The detailed runbook and acceptance gate are in `P4_ORDER_DEAL_BROKER_TOKEN_CALIBRATION.md`.
 
 ## V05 QMT bridge
 
@@ -138,4 +160,4 @@ The second command still has **zero broker trading side effect** under V05; it v
 - treating QMT callback status codes as calibrated broker lifecycle evidence
 - automatic resend after UNKNOWN
 
-Those require a separate mutation gate after V05 shadow calibration is observed on the real Guojin QMT runtime.
+Those require a separate, explicitly authorized mutation gate after ORDER/DEAL and status-code calibration. The current code contains no real broker mutation call.

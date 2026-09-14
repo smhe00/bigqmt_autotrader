@@ -279,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
                     **_event_summary(result, ingestion),
                     "evidence_ingested": ingest_result.evidence_ingested,
                     "command_result_ingested": ingest_result.command_result_ingested,
+                    "calibration_observed": ingest_result.calibration_observed,
                     "quarantined": ingest_result.quarantined,
                     "deduplicated": ingest_result.deduplicated,
                 },

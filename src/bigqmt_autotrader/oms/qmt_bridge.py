@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from bigqmt_autotrader.domain import OrderStatus, TransitionDisposition
 
 from .service import OfflineOms
+from .command_results import CommandResultConflict
 
 
 class QmtCommandResultInvariantViolation(RuntimeError):
@@ -39,8 +40,9 @@ class OmsQmtCommandResultSink:
     never promotes an order to ACKNOWLEDGED/CANCELLED/FILLED. If a result races
     the synchronous driver exception while the durable aggregate is still in
     SUBMITTING/CANCEL_PENDING, it may only converge that ambiguous side-effect
-    boundary to UNKNOWN. Actual lifecycle progress remains exclusively owned by
-    calibrated ORDER/DEAL/query broker evidence.
+    boundary to UNKNOWN. A later SHADOW_ACCEPTED may only begin RECONCILING.
+    Actual lifecycle progress remains exclusively owned by calibrated
+    ORDER/DEAL/query broker evidence.
     """
 
     def __init__(self, oms: OfflineOms) -> None:
@@ -84,56 +86,53 @@ class OmsQmtCommandResultSink:
         if not isinstance(broker_token, str) or not broker_token.startswith("BQ") or len(broker_token) >= 24:
             raise QmtCommandResultInvariantViolation("invalid broker token")
 
-        current = self.oms.repository.get_status(account_fingerprint, client_order_id)
-
-        if command_type == "SUBMIT_LIMIT" and current in {
-            OrderStatus.CREATED,
-            OrderStatus.RISK_ACCEPTED,
-        }:
+        session_id, separator, sequence_text = source_event_id.rpartition(":")
+        try:
+            sequence = int(sequence_text)
+        except ValueError as exc:
             raise QmtCommandResultInvariantViolation(
-                "submit command_result observed before durable submit reservation"
-            )
-        if command_type == "CANCEL_ORDER" and current in {
-            OrderStatus.CREATED,
-            OrderStatus.RISK_ACCEPTED,
-            OrderStatus.SUBMITTING,
-        }:
+                "source_event_id must end with a positive QMT sequence"
+            ) from exc
+        if not separator or not session_id or sequence <= 0:
             raise QmtCommandResultInvariantViolation(
-                "cancel command_result observed before durable cancel eligibility"
+                "source_event_id must contain QMT session and sequence"
             )
 
-        target = current
-        if command_type == "SUBMIT_LIMIT" and current is OrderStatus.SUBMITTING:
-            target = OrderStatus.UNKNOWN
-        elif command_type == "CANCEL_ORDER" and current is OrderStatus.CANCEL_PENDING:
-            target = OrderStatus.UNKNOWN
+        normalized_payload = dict(payload or {})
+        normalized_payload.update(
+            {
+                "command_id": command_id,
+                "command_type": command_type,
+                "client_order_id": client_order_id,
+                "broker_token": broker_token,
+                "result_status": result_status,
+                "execution_mode": execution_mode,
+                "live_side_effect": False,
+            }
+        )
+        try:
+            journal_result = self.oms.ingest_qmt_command_result(
+                qmt_session_id=session_id,
+                qmt_sequence=sequence,
+                account_fingerprint=account_fingerprint,
+                payload=normalized_payload,
+                observed_at=observed_at or datetime.now(timezone.utc),
+            )
+        except (ValueError, CommandResultConflict) as exc:
+            raise QmtCommandResultInvariantViolation(str(exc)) from exc
 
-        event_evidence: dict[str, Any] = {
-            "source": "qmt_command_result",
-            "source_event_id": source_event_id,
-            "command_id": command_id,
-            "command_type": command_type,
-            "broker_token": broker_token,
-            "result_status": result_status,
-            "execution_mode": execution_mode,
-            "live_side_effect": False,
-            "broker_evidence": False,
-        }
-        if observed_at is not None:
-            event_evidence["observed_at"] = observed_at.isoformat()
-        if payload:
-            event_evidence["payload"] = dict(payload)
-
-        outcome = self.oms.repository.transition_order(
-            account_fingerprint,
-            client_order_id,
-            target,
-            event_type="QMT_COMMAND_RESULT_" + result_status,
-            evidence=event_evidence,
+        if journal_result.order_status is None:
+            raise QmtCommandResultInvariantViolation(
+                "order command result did not produce an OMS reconciliation record"
+            )
+        disposition = (
+            journal_result.disposition
+            if journal_result.disposition is not None
+            else TransitionDisposition.DUPLICATE_IGNORED
         )
         return QmtCommandResultIngestResult(
-            status=outcome.current,
-            disposition=outcome.disposition,
+            status=journal_result.order_status,
+            disposition=disposition,
             command_id=command_id,
             result_status=result_status,
         )

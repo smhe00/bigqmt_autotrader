@@ -12,7 +12,7 @@ from bigqmt_autotrader.oms import (
 def test_fresh_database_migrates_to_supported_version(tmp_path):
     conn = connect_database(tmp_path / "fresh.sqlite3")
     initialize_database(conn)
-    assert current_schema_version(conn) == SUPPORTED_SCHEMA_VERSION == 4
+    assert current_schema_version(conn) == SUPPORTED_SCHEMA_VERSION == 5
     columns = {
         row["name"]
         for row in conn.execute("PRAGMA table_info(broker_orders)").fetchall()
@@ -27,6 +27,7 @@ def test_fresh_database_migrates_to_supported_version(tmp_path):
     assert "oms_leader" in tables
     assert "broker_evidence_keys" in tables
     assert "broker_evidence_observations" in tables
+    assert "qmt_command_results" in tables
 
 
 def test_initialize_is_idempotent(tmp_path):
@@ -34,7 +35,7 @@ def test_initialize_is_idempotent(tmp_path):
     initialize_database(conn)
     initialize_database(conn)
     rows = conn.execute("SELECT version FROM schema_meta ORDER BY version").fetchall()
-    assert [row["version"] for row in rows] == [1, 2, 3, 4]
+    assert [row["version"] for row in rows] == [1, 2, 3, 4, 5]
 
 
 def test_future_schema_fails_closed(tmp_path):
@@ -60,3 +61,4 @@ def test_packaged_migrations_create_foreign_keys_and_indexes(tmp_path):
     assert "idx_order_events_key" in indexes
     assert "idx_broker_evidence_order" in indexes
     assert "idx_broker_evidence_fingerprint" in indexes
+    assert "idx_qmt_command_results_order" in indexes

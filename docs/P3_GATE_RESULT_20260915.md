@@ -109,3 +109,4 @@ P3/P4-shadow code continues to satisfy:
 P3 is closed as **PASS**. It establishes the authoritative broker read plane, periodic reconciliation, and durable recovery substrate. It does **not** authorize or implement live trading.
 
 P4 may continue with OMS command-result reconciliation and ORDER/DEAL correlation calibration. Any future broker mutation requires a separate explicit gate and separate authorization.
+All V05 read-plane deployment checkpoints are closed. Live order submission and cancellation remain outside P3 and require a separate explicit gate and authorization.

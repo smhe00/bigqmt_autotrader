@@ -1,5 +1,5 @@
-from bigqmt_autotrader.qmt import QmtIngressBuffer, encode_transport_frame
-from bigqmt_autotrader.qmt.host import _should_log_event, _summary_should_emit
+from bigqmt_autotrader.qmt import QmtHostIngestion, QmtIngressBuffer, encode_transport_frame
+from bigqmt_autotrader.qmt.host import _event_summary, _should_log_event, _summary_should_emit
 
 
 FP = "sha256:" + "b" * 64
@@ -112,3 +112,30 @@ def test_unchanged_summary_waits_for_heartbeat():
         last_emit_monotonic=100.0,
         heartbeat_seconds=300.0,
     ) is True
+
+
+def test_command_result_log_contains_correlation_fields():
+    ingress = QmtIngressBuffer(expected_account_fingerprint=FP)
+    result = ingress.ingest_frame(
+        encode_transport_frame(
+            event(
+                1,
+                "command_result",
+                {
+                    "command_id": "cmd-log-1",
+                    "command_type": "SUBMIT_LIMIT",
+                    "client_order_id": "cid-log-1",
+                    "broker_token": "BQ" + "a" * 20,
+                    "result_status": "SHADOW_ACCEPTED",
+                    "execution_mode": "SHADOW",
+                    "live_side_effect": False,
+                },
+            )
+        )
+    )
+
+    summary = _event_summary(result, QmtHostIngestion())
+    assert summary["session_id"] == "session-log"
+    assert summary["command_id"] == "cmd-log-1"
+    assert summary["command_type"] == "SUBMIT_LIMIT"
+    assert summary["result_status"] == "SHADOW_ACCEPTED"

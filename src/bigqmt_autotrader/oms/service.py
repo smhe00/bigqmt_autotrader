@@ -14,6 +14,7 @@ from bigqmt_autotrader.drivers.simulated import (
 from bigqmt_autotrader.risk import RiskEvaluation, RiskPolicy, RiskSnapshot, evaluate_risk
 
 from .evidence import EvidenceIngestResult, EvidenceJournal
+from .command_results import CommandResultIngestResult, QmtCommandResultJournal
 from .leader import LeaderCoordinator, LeaderLease
 from .repository import OmsRepository
 
@@ -84,6 +85,10 @@ class OfflineOms:
             repository,
             write_guard=self.assert_leader,
         )
+        self._command_result_journal = QmtCommandResultJournal(
+            repository,
+            write_guard=self.assert_leader,
+        )
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -150,6 +155,28 @@ class OfflineOms:
 
     def list_broker_evidence(self, account_fingerprint: str, client_order_id: str):
         return self._evidence_journal.list_observations(account_fingerprint, client_order_id)
+
+    def ingest_qmt_command_result(
+        self,
+        *,
+        qmt_session_id: str,
+        qmt_sequence: int,
+        account_fingerprint: str,
+        payload: Mapping[str, Any],
+        observed_at: datetime,
+    ) -> CommandResultIngestResult:
+        """Persist execution-plane evidence and begin conservative reconciliation.
+
+        This entry point deliberately cannot accept a requested broker status.
+        Consequently SHADOW_ACCEPTED has no path to ACKNOWLEDGED.
+        """
+        return self._command_result_journal.ingest(
+            qmt_session_id=qmt_session_id,
+            qmt_sequence=qmt_sequence,
+            account_fingerprint=account_fingerprint,
+            payload=payload,
+            observed_at=observed_at,
+        )
 
     def recover(self) -> None:
         self.assert_leader()

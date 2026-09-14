@@ -54,8 +54,8 @@ Market/account state
 1. **P0 / G0 — PASS**: order-domain contract and deterministic state machine.
 2. **P1 — PASS**: crash-recoverable offline OMS with SQLite WAL, fencing, replay and reconciliation.
 3. **P2 — PASS**: deterministic four-level pre-trade risk engine and OMS-owned risk-to-submit boundary.
-4. **P3 — IN PROGRESS**: Big QMT read-only query/callback adapter implemented; Guojin 2.1.19.0 runtime calibration and host transport remain.
-5. **P4 — NOT STARTED**: minimal limit-order/cancel bridge behind leases and dual unlock.
+4. **P3 — PASS**: Big QMT read-only query/callback transport, recovery/archive, and Guojin V05 timer calibration are complete.
+5. **P4 — SHADOW CODE GATE PASS**: durable command round-trip and OMS reconciliation are implemented; ORDER/DEAL calibration remains pending and live submit/cancel are absent.
 6. **P5 — NOT STARTED**: shadow, simulation, then tightly limited live canary.
 
 No phase may skip directly to live trading.

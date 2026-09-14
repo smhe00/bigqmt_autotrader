@@ -95,6 +95,24 @@ def test_order_and_deal_are_quarantined_without_calibrated_mapper():
     assert host.read_model.healthy is True
 
 
+def test_calibration_observer_runs_while_order_remains_quarantined():
+    ingress = QmtIngressBuffer(expected_account_fingerprint=FP)
+    observed = []
+    host = QmtHostIngestion(calibration_observer=observed.append)
+    host.handle(ingress.ingest_frame(encode_transport_frame(snapshot())))
+
+    result = host.handle(
+        ingress.ingest_frame(
+            encode_transport_frame(event(2, "order", {"remark": "BQ" + "a" * 20}))
+        )
+    )
+
+    assert result.calibration_observed is True
+    assert result.quarantined is True
+    assert result.evidence_ingested is False
+    assert len(observed) == 1
+
+
 def test_explicit_mapper_is_required_before_oms_evidence_sink_is_called():
     ingress = QmtIngressBuffer(expected_account_fingerprint=FP)
     sink = FakeSink()

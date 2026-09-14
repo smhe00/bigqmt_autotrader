@@ -12,7 +12,7 @@ Updated: 2026-09-15
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
 | P3 Big QMT read-only | **PASS — multi-hour read/recovery/archive + V05 run_time deployment calibration complete** |
-| P4 Big QMT execution bridge | **IN PROGRESS — SHADOW command round-trip + OMS control-plane reconciliation implemented; ORDER/DEAL token/status calibration next** |
+| P4 Big QMT execution bridge | **SHADOW CODE GATE PASS — durable command-result/OMS reconciliation added; no live broker mutation** |
 | P5 Shadow / simulation / live canary | NOT STARTED |
 | Live trading allowed | **NO** |
 | Real QMT submit implemented | **NO** |
@@ -114,7 +114,7 @@ Real-QMT SHADOW submit calibration proved:
 
 - `SHADOW_ACCEPTED` never creates `ACKNOWLEDGED`;
 - if a result races a durable `SUBMITTING` or `CANCEL_PENDING` reservation, it can only converge that ambiguous boundary to `UNKNOWN`;
-- if the OMS is already `UNKNOWN`, the result is retained as an audit event without lifecycle promotion;
+- if the OMS is already `UNKNOWN`, `SHADOW_ACCEPTED` may only begin `RECONCILING`;
 - actual `ACKNOWLEDGED / PARTIALLY_FILLED / FILLED / CANCELLED / REJECTED` transitions remain reserved for calibrated broker ORDER/DEAL/query evidence.
 
 Host diagnostics now expose `session_id`; `command_result` logs include command/client/token/result/mode/live-side-effect fields, while bridge errors expose their code. This removes ambiguity after QMT restarts.
@@ -123,11 +123,13 @@ Host diagnostics now expose `session_id`; `command_result` logs include command/
 
 A read-only calibration projection now recognizes broker tokens only when QMT `remark` exactly matches `BQ[0-9a-f]{20}`. It records raw `broker_order_id`, `order_ref`, `trade_id`, QMT status/submit-status codes and quantities. It deliberately performs **no QMT-status → OMS-status mapping yet**. That mapping requires observed Guojin ORDER/DEAL broker evidence before it can be trusted.
 
+QMT command results are durably journaled in OMS schema v5. Duplicate/conflicting command or QMT session/sequence identities fail closed. The `QmtBrokerTokenCalibration` observer matches only exact pre-registered tokens and never generates broker evidence; ORDER/DEAL remain quarantined until the separate calibration gate passes.
+
 ## Verification
 
 | Verification | State |
 | --- | --- |
-| Latest verified Python suite | **189 passed on Python 3.12** |
+| Latest verified Python suite | **197 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | Broker mutation-call static audit | **PASS** |
 | FSM implementation/formal conformance | **PASS** |
@@ -146,9 +148,11 @@ A read-only calibration projection now recognizes broker tokens only when QMT `r
 - P3 Guojin calibration: `docs/P3_GUOJIN_QMT_CALIBRATION_20260914.md`
 - P3 archive contract: `docs/P3_DAILY_SPOOL_ARCHIVE.md`
 - P4 shadow boundary: `docs/P4_SHADOW_BRIDGE_SCOPE.md`
+- P4 shadow gate: `docs/P4_GATE_RESULT_20260915.md`
+- P4 ORDER/DEAL token calibration: `docs/P4_ORDER_DEAL_BROKER_TOKEN_CALIBRATION.md`
 
 ## Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW execution/control-plane integration IN PROGRESS. Live trading remains disabled and unimplemented.**
+**P0/P1/P2/P3 PASS. P4 SHADOW code gate PASS; ORDER/DEAL broker lifecycle calibration remains pending. Live trading remains disabled and unimplemented.**
 
-The next technical checkpoint is ORDER/DEAL correlation and Guojin status-code calibration. No real broker mutation is authorized by this checkpoint.
+The next checkpoint is observation-only ORDER/DEAL + `m_strRemark` calibration using the documented quarantine path. No broker mutation gate may be opened from the current status.

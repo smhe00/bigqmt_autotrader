@@ -70,6 +70,7 @@ class HostIngestResult:
     quarantined: bool
     deduplicated: bool = False
     command_result_ingested: bool = False
+    calibration_observed: bool = False
 
 
 class QmtHostIngestion:
@@ -97,6 +98,7 @@ class QmtHostIngestion:
         evidence_sink: EvidenceSink | None = None,
         evidence_mapper: EvidenceMapper | None = None,
         command_result_sink: CommandResultSink | None = None,
+        calibration_observer: Callable[[QmtEvent], Any] | None = None,
         max_quarantine: int = 1024,
     ) -> None:
         if max_quarantine <= 0:
@@ -105,6 +107,7 @@ class QmtHostIngestion:
         self.evidence_sink = evidence_sink
         self.evidence_mapper = evidence_mapper
         self.command_result_sink = command_result_sink
+        self.calibration_observer = calibration_observer
         self.max_quarantine = max_quarantine
         self.quarantine: list[QmtEvent] = []
         self.quarantine_dropped = 0
@@ -136,6 +139,11 @@ class QmtHostIngestion:
                 deduplicated=semantic_duplicate,
             )
 
+        calibration_observed = False
+        if self.calibration_observer is not None:
+            self.calibration_observer(event)
+            calibration_observed = True
+
         if self.evidence_sink is None or self.evidence_mapper is None:
             self._quarantine(event)
             return HostIngestResult(
@@ -143,6 +151,7 @@ class QmtHostIngestion:
                 evidence_ingested=False,
                 quarantined=True,
                 deduplicated=False,
+                calibration_observed=calibration_observed,
             )
 
         candidate = self.evidence_mapper(event)
@@ -153,6 +162,7 @@ class QmtHostIngestion:
                 evidence_ingested=False,
                 quarantined=True,
                 deduplicated=False,
+                calibration_observed=calibration_observed,
             )
 
         if candidate.account_fingerprint != event.account_fingerprint:
@@ -181,6 +191,7 @@ class QmtHostIngestion:
             evidence_ingested=True,
             quarantined=False,
             deduplicated=False,
+            calibration_observed=calibration_observed,
         )
 
     def _handle_command_result(

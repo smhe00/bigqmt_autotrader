@@ -6,6 +6,11 @@ from .db import (
     current_schema_version,
     initialize_database,
 )
+from .command_results import (
+    CommandResultConflict,
+    CommandResultIngestResult,
+    QmtCommandResultJournal,
+)
 from .evidence import (
     BrokerEvidenceConflict,
     EvidenceIngestResult,
@@ -35,6 +40,9 @@ from .qmt_bridge import (
 )
 
 __all__ = [
+    "CommandResultConflict",
+    "CommandResultIngestResult",
+    "QmtCommandResultJournal",
     "BrokerEvidenceConflict",
     "BrokerFactConflict",
     "BrokerOrderIdMismatch",
