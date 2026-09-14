@@ -147,6 +147,7 @@ def test_daily_archive_commits_then_deletes_small_files(tmp_path: Path):
     assert meta["source_file_count"] == 3
     assert meta["final_snapshot"]["sequence"] == 3
     assert meta["trailing_identical_account_heartbeats"] == 0
+    assert meta["quiet_anchor_timestamp_ms"] == ts(15, 0, 0)
     assert meta["archive_sha256"] == result.archive_sha256
     committed = json.loads(checkpoint.read_text(encoding="utf-8"))
     assert committed["status"] == "COMMITTED"
@@ -170,6 +171,28 @@ def test_archive_allows_identical_account_heartbeat_after_clean_snapshot(tmp_pat
         (tmp_path / "archive" / f"{DAY}_manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["final_snapshot"]["sequence"] == 1
+    assert manifest["trailing_identical_account_heartbeats"] == 1
+
+
+def test_identical_account_heartbeat_does_not_reset_quiet_period(tmp_path: Path):
+    snapshot = event(1, timestamp_ms=ts(15, 0, 0))
+    heartbeat = account_event(2)
+    heartbeat["timestamp_ms"] = ts(15, 19, 0)
+    receiver = consume(tmp_path, [snapshot, heartbeat])
+
+    result = DailySpoolArchiver(spool_root=tmp_path).archive_day(
+        DAY,
+        quiet_seconds=300,
+        now_ms=ts(15, 20, 0),
+    )
+
+    assert result.status == "archived"
+    assert not list(receiver.processed.glob("*.json"))
+    manifest = json.loads(
+        (tmp_path / "archive" / f"{DAY}_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["last_timestamp_ms"] == ts(15, 19, 0)
+    assert manifest["quiet_anchor_timestamp_ms"] == ts(15, 0, 0)
     assert manifest["trailing_identical_account_heartbeats"] == 1
 
 
