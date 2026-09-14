@@ -42,6 +42,16 @@ class SpoolReplayResult:
     last_sequence: int = 0
     account_fingerprint: str | None = None
     snapshot_timestamp_ms: int | None = None
+    snapshot_sequence: int = 0
+    target_sequence: int = 0
+    target_timestamp_ms: int | None = None
+
+
+@dataclass(frozen=True)
+class _DecodedSpoolEvent:
+    path: Path
+    raw: bytes
+    event: QmtEvent
 
 
 class FileSpoolReceiver:
@@ -53,8 +63,9 @@ class FileSpoolReceiver:
     ``quarantine`` and are never silently deleted.
 
     ``processed`` also acts as the restart journal for the current unarchived
-    day. A restarted Host may replay from the most recent clean snapshot without
-    moving or deleting those files, then continue with new ``inbox`` events.
+    day. A restarted Host may replay the coherent current session from its most
+    recent clean snapshot without moving or deleting those files, then continue
+    with new ``inbox`` events.
 
     The transport is deliberately one-way and read-only. It conveys broker facts
     but carries no command channel and therefore cannot grant execution authority.
@@ -78,39 +89,97 @@ class FileSpoolReceiver:
         for directory in (self.inbox, self.processed, self.quarantine):
             directory.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _event_sort_key(item: _DecodedSpoolEvent) -> tuple[int, str, int, str]:
+        return (
+            item.event.timestamp_ms,
+            item.event.session_id,
+            item.event.sequence,
+            item.path.name,
+        )
+
+    @staticmethod
+    def _read_decoded(path: Path) -> _DecodedSpoolEvent:
+        raw = path.read_bytes()
+        if not raw or len(raw) > MAX_FRAME_BYTES:
+            raise QmtProtocolError("invalid transport frame size")
+        return _DecodedSpoolEvent(path=path, raw=raw, event=decode_transport_frame(raw))
+
     def replay_processed_from_latest_clean_snapshot(self) -> SpoolReplayResult:
-        """Rebuild Host ingress/read-model state after a Host-only restart.
+        """Rebuild Host state from the coherent current spool stream.
 
-        The newest clean full snapshot in ``processed`` is an explicit resync
-        boundary. Replay starts there and continues chronologically through all
-        later processed events. Any later session switch, sequence gap, account
-        mismatch, or downstream ingestion failure remains visible/fail-closed.
+        Calibration can leave several historical QMT sessions/accounts in the
+        same daily ``processed`` directory. Selecting the globally newest clean
+        snapshot is therefore unsafe: replay can cross into an unrelated stream
+        and fail account/session validation.
 
+        Recovery first identifies the newest valid tail event across ``inbox``
+        and ``processed`` (respecting an explicitly pinned account when present).
+        It then selects only that tail event's session + account, finds the newest
+        clean processed snapshot in that same stream, and replays processed events
+        from that snapshot through the processed tail. Historical streams remain
+        on disk for archive/quarantine inspection but do not contaminate live Host
+        memory recovery.
+
+        Invalid ``processed`` data is fail-closed. Invalid ``inbox`` candidates
+        are ignored only for target selection; normal polling will quarantine them.
         Files are never moved, rewritten, or deleted by replay.
         """
 
-        decoded: list[tuple[Path, bytes, QmtEvent]] = []
+        processed: list[_DecodedSpoolEvent] = []
         for path in sorted(self.processed.glob("*.json")):
-            raw = path.read_bytes()
-            if not raw or len(raw) > MAX_FRAME_BYTES:
-                raise QmtProtocolError("invalid processed transport frame size")
-            event = decode_transport_frame(raw)
-            decoded.append((path, raw, event))
+            processed.append(self._read_decoded(path))
 
-        snapshot_index: int | None = None
-        for index in range(len(decoded) - 1, -1, -1):
-            event = decoded[index][2]
-            if event.event_type == "snapshot" and not event.payload.get("query_errors"):
-                snapshot_index = index
-                break
+        inbox_valid: list[_DecodedSpoolEvent] = []
+        for path in sorted(self.inbox.glob("*.json")):
+            try:
+                inbox_valid.append(self._read_decoded(path))
+            except (OSError, QmtProtocolError):
+                # Normal poll_once() owns quarantine/movement semantics.
+                continue
 
-        if snapshot_index is None:
+        candidates = processed + inbox_valid
+        expected = self.ingress.expected_account_fingerprint
+        if expected is not None:
+            candidates = [item for item in candidates if item.event.account_fingerprint == expected]
+        if not candidates:
             return SpoolReplayResult(snapshot_found=False, replayed=0)
 
+        target = max(candidates, key=self._event_sort_key)
+        target_session = target.event.session_id
+        target_account = target.event.account_fingerprint
+        target_sequence = target.event.sequence
+
+        coherent_processed = [
+            item
+            for item in processed
+            if item.event.session_id == target_session
+            and item.event.account_fingerprint == target_account
+            and item.event.sequence <= target_sequence
+        ]
+        coherent_processed.sort(key=lambda item: (item.event.sequence, item.event.timestamp_ms, item.path.name))
+
+        snapshot: _DecodedSpoolEvent | None = None
+        for item in reversed(coherent_processed):
+            if item.event.event_type == "snapshot" and not item.event.payload.get("query_errors"):
+                snapshot = item
+                break
+
+        if snapshot is None:
+            return SpoolReplayResult(
+                snapshot_found=False,
+                replayed=0,
+                session_id=target_session,
+                account_fingerprint=target_account,
+                target_sequence=target_sequence,
+                target_timestamp_ms=target.event.timestamp_ms,
+            )
+
         replayed = 0
-        snapshot = decoded[snapshot_index][2]
-        for _path, raw, _event in decoded[snapshot_index:]:
-            result = self.ingress.ingest_frame(raw)
+        for item in coherent_processed:
+            if item.event.sequence < snapshot.event.sequence:
+                continue
+            result = self.ingress.ingest_frame(item.raw)
             if self.on_event is not None:
                 self.on_event(result)
             replayed += 1
@@ -121,7 +190,10 @@ class FileSpoolReceiver:
             session_id=self.ingress.session_id,
             last_sequence=self.ingress.last_sequence,
             account_fingerprint=self.ingress.expected_account_fingerprint,
-            snapshot_timestamp_ms=snapshot.timestamp_ms,
+            snapshot_timestamp_ms=snapshot.event.timestamp_ms,
+            snapshot_sequence=snapshot.event.sequence,
+            target_sequence=target_sequence,
+            target_timestamp_ms=target.event.timestamp_ms,
         )
 
     def poll_once(self, *, max_files: int = 256) -> SpoolPollResult:
