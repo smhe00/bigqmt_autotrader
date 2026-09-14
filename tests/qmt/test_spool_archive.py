@@ -80,6 +80,26 @@ def position_event(
     return value
 
 
+def full_position_row(
+    *,
+    symbol: str = "204001.SH",
+    quantity: int = 1000,
+    open_price: str = "1.4150000000000003",
+    market_value: str = "1000.0",
+) -> dict:
+    return {
+        "symbol": symbol,
+        "quantity": quantity,
+        "sellable_quantity": quantity,
+        "frozen_quantity": 0,
+        "on_road_quantity": 0,
+        "market_value": market_value,
+        "last_price": "1.4150000000000003",
+        "open_price": open_price,
+        "trading_day": "20260914",
+    }
+
+
 def write_inbox(root: Path, value: dict) -> Path:
     inbox = root / "inbox"
     inbox.mkdir(parents=True, exist_ok=True)
@@ -233,6 +253,72 @@ def test_archive_allows_identical_position_callback_after_clean_snapshot(tmp_pat
     assert manifest["final_snapshot"]["sequence"] == 1
     assert manifest["trailing_identical_account_heartbeats"] == 0
     assert manifest["trailing_identical_position_callbacks"] == 1
+
+
+def test_archive_allows_zero_open_price_when_all_other_position_fields_match(tmp_path: Path):
+    snapshot = event(1, timestamp_ms=ts(15, 0, 0))
+    snapshot_position = full_position_row()
+    snapshot["payload"]["positions"] = [snapshot_position]
+    replay = position_event(2, symbol="204001.SH", timestamp_ms=ts(15, 19, 0))
+    replay["payload"] = dict(snapshot_position)
+    replay["payload"]["open_price"] = "0.0"
+
+    receiver = consume(tmp_path, [snapshot, replay])
+    result = DailySpoolArchiver(spool_root=tmp_path).archive_day(
+        DAY,
+        quiet_seconds=300,
+        now_ms=ts(15, 20, 0),
+    )
+
+    assert result.status == "archived"
+    assert not list(receiver.processed.glob("*.json"))
+    manifest = json.loads(
+        (tmp_path / "archive" / f"{DAY}_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["final_snapshot"]["sequence"] == 1
+    assert manifest["quiet_anchor_timestamp_ms"] == ts(15, 0, 0)
+    assert manifest["trailing_identical_position_callbacks"] == 1
+
+
+def test_zero_open_price_does_not_mask_other_position_change(tmp_path: Path):
+    snapshot = event(1, timestamp_ms=ts(15, 0, 0))
+    snapshot_position = full_position_row()
+    snapshot["payload"]["positions"] = [snapshot_position]
+    changed = position_event(2, symbol="204001.SH")
+    changed["payload"] = dict(snapshot_position)
+    changed["payload"]["open_price"] = "0.0"
+    changed["payload"]["market_value"] = "999.0"
+
+    receiver = consume(tmp_path, [snapshot, changed])
+    result = DailySpoolArchiver(spool_root=tmp_path).archive_day(
+        DAY,
+        quiet_seconds=0,
+        now_ms=ts(15, 20, 0),
+    )
+
+    assert result.status == "not_ready"
+    assert result.reasons == ("final_snapshot_missing",)
+    assert len(list(receiver.processed.glob("*.json"))) == 2
+
+
+def test_nonzero_open_price_change_still_requires_new_snapshot(tmp_path: Path):
+    snapshot = event(1, timestamp_ms=ts(15, 0, 0))
+    snapshot_position = full_position_row()
+    snapshot["payload"]["positions"] = [snapshot_position]
+    changed = position_event(2, symbol="204001.SH")
+    changed["payload"] = dict(snapshot_position)
+    changed["payload"]["open_price"] = "1.4"
+
+    receiver = consume(tmp_path, [snapshot, changed])
+    result = DailySpoolArchiver(spool_root=tmp_path).archive_day(
+        DAY,
+        quiet_seconds=0,
+        now_ms=ts(15, 20, 0),
+    )
+
+    assert result.status == "not_ready"
+    assert result.reasons == ("final_snapshot_missing",)
+    assert len(list(receiver.processed.glob("*.json"))) == 2
 
 
 def test_identical_position_callback_does_not_reset_quiet_period(tmp_path: Path):
