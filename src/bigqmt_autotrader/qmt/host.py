@@ -53,6 +53,22 @@ def _event_summary(result: IngressResult, ingestion: QmtHostIngestion) -> dict[s
     return payload
 
 
+def _should_log_event(
+    result: IngressResult,
+    *,
+    deduplicated: bool,
+    quarantined: bool,
+) -> bool:
+    event_type = result.event.event_type
+    if result.needs_resync or quarantined:
+        return True
+    if event_type in {"bridge_ready", "bridge_error", "snapshot", "order", "deal"}:
+        return True
+    if event_type == "account" and not deduplicated:
+        return True
+    return False
+
+
 def _parse_hhmm(value: str) -> wall_time:
     try:
         hour_text, minute_text = value.split(":", 1)
@@ -95,6 +111,29 @@ def _spool_dir_source(explicit_cli: str | None) -> str:
     return "temp"
 
 
+def _status_summary_payload(
+    stats: dict[str, int],
+    ingestion: QmtHostIngestion,
+    *,
+    pending: int,
+) -> dict[str, Any]:
+    return {
+        "events_seen": stats["events_seen"],
+        "snapshots_seen": stats["snapshots_seen"],
+        "account_events_seen": stats["account_events_seen"],
+        "account_events_deduplicated": stats["account_events_deduplicated"],
+        "position_events_seen": stats["position_events_seen"],
+        "order_events_seen": stats["order_events_seen"],
+        "deal_events_seen": stats["deal_events_seen"],
+        "semantic_quarantine_depth": len(ingestion.quarantine),
+        "semantic_quarantine_dropped": ingestion.quarantine_dropped,
+        "spool_processed_total": stats["spool_processed_total"],
+        "spool_quarantined_total": stats["spool_quarantined_total"],
+        "spool_pending": pending,
+        "read_model_healthy": ingestion.read_model.healthy,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Big QMT P3 read-only host receiver")
     parser.add_argument(
@@ -126,6 +165,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--archive-quiet-seconds", type=float, default=300.0)
     parser.add_argument("--archive-check-interval", type=float, default=30.0)
+    parser.add_argument(
+        "--status-summary-interval",
+        type=float,
+        default=60.0,
+        help="Seconds between compact host status summaries (default 60).",
+    )
     return parser
 
 
@@ -137,23 +182,56 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--archive-quiet-seconds must be non-negative")
     if args.archive_check_interval <= 0:
         raise SystemExit("--archive-check-interval must be positive")
+    if args.status_summary_interval <= 0:
+        raise SystemExit("--status-summary-interval must be positive")
 
     ingress = QmtIngressBuffer(
         expected_account_fingerprint=args.expected_account_fingerprint
     )
     ingestion = QmtHostIngestion()
+    stats = {
+        "events_seen": 0,
+        "snapshots_seen": 0,
+        "account_events_seen": 0,
+        "account_events_deduplicated": 0,
+        "position_events_seen": 0,
+        "order_events_seen": 0,
+        "deal_events_seen": 0,
+        "spool_processed_total": 0,
+        "spool_quarantined_total": 0,
+    }
 
     def on_event(result: IngressResult) -> None:
         ingest_result = ingestion.handle(result)
-        _safe_status(
-            "event",
-            {
-                **_event_summary(result, ingestion),
-                "evidence_ingested": ingest_result.evidence_ingested,
-                "quarantined": ingest_result.quarantined,
-                "deduplicated": ingest_result.deduplicated,
-            },
-        )
+        event_type = result.event.event_type
+        stats["events_seen"] += 1
+        if event_type == "snapshot":
+            stats["snapshots_seen"] += 1
+        elif event_type == "account":
+            stats["account_events_seen"] += 1
+            if ingest_result.deduplicated:
+                stats["account_events_deduplicated"] += 1
+        elif event_type == "position":
+            stats["position_events_seen"] += 1
+        elif event_type == "order":
+            stats["order_events_seen"] += 1
+        elif event_type == "deal":
+            stats["deal_events_seen"] += 1
+
+        if _should_log_event(
+            result,
+            deduplicated=ingest_result.deduplicated,
+            quarantined=ingest_result.quarantined,
+        ):
+            _safe_status(
+                "event",
+                {
+                    **_event_summary(result, ingestion),
+                    "evidence_ingested": ingest_result.evidence_ingested,
+                    "quarantined": ingest_result.quarantined,
+                    "deduplicated": ingest_result.deduplicated,
+                },
+            )
 
     if args.transport == "tcp":
         receiver = LocalQmtReceiver(
@@ -208,15 +286,22 @@ def main(argv: list[str] | None = None) -> int:
             "archive_quiet_seconds": args.archive_quiet_seconds,
             "archive_timezone": "UTC+08:00",
             "host_account_semantic_dedup": True,
+            "event_log_mode": "important_only",
+            "status_summary_interval": args.status_summary_interval,
         },
     )
 
     last_archive_check = 0.0
+    last_summary = time.monotonic()
+    last_pending = sum(1 for _ in spool.inbox.glob("*.json"))
     last_archive_signature: dict[str, tuple[str, tuple[str, ...]]] = {}
     try:
         while True:
             try:
                 result = spool.poll_once()
+                stats["spool_processed_total"] += result.processed
+                stats["spool_quarantined_total"] += result.quarantined
+                last_pending = result.pending
                 if result.quarantined:
                     _safe_status(
                         "spool_quarantined",
@@ -229,6 +314,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             monotonic_now = time.monotonic()
+            if monotonic_now - last_summary >= args.status_summary_interval:
+                last_summary = monotonic_now
+                _safe_status(
+                    "summary",
+                    _status_summary_payload(stats, ingestion, pending=last_pending),
+                )
+
             if args.auto_archive and monotonic_now - last_archive_check >= args.archive_check_interval:
                 last_archive_check = monotonic_now
                 now = datetime.now(tz=SHANGHAI_TZ)
