@@ -1,3 +1,4 @@
+from .qmt_shadow import QmtShadowDriver
 from .simulated import (
     CancelFailureMode,
     CancelOutcomeUnknown,
@@ -11,6 +12,7 @@ from .simulated import (
 )
 
 __all__ = [
+    "QmtShadowDriver",
     "CancelFailureMode",
     "CancelOutcomeUnknown",
     "DuplicateBrokerCancel",
