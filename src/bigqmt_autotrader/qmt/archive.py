@@ -169,10 +169,11 @@ class DailySpoolArchiver:
             snapshots = [record.event for record in records if record.event.event_type == "snapshot"]
             final_snapshot = snapshots[-1] if snapshots else None
 
-        # Identical ACCOUNT heartbeats after a clean snapshot carry no new broker
-        # state and therefore must not keep resetting the archive quiet timer.
-        # Any non-identical or non-ACCOUNT trailing event makes final_reason non-null,
-        # in which case the latest event remains the conservative quiet anchor.
+        # Identical ACCOUNT heartbeats and POSITION replay callbacks after a clean
+        # snapshot carry no new broker state and therefore must not keep resetting
+        # the archive quiet timer. Any changed or unsupported trailing event makes
+        # final_reason non-null, in which case the latest event remains the
+        # conservative quiet anchor.
         quiet_anchor_ms = max(item.event.timestamp_ms for item in records)
         if require_final_snapshot and final_snapshot is not None and final_reason is None:
             quiet_anchor_ms = final_snapshot.timestamp_ms
@@ -213,6 +214,11 @@ class DailySpoolArchiver:
             ),
             "trailing_identical_account_heartbeats": (
                 self._count_trailing_identical_account_heartbeats(records, final_snapshot)
+                if final_snapshot is not None
+                else 0
+            ),
+            "trailing_identical_position_callbacks": (
+                self._count_trailing_identical_position_callbacks(records, final_snapshot)
                 if final_snapshot is not None
                 else 0
             ),
@@ -265,6 +271,40 @@ class DailySpoolArchiver:
             return None
         return dict(row)
 
+    @staticmethod
+    def _snapshot_positions(event: QmtEvent) -> dict[str, dict[str, Any]] | None:
+        positions = event.payload.get("positions")
+        if not isinstance(positions, list):
+            return None
+        indexed: dict[str, dict[str, Any]] = {}
+        for row in positions:
+            if not isinstance(row, dict):
+                return None
+            symbol = row.get("symbol")
+            if not isinstance(symbol, str) or not symbol or symbol in indexed:
+                return None
+            indexed[symbol] = dict(row)
+        return indexed
+
+    @classmethod
+    def _is_identical_snapshot_fact(cls, snapshot: QmtEvent, event: QmtEvent) -> bool:
+        if (
+            event.session_id != snapshot.session_id
+            or event.account_fingerprint != snapshot.account_fingerprint
+        ):
+            return False
+        if event.event_type == "account":
+            account = cls._snapshot_account(snapshot)
+            return account is not None and dict(event.payload) == account
+        if event.event_type == "position":
+            positions = cls._snapshot_positions(snapshot)
+            if positions is None:
+                return False
+            payload = dict(event.payload)
+            symbol = payload.get("symbol")
+            return isinstance(symbol, str) and positions.get(symbol) == payload
+        return False
+
     @classmethod
     def _find_final_snapshot(
         cls, records: list[_SpoolRecord]
@@ -282,10 +322,8 @@ class DailySpoolArchiver:
         if snapshot.payload.get("query_errors"):
             return snapshot, "final_snapshot_query_error"
 
-        account = cls._snapshot_account(snapshot)
         for record in records[snapshot_index + 1 :]:
-            event = record.event
-            if event.event_type != "account" or account is None or dict(event.payload) != account:
+            if not cls._is_identical_snapshot_fact(snapshot, record.event):
                 return snapshot, "final_snapshot_missing"
         return snapshot, None
 
@@ -293,16 +331,35 @@ class DailySpoolArchiver:
     def _count_trailing_identical_account_heartbeats(
         cls, records: list[_SpoolRecord], snapshot: QmtEvent
     ) -> int:
-        account = cls._snapshot_account(snapshot)
-        if account is None:
-            return 0
         found_snapshot = False
         count = 0
         for record in records:
             if record.event is snapshot:
                 found_snapshot = True
                 continue
-            if found_snapshot and record.event.event_type == "account" and dict(record.event.payload) == account:
+            if (
+                found_snapshot
+                and record.event.event_type == "account"
+                and cls._is_identical_snapshot_fact(snapshot, record.event)
+            ):
+                count += 1
+        return count
+
+    @classmethod
+    def _count_trailing_identical_position_callbacks(
+        cls, records: list[_SpoolRecord], snapshot: QmtEvent
+    ) -> int:
+        found_snapshot = False
+        count = 0
+        for record in records:
+            if record.event is snapshot:
+                found_snapshot = True
+                continue
+            if (
+                found_snapshot
+                and record.event.event_type == "position"
+                and cls._is_identical_snapshot_fact(snapshot, record.event)
+            ):
                 count += 1
         return count
 
