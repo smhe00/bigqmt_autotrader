@@ -31,7 +31,7 @@ Archive day classification is explicitly UTC+08:00 (A-share local time), indepen
 
 - file-spool transport;
 - automatic daily archive enabled;
-- today's archive is eligible after `15:10` UTC+08:00;
+- today's archive is eligible after `16:10` UTC+08:00;
 - five-minute quiet period (`300 s`);
 - archive eligibility rechecked every `30 s`;
 - historical unarchived days are retried on Host startup.
