@@ -66,6 +66,20 @@ def account_event(sequence: int, *, balance: str = "1000", available_cash: str =
     return value
 
 
+def position_event(
+    sequence: int,
+    *,
+    quantity: int = 100,
+    symbol: str = "000001.SZ",
+    timestamp_ms: int | None = None,
+) -> dict:
+    if timestamp_ms is None:
+        timestamp_ms = ts(15, 0, sequence)
+    value = event(sequence, event_type="position", timestamp_ms=timestamp_ms)
+    value["payload"] = {"symbol": symbol, "quantity": quantity}
+    return value
+
+
 def write_inbox(root: Path, value: dict) -> Path:
     inbox = root / "inbox"
     inbox.mkdir(parents=True, exist_ok=True)
@@ -147,6 +161,7 @@ def test_daily_archive_commits_then_deletes_small_files(tmp_path: Path):
     assert meta["source_file_count"] == 3
     assert meta["final_snapshot"]["sequence"] == 3
     assert meta["trailing_identical_account_heartbeats"] == 0
+    assert meta["trailing_identical_position_callbacks"] == 0
     assert meta["quiet_anchor_timestamp_ms"] == ts(15, 0, 0)
     assert meta["archive_sha256"] == result.archive_sha256
     committed = json.loads(checkpoint.read_text(encoding="utf-8"))
@@ -172,6 +187,7 @@ def test_archive_allows_identical_account_heartbeat_after_clean_snapshot(tmp_pat
     )
     assert manifest["final_snapshot"]["sequence"] == 1
     assert manifest["trailing_identical_account_heartbeats"] == 1
+    assert manifest["trailing_identical_position_callbacks"] == 0
 
 
 def test_identical_account_heartbeat_does_not_reset_quiet_period(tmp_path: Path):
@@ -194,12 +210,73 @@ def test_identical_account_heartbeat_does_not_reset_quiet_period(tmp_path: Path)
     assert manifest["last_timestamp_ms"] == ts(15, 19, 0)
     assert manifest["quiet_anchor_timestamp_ms"] == ts(15, 0, 0)
     assert manifest["trailing_identical_account_heartbeats"] == 1
+    assert manifest["trailing_identical_position_callbacks"] == 0
+
+
+def test_archive_allows_identical_position_callback_after_clean_snapshot(tmp_path: Path):
+    values = [
+        event(1, timestamp_ms=ts(15, 0, 0)),
+        position_event(2),
+    ]
+    receiver = consume(tmp_path, values)
+    result = DailySpoolArchiver(spool_root=tmp_path).archive_day(
+        DAY,
+        quiet_seconds=0,
+        now_ms=ts(15, 20, 0),
+    )
+
+    assert result.status == "archived"
+    assert not list(receiver.processed.glob("*.json"))
+    manifest = json.loads(
+        (tmp_path / "archive" / f"{DAY}_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["final_snapshot"]["sequence"] == 1
+    assert manifest["trailing_identical_account_heartbeats"] == 0
+    assert manifest["trailing_identical_position_callbacks"] == 1
+
+
+def test_identical_position_callback_does_not_reset_quiet_period(tmp_path: Path):
+    snapshot = event(1, timestamp_ms=ts(15, 0, 0))
+    replay = position_event(2, timestamp_ms=ts(15, 19, 0))
+    receiver = consume(tmp_path, [snapshot, replay])
+
+    result = DailySpoolArchiver(spool_root=tmp_path).archive_day(
+        DAY,
+        quiet_seconds=300,
+        now_ms=ts(15, 20, 0),
+    )
+
+    assert result.status == "archived"
+    assert not list(receiver.processed.glob("*.json"))
+    manifest = json.loads(
+        (tmp_path / "archive" / f"{DAY}_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["last_timestamp_ms"] == ts(15, 19, 0)
+    assert manifest["quiet_anchor_timestamp_ms"] == ts(15, 0, 0)
+    assert manifest["trailing_identical_position_callbacks"] == 1
 
 
 def test_archive_requires_new_snapshot_after_real_account_change(tmp_path: Path):
     values = [
         event(1, timestamp_ms=ts(15, 0, 0)),
         account_event(2, available_cash="700"),
+    ]
+    receiver = consume(tmp_path, values)
+    result = DailySpoolArchiver(spool_root=tmp_path).archive_day(
+        DAY,
+        quiet_seconds=0,
+        now_ms=ts(15, 20, 0),
+    )
+
+    assert result.status == "not_ready"
+    assert result.reasons == ("final_snapshot_missing",)
+    assert len(list(receiver.processed.glob("*.json"))) == 2
+
+
+def test_archive_requires_new_snapshot_after_real_position_change(tmp_path: Path):
+    values = [
+        event(1, timestamp_ms=ts(15, 0, 0)),
+        position_event(2, quantity=101),
     ]
     receiver = consume(tmp_path, values)
     result = DailySpoolArchiver(spool_root=tmp_path).archive_day(
