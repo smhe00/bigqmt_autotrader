@@ -288,8 +288,32 @@ def main(argv: list[str] | None = None) -> int:
             "host_account_semantic_dedup": True,
             "event_log_mode": "important_only",
             "status_summary_interval": args.status_summary_interval,
+            "restart_replay": "processed_from_latest_clean_snapshot",
         },
     )
+
+    try:
+        replay = spool.replay_processed_from_latest_clean_snapshot()
+    except Exception as exc:
+        _safe_status(
+            "recovery_replay_error",
+            {
+                "error_type": type(exc).__name__,
+                "read_model_healthy": ingestion.read_model.healthy,
+            },
+        )
+    else:
+        _safe_status(
+            "recovery_replay",
+            {
+                "snapshot_found": replay.snapshot_found,
+                "replayed": replay.replayed,
+                "session_id": replay.session_id,
+                "last_sequence": replay.last_sequence,
+                "snapshot_timestamp_ms": replay.snapshot_timestamp_ms,
+                "read_model_healthy": ingestion.read_model.healthy,
+            },
+        )
 
     last_archive_check = 0.0
     last_summary = time.monotonic()
