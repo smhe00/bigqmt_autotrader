@@ -288,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
             "host_account_semantic_dedup": True,
             "event_log_mode": "important_only",
             "status_summary_interval": args.status_summary_interval,
-            "restart_replay": "processed_from_latest_clean_snapshot",
+            "restart_replay": "coherent_current_session_from_latest_spool_tail",
         },
     )
 
@@ -310,7 +310,10 @@ def main(argv: list[str] | None = None) -> int:
                 "replayed": replay.replayed,
                 "session_id": replay.session_id,
                 "last_sequence": replay.last_sequence,
+                "snapshot_sequence": replay.snapshot_sequence,
                 "snapshot_timestamp_ms": replay.snapshot_timestamp_ms,
+                "target_sequence": replay.target_sequence,
+                "target_timestamp_ms": replay.target_timestamp_ms,
                 "read_model_healthy": ingestion.read_model.healthy,
             },
         )
