@@ -193,7 +193,9 @@ def test_v05_expired_command_is_rejected_without_live_side_effect(tmp_path, monk
     bridge = load_bridge()
     context = install_runtime(bridge, tmp_path)
     command = base_command(bridge, command_id="cmd-expired")
-    command["expires_ms"] = int(time.time() * 1000) - 1
+    now = int(time.time() * 1000)
+    command["created_ms"] = now - 10_000
+    command["expires_ms"] = now - 1
     write_command(bridge, tmp_path, command)
 
     bridge.command_tick(context)
