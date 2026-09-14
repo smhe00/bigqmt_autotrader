@@ -34,6 +34,7 @@ Archive day classification is explicitly UTC+08:00 (A-share local time), indepen
 - today's archive is eligible after `16:10` UTC+08:00;
 - five-minute quiet period (`300 s`);
 - archive eligibility rechecked every `30 s`;
+- compact Host status summary every `60 s`;
 - historical unarchived days are retried on Host startup.
 
 CLI overrides:
@@ -43,6 +44,7 @@ CLI overrides:
 --archive-after HH:MM
 --archive-quiet-seconds SECONDS
 --archive-check-interval SECONDS
+--status-summary-interval SECONDS
 ```
 
 ## Commit gate
@@ -54,15 +56,19 @@ A day is not considered archived merely because a gzip file exists. Before sourc
 3. quiet period has elapsed since the latest event;
 4. all selected events use one account fingerprint;
 5. sequence numbers have no internal gap inside each QMT session;
-6. the final selected event is a clean full `snapshot` with `query_errors=[]`;
-7. the gzip archive is written and atomically published;
-8. the manifest is written and atomically published;
-9. gzip is re-opened and every JSON line is decoded and validated;
-10. compressed archive SHA-256, uncompressed event-stream SHA-256, event count and trading day all match the manifest;
-11. a `COMMITTED` checkpoint containing archive and manifest hashes is durably written;
-12. the committed archive set is verified again.
+6. there is a clean full `snapshot` with `query_errors=[]` that is still the final convergence baseline;
+7. after that clean snapshot, only ACCOUNT callbacks whose payload is exactly identical to the snapshot ACCOUNT row are permitted;
+8. any changed ACCOUNT fact, POSITION, ORDER, DEAL, bridge error, or other event after the clean snapshot blocks commit until a newer clean snapshot arrives;
+9. the gzip archive is written and atomically published;
+10. the manifest is written and atomically published;
+11. gzip is re-opened and every JSON line is decoded and validated;
+12. compressed archive SHA-256, uncompressed event-stream SHA-256, event count and trading day all match the manifest;
+13. a `COMMITTED` checkpoint containing archive and manifest hashes is durably written;
+14. the committed archive set is verified again.
 
-Only after step 12 may the exact source small files listed in the manifest be deleted.
+Only after step 14 may the exact source small files listed in the manifest be deleted.
+
+This rule deliberately tolerates the calibrated Guojin behavior where an unchanged ACCOUNT heartbeat may arrive after the final clean snapshot. It does **not** relax the gate for real broker-state changes.
 
 ## Daily outputs
 
@@ -81,10 +87,23 @@ The gzip contains the original validated transport JSON lines in chronological o
 - event count;
 - first/last timestamp;
 - per-session first/last sequence and event count;
-- final snapshot identity;
+- final clean snapshot identity;
+- number of trailing identical ACCOUNT heartbeats;
 - archive SHA-256;
 - uncompressed event-stream SHA-256;
 - exact source filenames and source-file-set SHA-256.
+
+## Host logging policy
+
+Normal production logging is intentionally compact:
+
+- always log ready, snapshot, ORDER, DEAL, bridge/resync/error, quarantine and archive state changes;
+- log ACCOUNT when its semantic value changes;
+- suppress per-event logs for semantically duplicate ACCOUNT callbacks and routine POSITION backlog events;
+- keep protocol sequence processing unchanged even when the per-event console line is suppressed;
+- emit a compact cumulative `summary` every 60 seconds by default.
+
+This is console-log suppression only. It does not discard already published spool evidence.
 
 ## Crash recovery
 
@@ -98,6 +117,8 @@ The design is idempotent around the commit boundary:
 ## Quarantine
 
 `quarantine/` is for malformed or protocol-invalid transport files. Presence of a same-day quarantine file blocks daily archive commit for that day. This prevents an apparently clean archive from hiding evidence loss.
+
+Historical quarantine is intentionally not auto-deleted. It must be inspected or explicitly reconciled before the day can commit.
 
 ORDER/DEAL semantic quarantine inside Host ingestion is a separate mechanism: those broker facts remain fail-closed until Guojin order/deal status mapping is calibrated.
 
