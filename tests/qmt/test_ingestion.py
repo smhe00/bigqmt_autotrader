@@ -173,3 +173,39 @@ def test_mapper_cannot_change_account_identity():
             )
         )
     assert sink.calls == []
+
+
+def test_identical_account_callback_is_semantically_deduplicated_but_sequence_advances():
+    ingress = QmtIngressBuffer(expected_account_fingerprint=FP)
+    host = QmtHostIngestion()
+
+    first = host.handle(ingress.ingest_frame(encode_transport_frame(snapshot())))
+    assert first.deduplicated is False
+    assert host.read_model.view is not None
+    assert host.read_model.view.sequence == 1
+
+    same = host.handle(
+        ingress.ingest_frame(
+            encode_transport_frame(
+                event(2, "account", {"balance": "1000", "available_cash": "800"})
+            )
+        )
+    )
+    assert same.deduplicated is True
+    assert host.account_semantic_duplicates == 1
+    assert host.read_model.view is not None
+    assert host.read_model.view.sequence == 2
+    assert host.read_model.view.account[0]["available_cash"] == "800"
+
+    changed = host.handle(
+        ingress.ingest_frame(
+            encode_transport_frame(
+                event(3, "account", {"balance": "1000", "available_cash": "700"})
+            )
+        )
+    )
+    assert changed.deduplicated is False
+    assert host.account_semantic_duplicates == 1
+    assert host.read_model.view is not None
+    assert host.read_model.view.sequence == 3
+    assert host.read_model.view.account[0]["available_cash"] == "700"
