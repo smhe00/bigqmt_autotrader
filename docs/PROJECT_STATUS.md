@@ -11,20 +11,24 @@ Updated: 2026-09-14
 | P0 / G0 | **PASS** |
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
-| P3 Big QMT read-only | **IN PROGRESS — active-query PASS; file-spool Host transport + V05 daily archive implemented; real end-to-end spool/callback calibration pending** |
+| P3 Big QMT read-only | **IN PROGRESS — QMT-side lifecycle/query/callback/file-spool PASS; Python 3.12 Host end-to-end calibration and ORDER/DEAL semantics pending** |
 | P4 Big QMT trading bridge | NOT STARTED |
 | P5 Shadow / simulation / live canary | NOT STARTED |
 | Live trading allowed | **NO** |
 | Real QMT submit implemented | **NO** |
 | Real QMT cancel implemented | **NO** |
 | Big QMT read-only adapter implemented | **YES — active query + callback normalization + bounded queue** |
-| Guojin ACCOUNT/POSITION active query | **PASS — real terminal calibration, no query errors** |
-| Guojin ORDER/DEAL active query | **CALL SUCCEEDED, 0 rows observed; field rows/status semantics still uncalibrated** |
-| Guojin callback delivery | **PENDING CALIBRATION** |
+| Guojin ACCOUNT/POSITION active query | **PASS — latest real snapshot returned 1 ACCOUNT row and 8 POSITION rows, no query errors** |
+| Guojin ORDER/DEAL active query | **PASS at query/schema level — latest real snapshot returned 1 ORDER row and 2 DEAL rows; status semantics still uncalibrated** |
+| Guojin callback subscription | **PASS — `ContextInfo.set_account(account)` succeeded** |
+| Guojin ACCOUNT callback delivery | **PASS — repeated real callbacks observed** |
+| Guojin POSITION/ORDER/DEAL callback delivery | **PENDING CALIBRATION** |
 | Guojin built-in `_socket` | **UNAVAILABLE on calibrated install — `socket.py` imports fail because `_socket` DLL cannot load** |
 | QMT TCP candidate V03 | **INCOMPATIBLE with calibrated Guojin runtime; retained only as evidence/reference** |
-| QMT file-spool candidate V04 | **IMPLEMENTED — Python 3.6-compatible, no socket/thread/process dependency, atomic rename publication** |
-| Python 3.12 file-spool receiver | **IMPLEMENTED — default Host transport, account pinning, protocol/session/sequence validation** |
+| QMT file-spool candidate V04 | **IMPLEMENTED / REAL-QMT PASS — build `p3-file-spool-2`, Python 3.6-compatible, atomic rename, resolved spool path logging, ACCOUNT callback dedup** |
+| ACCOUNT callback dedup | **IMPLEMENTED — state changes emit immediately; identical callbacks suppressed; identical heartbeat at most every 300 s when no newer full snapshot refreshes state** |
+| Python 3.12 file-spool receiver | **IMPLEMENTED — default Host transport, account pinning, protocol/session/sequence validation, resolved spool path logging** |
+| Host ACCOUNT semantic dedup | **IMPLEMENTED — repeated account facts marked deduplicated while sequence/timestamp still advance** |
 | V05 daily spool archive | **IMPLEMENTED — UTC+08 trading day, 16:10 default archive gate, 300 s quiet period, jsonl.gz + manifest + committed checkpoint** |
 | V05 source cleanup | **FAIL-SAFE — exact small files deleted only after archive/manifest/checkpoint revalidation** |
 | V05 quarantine | **IMPLEMENTED — malformed/protocol-invalid files retained in `quarantine/`; same-day quarantine blocks archive** |
@@ -34,7 +38,7 @@ Updated: 2026-09-14
 | Runnable host receiver | **IMPLEMENTED — `python -m bigqmt_autotrader.qmt.host` defaults to file spool + auto archive** |
 | P2 execution-authority policy | **SIMULATION only** |
 | SQLite schema | v4 forward-only migrations |
-| Latest verified Python tests | **147 passed on Python 3.12** |
+| Latest verified Python tests | **150 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | P3 QMT mutation-call static contract | **PASS — no passorder/order_lots/cancel mutation calls** |
 | FSM implementation/formal conformance | **196 / 196** state-request pairs PASS |
@@ -59,16 +63,18 @@ P1 Gate evidence: `docs/P1_GATE_RESULT_20260912.md`.
 
 P2 Gate evidence: `docs/P2_GATE_RESULT_20260913.md`.
 
-P3 Guojin query calibration: `docs/P3_GUOJIN_QMT_CALIBRATION_20260914.md`.
+P3 Guojin query/callback calibration: `docs/P3_GUOJIN_QMT_CALIBRATION_20260914.md`.
 
 P3 daily spool archive contract: `docs/P3_DAILY_SPOOL_ARCHIVE.md`.
 
-Current checkpoint: **P0/P1/P2 PASS. P3 IN PROGRESS.** Real Guojin QMT 2.1.19.0 calibration has confirmed built-in CPython 3.6.8, normal `init` / `handlebar` lifecycle behavior, account binding, and successful read-only ACCOUNT/POSITION queries through `get_trade_detail_data()` with zero query errors.
+Current checkpoint: **P0/P1/P2 PASS. P3 IN PROGRESS.** Real Guojin QMT 2.1.19.0 calibration has now confirmed built-in CPython 3.6.8, normal model-trading lifecycle behavior, account binding, successful read-only ACCOUNT/POSITION/ORDER/DEAL active queries, callback subscription, ACCOUNT callback delivery, and durable file-spool publication with zero observed query or transport errors.
 
-The first localhost TCP transport candidate (V03) failed on the real terminal before model code could run because the bundled Python 3.6.8 environment could not load the `_socket` extension DLL. This terminal capability is treated as a hard runtime boundary; the project does not require users to modify broker-installed DLLs or enable local Python to work around it.
+The first localhost TCP transport candidate (V03) failed because the bundled Python 3.6.8 environment could not load the `_socket` extension DLL. This terminal capability is treated as a hard runtime boundary; the project does not require broker DLL modification or local-Python mode as a workaround.
 
-The Guojin-adapted transport is file based. `qmt_side/BIGQMT_EXECUTION_BRIDGE_V04.py` publishes one complete transport frame per event using write/flush/fsync plus same-directory atomic rename into the OS temp spool. The Python 3.12 Host defaults to polling that spool, validates protocol/account/session/sequence, detects gaps/restarts, and keeps the read model unhealthy until a clean full snapshot resynchronizes it. Successfully consumed files move to `processed`; malformed or protocol-invalid files move to `quarantine`. ORDER/DEAL facts remain separately quarantined at the semantic ingestion boundary until explicit Guojin schema/status mapping exists.
+The Guojin-adapted transport is file based. `qmt_side/BIGQMT_EXECUTION_BRIDGE_V04.py` build `p3-file-spool-2` publishes complete transport frames using write/flush/fsync plus same-directory atomic rename. It now logs its fully resolved spool root/inbox path. Repeated identical ACCOUNT callbacks are suppressed at the QMT edge; account changes emit immediately, while an identical callback heartbeat is permitted only after 300 seconds if a newer full snapshot has not already refreshed the account state. This avoids the observed approximately five-second repetitive ACCOUNT callback stream from creating thousands of redundant small files.
 
-V05 adds bounded long-term file management without weakening crash recovery. The Host automatically considers today's archive after 16:10 UTC+08:00 and historical unarchived days on startup. A day commits only after the quiet period, empty same-day inbox, no same-day quarantine, no internal per-session sequence gaps, one account fingerprint, and a final clean snapshot. It then creates a deterministic `YYYY-MM-DD_events.jsonl.gz`, a SHA-256 manifest, and a durable `COMMITTED` checkpoint; exact source files are deleted only after the committed archive set is re-read and verified. A crash after checkpoint but before cleanup is recoverable, corrupt committed archives block deletion, and late events after commit are retained and surfaced rather than silently lost.
+The Python 3.12 Host logs its own fully resolved spool root/inbox path so QMT and Host path convergence can be checked directly. It also independently marks repeated ACCOUNT facts as semantic duplicates while still advancing sequence/timestamp and preserving gap detection. Successfully consumed files move to `processed`; malformed or protocol-invalid files move to `quarantine`. ORDER/DEAL facts remain separately quarantined at the semantic ingestion boundary until explicit Guojin status mapping exists.
 
-The QMT-side adapter still has no trading mutation path. `passorder`, `order_lots`, cancel/task mutation, real submit, and real cancel remain absent/disabled. P3 is **not yet PASS**: remaining work is real QMT→Host file-spool calibration, callback-delivery calibration, reconnect/startup testing, and ORDER/DEAL schema/status mapping before broker order evidence can enter the OMS.
+V05 adds bounded long-term file management without weakening crash recovery. The Host considers today's archive after 16:10 UTC+08:00 and historical unarchived days on startup. A day commits only after the quiet period, empty same-day inbox, no same-day quarantine, no internal per-session sequence gaps, one account fingerprint, and a final clean snapshot. It then creates deterministic daily `jsonl.gz`, manifest, and `COMMITTED` checkpoint artifacts; exact source files are deleted only after revalidation.
+
+The QMT-side adapter still has no trading mutation path. `passorder`, `order_lots`, cancel/task mutation, real submit, and real cancel remain absent/disabled. P3 is **not yet PASS**: remaining work is real QMT→Python 3.12 Host spool consumption/restart testing, POSITION/ORDER/DEAL callback calibration, and Guojin ORDER/DEAL status/token mapping before broker order evidence can enter the OMS.
