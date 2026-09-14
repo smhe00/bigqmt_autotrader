@@ -1,5 +1,5 @@
 from bigqmt_autotrader.qmt import QmtIngressBuffer, encode_transport_frame
-from bigqmt_autotrader.qmt.host import _should_log_event
+from bigqmt_autotrader.qmt.host import _should_log_event, _summary_should_emit
 
 
 FP = "sha256:" + "b" * 64
@@ -82,3 +82,33 @@ def test_host_logs_account_change_order_and_resync():
     assert _should_log_event(account_change, deduplicated=False, quarantined=False) is True
     assert _should_log_event(order, deduplicated=False, quarantined=False) is True
     assert _should_log_event(gap, deduplicated=False, quarantined=False) is True
+
+
+def test_changed_summary_emits_immediately():
+    previous = {"events_seen": 10, "read_model_healthy": True}
+    current = {"events_seen": 11, "read_model_healthy": True}
+    assert _summary_should_emit(
+        current,
+        previous_payload=previous,
+        monotonic_now=101.0,
+        last_emit_monotonic=100.0,
+        heartbeat_seconds=300.0,
+    ) is True
+
+
+def test_unchanged_summary_waits_for_heartbeat():
+    payload = {"events_seen": 10, "read_model_healthy": True}
+    assert _summary_should_emit(
+        payload,
+        previous_payload=payload,
+        monotonic_now=399.9,
+        last_emit_monotonic=100.0,
+        heartbeat_seconds=300.0,
+    ) is False
+    assert _summary_should_emit(
+        payload,
+        previous_payload=payload,
+        monotonic_now=400.0,
+        last_emit_monotonic=100.0,
+        heartbeat_seconds=300.0,
+    ) is True
