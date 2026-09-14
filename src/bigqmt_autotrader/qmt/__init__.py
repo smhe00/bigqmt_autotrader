@@ -19,6 +19,7 @@ from .commands import (
 )
 from .ingestion import (
     BrokerEvidenceCandidate,
+    CommandResultSink,
     EvidenceMapper,
     EvidenceSink,
     HostIngestResult,
@@ -73,6 +74,7 @@ __all__ = [
     "QmtReadModel",
     "QmtSnapshotView",
     "BrokerEvidenceCandidate",
+    "CommandResultSink",
     "EvidenceMapper",
     "EvidenceSink",
     "HostIngestResult",
