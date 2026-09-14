@@ -20,6 +20,7 @@ _ALLOWED_EVENT_TYPES = frozenset(
         "deal",
         "bridge_ready",
         "bridge_error",
+        "command_result",
     }
 )
 
@@ -91,6 +92,8 @@ class QmtEvent:
 
         if event_type == "snapshot":
             _validate_snapshot_payload(payload)
+        elif event_type == "command_result":
+            _validate_command_result_payload(payload)
 
         return cls(
             protocol_version=protocol_version,
@@ -114,6 +117,21 @@ def _validate_snapshot_payload(payload: Mapping[str, Any]) -> None:
     for key in ("account", "positions", "orders", "deals"):
         if any(not isinstance(row, Mapping) for row in payload[key]):
             raise QmtProtocolError(f"snapshot {key} rows must be objects")
+
+
+def _validate_command_result_payload(payload: Mapping[str, Any]) -> None:
+    command_id = payload.get("command_id")
+    command_type = payload.get("command_type")
+    result_status = payload.get("result_status")
+    live_side_effect = payload.get("live_side_effect")
+    if not isinstance(command_id, str) or not command_id:
+        raise QmtProtocolError("command_result command_id must be non-empty text")
+    if command_type not in {"SUBMIT_LIMIT", "CANCEL_ORDER", "REQUEST_SNAPSHOT"}:
+        raise QmtProtocolError("command_result has unsupported command_type")
+    if not isinstance(result_status, str) or not result_status:
+        raise QmtProtocolError("command_result result_status must be non-empty text")
+    if not isinstance(live_side_effect, bool):
+        raise QmtProtocolError("command_result live_side_effect must be boolean")
 
 
 def encode_transport_frame(event: QmtEvent | Mapping[str, Any]) -> bytes:
