@@ -162,12 +162,14 @@ class DailySpoolArchiver:
         if gaps:
             reasons.append("sequence_gap")
 
-        final = records[-1].event
+        final_snapshot: QmtEvent | None = None
         if require_final_snapshot:
-            if final.event_type != "snapshot":
-                reasons.append("final_snapshot_missing")
-            elif final.payload.get("query_errors"):
-                reasons.append("final_snapshot_query_error")
+            final_snapshot, final_reason = self._find_final_snapshot(records)
+            if final_reason is not None:
+                reasons.append(final_reason)
+        else:
+            snapshots = [record.event for record in records if record.event.event_type == "snapshot"]
+            final_snapshot = snapshots[-1] if snapshots else None
 
         if reasons:
             return DailyArchiveResult(
@@ -191,11 +193,20 @@ class DailySpoolArchiver:
             "first_timestamp_ms": records[0].event.timestamp_ms,
             "last_timestamp_ms": records[-1].event.timestamp_ms,
             "sessions": sessions,
-            "final_snapshot": {
-                "session_id": final.session_id,
-                "sequence": final.sequence,
-                "timestamp_ms": final.timestamp_ms,
-            },
+            "final_snapshot": (
+                {
+                    "session_id": final_snapshot.session_id,
+                    "sequence": final_snapshot.sequence,
+                    "timestamp_ms": final_snapshot.timestamp_ms,
+                }
+                if final_snapshot is not None
+                else None
+            ),
+            "trailing_identical_account_heartbeats": (
+                self._count_trailing_identical_account_heartbeats(records, final_snapshot)
+                if final_snapshot is not None
+                else 0
+            ),
             "archive_filename": archive_path.name,
             "archive_sha256": archive_sha256,
             "event_stream_sha256": event_stream_sha256,
@@ -222,8 +233,6 @@ class DailySpoolArchiver:
         }
         self._atomic_write_json(checkpoint_path, checkpoint)
 
-        # Verify once more after the commit marker exists. Only then may source
-        # small files be deleted.
         self._verify_committed_files(archive_path, manifest_path, checkpoint_path)
         deleted = self._delete_exact_sources(records)
         return DailyArchiveResult(
@@ -236,6 +245,57 @@ class DailySpoolArchiver:
             checkpoint_path=str(checkpoint_path),
             archive_sha256=archive_sha256,
         )
+
+    @staticmethod
+    def _snapshot_account(event: QmtEvent) -> dict[str, Any] | None:
+        account = event.payload.get("account")
+        if not isinstance(account, list) or len(account) != 1:
+            return None
+        row = account[0]
+        if not isinstance(row, dict):
+            return None
+        return dict(row)
+
+    @classmethod
+    def _find_final_snapshot(
+        cls, records: list[_SpoolRecord]
+    ) -> tuple[QmtEvent | None, str | None]:
+        snapshot_index = -1
+        snapshot: QmtEvent | None = None
+        for index in range(len(records) - 1, -1, -1):
+            event = records[index].event
+            if event.event_type == "snapshot":
+                snapshot_index = index
+                snapshot = event
+                break
+        if snapshot is None:
+            return None, "final_snapshot_missing"
+        if snapshot.payload.get("query_errors"):
+            return snapshot, "final_snapshot_query_error"
+
+        account = cls._snapshot_account(snapshot)
+        for record in records[snapshot_index + 1 :]:
+            event = record.event
+            if event.event_type != "account" or account is None or dict(event.payload) != account:
+                return snapshot, "final_snapshot_missing"
+        return snapshot, None
+
+    @classmethod
+    def _count_trailing_identical_account_heartbeats(
+        cls, records: list[_SpoolRecord], snapshot: QmtEvent
+    ) -> int:
+        account = cls._snapshot_account(snapshot)
+        if account is None:
+            return 0
+        found_snapshot = False
+        count = 0
+        for record in records:
+            if record.event is snapshot:
+                found_snapshot = True
+                continue
+            if found_snapshot and record.event.event_type == "account" and dict(record.event.payload) == account:
+                count += 1
+        return count
 
     def _recover_committed_day(
         self,
