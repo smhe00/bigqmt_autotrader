@@ -32,6 +32,7 @@ def _event_summary(result: IngressResult, ingestion: QmtHostIngestion) -> dict[s
     event = result.event
     payload: dict[str, Any] = {
         "event_type": event.event_type,
+        "session_id": event.session_id,
         "sequence": event.sequence,
         "disposition": result.disposition.value,
         "needs_resync": result.needs_resync,
@@ -48,6 +49,51 @@ def _event_summary(result: IngressResult, ingestion: QmtHostIngestion) -> dict[s
                 "order_rows": len(event.payload.get("orders", [])),
                 "deal_rows": len(event.payload.get("deals", [])),
                 "query_error_count": len(event.payload.get("query_errors", [])),
+            }
+        )
+    elif event.event_type == "command_result":
+        payload.update(
+            {
+                "command_id": event.payload.get("command_id"),
+                "command_type": event.payload.get("command_type"),
+                "client_order_id": event.payload.get("client_order_id"),
+                "broker_token": event.payload.get("broker_token"),
+                "result_status": event.payload.get("result_status"),
+                "execution_mode": event.payload.get("execution_mode"),
+                "live_side_effect": event.payload.get("live_side_effect"),
+            }
+        )
+    elif event.event_type == "bridge_error":
+        payload.update(
+            {
+                "code": event.payload.get("code"),
+                "error_type": event.payload.get("error_type"),
+            }
+        )
+    elif event.event_type == "order":
+        payload.update(
+            {
+                "symbol": event.payload.get("symbol"),
+                "broker_order_id": event.payload.get("broker_order_id"),
+                "order_ref": event.payload.get("order_ref"),
+                "remark": event.payload.get("remark"),
+                "status_code": event.payload.get("status_code"),
+                "submit_status_code": event.payload.get("submit_status_code"),
+                "original_quantity": event.payload.get("original_quantity"),
+                "filled_quantity": event.payload.get("filled_quantity"),
+                "remaining_quantity": event.payload.get("remaining_quantity"),
+            }
+        )
+    elif event.event_type == "deal":
+        payload.update(
+            {
+                "symbol": event.payload.get("symbol"),
+                "broker_order_id": event.payload.get("broker_order_id"),
+                "order_ref": event.payload.get("order_ref"),
+                "remark": event.payload.get("remark"),
+                "trade_id": event.payload.get("trade_id"),
+                "quantity": event.payload.get("quantity"),
+                "price": event.payload.get("price"),
             }
         )
     return payload
@@ -232,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     **_event_summary(result, ingestion),
                     "evidence_ingested": ingest_result.evidence_ingested,
+                    "command_result_ingested": ingest_result.command_result_ingested,
                     "quarantined": ingest_result.quarantined,
                     "deduplicated": ingest_result.deduplicated,
                 },
