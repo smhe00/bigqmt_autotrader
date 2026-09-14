@@ -111,8 +111,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--archive-after",
         type=_parse_hhmm,
-        default=wall_time(hour=15, minute=10),
-        help="A-share local time after which today's archive may commit (default 15:10).",
+        default=wall_time(hour=16, minute=10),
+        help="A-share local time after which today's archive may commit (default 16:10).",
     )
     parser.add_argument("--archive-quiet-seconds", type=float, default=300.0)
     parser.add_argument("--archive-check-interval", type=float, default=30.0)
