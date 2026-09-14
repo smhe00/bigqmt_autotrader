@@ -31,7 +31,7 @@ Updated: 2026-09-14
 | Host ACCOUNT semantic dedup | **IMPLEMENTED — repeated account facts marked deduplicated while sequence/timestamp still advance** |
 | Host-only restart recovery | **IMPLEMENTED — read-only replay from the newest clean snapshot in `processed/`, then continue with `inbox/`; processed source files are not moved/deleted** |
 | Host console logging | **HARDENED — important events only; duplicate ACCOUNT/routine POSITION backlog suppressed; cumulative summary every 60 s by default** |
-| V05 daily spool archive | **IMPLEMENTED — UTC+08 trading day, 16:10 gate, 300 s quiet period, clean-snapshot convergence, identical trailing ACCOUNT heartbeat tolerated** |
+| V05 daily spool archive | **IMPLEMENTED — UTC+08 trading day, 16:10 gate, clean-snapshot convergence; identical trailing ACCOUNT heartbeat neither invalidates convergence nor resets the 300 s quiet timer** |
 | V05 source cleanup | **FAIL-SAFE — exact small files deleted only after archive/manifest/checkpoint revalidation** |
 | V05 quarantine | **IMPLEMENTED — malformed/protocol-invalid files retained in `quarantine/`; same-day quarantine blocks archive; no automatic deletion** |
 | TCP receiver | **RETAINED for tests/future runtimes; not the Guojin P3 production path** |
@@ -40,7 +40,7 @@ Updated: 2026-09-14
 | Runnable host receiver | **IMPLEMENTED — `python -m bigqmt_autotrader.qmt.host` defaults to file spool + auto archive + processed-spool restart replay** |
 | P2 execution-authority policy | **SIMULATION only** |
 | SQLite schema | v4 forward-only migrations |
-| Latest verified Python tests | **157 passed on Python 3.12** |
+| Latest verified Python tests | **158 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | P3 QMT mutation-call static contract | **PASS — no passorder/order_lots/cancel mutation calls** |
 | FSM implementation/formal conformance | **196 / 196** state-request pairs PASS |
@@ -79,7 +79,7 @@ The Guojin-adapted transport is file based. `qmt_side/BIGQMT_EXECUTION_BRIDGE_V0
 
 The Python 3.12 Host logs its resolved spool root/inbox path and independently marks repeated ACCOUNT facts as semantic duplicates while preserving sequence/timestamp continuity and gap detection. Console output is important-event oriented: snapshots, ORDER/DEAL, account changes, gap/resync/error, quarantine and archive transitions remain visible; routine duplicate ACCOUNT and POSITION backlog events are not printed one-by-one. A cumulative summary is emitted every 60 seconds by default.
 
-V05 daily archive convergence treats the latest clean snapshot as the broker-state baseline. Identical ACCOUNT heartbeat events after that snapshot do not invalidate the day. Any real ACCOUNT change, POSITION/ORDER/DEAL fact, bridge error, or other event after the snapshot still blocks commit until a newer clean snapshot arrives. Same-day filesystem quarantine also continues to block archive commit, and quarantine is never auto-deleted.
+V05 daily archive convergence treats the latest clean snapshot as the broker-state baseline. Identical ACCOUNT heartbeat events after that snapshot do not invalidate the day and do not reset the archive quiet timer; the final clean snapshot remains the quiet-period anchor. Any real ACCOUNT change, POSITION/ORDER/DEAL fact, bridge error, or other event after the snapshot still blocks commit until a newer clean snapshot arrives. Same-day filesystem quarantine also continues to block archive commit, and quarantine is never auto-deleted.
 
 The current 2026-09-14 temp spool contains historical calibration material that triggers `account_mismatch` and `quarantine_present`; those conditions are intentionally not auto-cleared. They must be inspected or intentionally retired as calibration data before that day's archive can commit.
 
