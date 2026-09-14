@@ -24,9 +24,9 @@ class QmtSnapshotView:
 class QmtReadModel:
     """Host-side current broker view.
 
-    P3 only: this object is read-only evidence state and cannot submit/cancel.
-    A sequence gap or a new QMT session makes the view unhealthy until a clean
-    full snapshot arrives.
+    Broker-state callbacks incrementally update an already synchronized view.
+    Non-broker bridge events such as command_result still advance sequence/time
+    continuity but cannot mutate account/position/order/deal state.
     """
 
     def __init__(self) -> None:
@@ -66,6 +66,8 @@ class QmtReadModel:
         elif event.event_type == "deal":
             deals = self._append_event(self._view.deals, event.payload)
             self._view = self._replace(deals=deals, sequence=event.sequence, timestamp_ms=event.timestamp_ms)
+        elif event.event_type in {"command_result", "bridge_ready", "bridge_error"}:
+            self._view = self._replace(sequence=event.sequence, timestamp_ms=event.timestamp_ms)
         return self._view
 
     def _replace(self, **changes: Any) -> QmtSnapshotView:
