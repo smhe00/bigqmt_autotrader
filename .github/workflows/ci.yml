@@ -31,6 +31,8 @@ jobs:
         run: python tools/verify_fsm_exhaustive.py
       - name: Audit broker side-effect call surface
         run: python tools/audit_side_effect_calls.py
+      - name: Verify standalone QMT deployment files
+        run: python tools/build_qmt_deployments.py --check
       - uses: actions/setup-java@v5
         with:
           distribution: temurin

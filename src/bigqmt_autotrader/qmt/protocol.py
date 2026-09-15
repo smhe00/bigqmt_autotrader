@@ -12,6 +12,7 @@ TRANSPORT_VERSION = "1"
 MAX_FRAME_BYTES = 1024 * 1024
 _ACCOUNT_FINGERPRINT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _BROKER_TOKEN_RE = re.compile(r"^BQ[0-9a-f]{20}$")
+_INSTANCE_ID_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 _ALLOWED_EVENT_TYPES = frozenset(
     {
         "snapshot",
@@ -48,6 +49,7 @@ class QmtEvent:
     account_fingerprint: str
     account_type: str | None
     payload: Mapping[str, Any]
+    terminal_instance_id: str | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "QmtEvent":
@@ -88,6 +90,13 @@ class QmtEvent:
         if account_type is not None and not isinstance(account_type, str):
             raise QmtProtocolError("account_type must be a string or null")
 
+        terminal_instance_id = value.get("terminal_instance_id")
+        if terminal_instance_id is not None and (
+            not isinstance(terminal_instance_id, str)
+            or not _INSTANCE_ID_RE.fullmatch(terminal_instance_id)
+        ):
+            raise QmtProtocolError("invalid terminal_instance_id")
+
         payload = value.get("payload")
         if not isinstance(payload, Mapping):
             raise QmtProtocolError("payload must be an object")
@@ -109,6 +118,7 @@ class QmtEvent:
             account_fingerprint=account_fingerprint,
             account_type=account_type,
             payload=dict(payload),
+            terminal_instance_id=terminal_instance_id,
         )
 
 
@@ -215,6 +225,7 @@ def encode_transport_frame(event: QmtEvent | Mapping[str, Any]) -> bytes:
             "source": event.source,
             "account_fingerprint": event.account_fingerprint,
             "account_type": event.account_type,
+            "terminal_instance_id": event.terminal_instance_id,
             "payload": dict(event.payload),
         }
     else:

@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from bigqmt_autotrader.qmt import host as host_module
+from bigqmt_autotrader.qmt.host import _resolve_spool_instance, build_parser
+from bigqmt_autotrader.qmt.instances import QmtInstanceError, discover_instances, load_instance
+from bigqmt_autotrader.qmt.protocol import QmtEvent, encode_transport_frame
+from bigqmt_autotrader.qmt.receiver import QmtIngressBuffer, QmtIngressIdentityError
+
+
+FINGERPRINT = "sha256:" + "a" * 64
+
+
+def _write_instance(base: Path, instance_id: str = "terminal_01") -> Path:
+    root = base / instance_id
+    inbox = root / "inbox"
+    inbox.mkdir(parents=True)
+    manifest = {
+        "manifest_version": "1",
+        "terminal_instance_id": instance_id,
+        "protocol_version": "0.2",
+        "transport_version": "1",
+        "bridge_build": "p4-shadow-command-spool-5",
+        "session_id": "session-01",
+        "account_fingerprint": FINGERPRINT,
+        "account_type": "STOCK",
+        "created_ms": 1_700_000_000_000,
+        "execution_mode": "SHADOW",
+        "trading_enabled": False,
+        "live_submit": False,
+        "live_cancel": False,
+    }
+    (root / "instance.json").write_text(json.dumps(manifest), encoding="utf-8")
+    event = {
+        "protocol_version": "0.2",
+        "terminal_instance_id": instance_id,
+        "session_id": "session-01",
+        "sequence": 1,
+        "timestamp_ms": 1_700_000_000_001,
+        "event_type": "bridge_ready",
+        "source": "init",
+        "account_fingerprint": FINGERPRINT,
+        "account_type": "STOCK",
+        "payload": {
+            "capabilities": {
+                "bridge_build": "p4-shadow-command-spool-5",
+                "execution_mode": "SHADOW",
+                "trading_enabled": False,
+                "live_submit": False,
+                "live_cancel": False,
+                "spool_instance_id": instance_id,
+            }
+        },
+    }
+    (inbox / "ready.json").write_bytes(encode_transport_frame(event))
+    return root
+
+
+def test_discovers_only_manifest_and_bridge_ready_validated_children(tmp_path: Path) -> None:
+    _write_instance(tmp_path, "terminal_01")
+    for legacy_name in ("archive", "commands", "processed"):
+        (tmp_path / legacy_name).mkdir()
+
+    instances = discover_instances(tmp_path)
+
+    assert [item.instance_id for item in instances] == ["terminal_01"]
+    assert instances[0].account_fingerprint == FINGERPRINT
+    assert instances[0].root == tmp_path / "terminal_01"
+
+
+def test_manifest_directory_identity_mismatch_fails_closed(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    manifest = json.loads((root / "instance.json").read_text(encoding="utf-8"))
+    manifest["terminal_instance_id"] = "terminal_02"
+    (root / "instance.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(QmtInstanceError, match="terminal_instance_id"):
+        load_instance(tmp_path, "terminal_01")
+    assert discover_instances(tmp_path) == ()
+
+
+def test_bridge_ready_session_and_instance_must_match_manifest(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    manifest = json.loads((root / "instance.json").read_text(encoding="utf-8"))
+    manifest["session_id"] = "other-session"
+    (root / "instance.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(QmtInstanceError, match="bridge_ready"):
+        load_instance(tmp_path, "terminal_01")
+
+
+def test_ingress_rejects_other_terminal_instance() -> None:
+    ingress = QmtIngressBuffer(
+        expected_account_fingerprint=FINGERPRINT,
+        expected_terminal_instance_id="terminal_01",
+    )
+    event = QmtEvent.from_mapping(
+        {
+            "protocol_version": "0.2",
+            "terminal_instance_id": "terminal_02",
+            "session_id": "session-01",
+            "sequence": 1,
+            "timestamp_ms": 1_700_000_000_001,
+            "event_type": "bridge_ready",
+            "source": "init",
+            "account_fingerprint": FINGERPRINT,
+            "account_type": "STOCK",
+            "payload": {},
+        }
+    )
+
+    with pytest.raises(QmtIngressIdentityError, match="terminal_instance_id"):
+        ingress.ingest(event)
+
+
+def test_host_defaults_to_broker_neutral_spool_discovery() -> None:
+    args = build_parser().parse_args([])
+    assert args.instance_id is None
+    assert args.spool_base == r"D:\BigQMTData\spool"
+    host_source = (Path(__file__).resolve().parents[2] / "src" / "bigqmt_autotrader" / "qmt" / "host.py").read_text(
+        encoding="utf-8"
+    )
+    assert "galaxy" not in host_source.lower()
+    assert "guojin" not in host_source.lower()
+
+
+def test_host_resolves_instance_id_only_from_discovered_manifest(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    args = build_parser().parse_args(
+        ["--spool-base", str(tmp_path), "--instance-id", "terminal_01"]
+    )
+
+    instance = _resolve_spool_instance(args)
+
+    assert instance.instance_id == "terminal_01"
+    assert instance.root == root
+
+
+def test_host_no_argument_selection_comes_from_discovered_children(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_instance(tmp_path, "terminal_01")
+    _write_instance(tmp_path, "terminal_02")
+    monkeypatch.setattr("builtins.input", lambda _prompt: "2")
+    args = build_parser().parse_args(["--spool-base", str(tmp_path)])
+
+    instance = _resolve_spool_instance(args)
+
+    assert instance.instance_id == "terminal_02"
+
+
+def test_host_no_argument_waits_until_qmt_manifest_exists(tmp_path: Path, monkeypatch) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    instance = load_instance(tmp_path, "terminal_01")
+    discoveries = iter([(), (instance,)])
+    monkeypatch.setattr(host_module, "discover_instances", lambda _base: next(discoveries))
+    monkeypatch.setattr(host_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(host_module, "_choose_instance", lambda choices: choices[0])
+    args = build_parser().parse_args(["--spool-base", str(tmp_path)])
+
+    selected = _resolve_spool_instance(args)
+
+    assert selected.instance_id == "terminal_01"
+    assert selected.root == root

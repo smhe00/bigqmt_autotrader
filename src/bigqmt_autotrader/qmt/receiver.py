@@ -34,8 +34,14 @@ class IngressResult:
 class QmtIngressBuffer:
     """Validates account/session/sequence and detects replay or gaps fail-closed."""
 
-    def __init__(self, *, expected_account_fingerprint: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        expected_account_fingerprint: str | None = None,
+        expected_terminal_instance_id: str | None = None,
+    ) -> None:
         self.expected_account_fingerprint = expected_account_fingerprint
+        self.expected_terminal_instance_id = expected_terminal_instance_id
         self.session_id: str | None = None
         self.last_sequence = 0
         self.needs_resync = True
@@ -44,6 +50,11 @@ class QmtIngressBuffer:
 
     def ingest(self, event: QmtEvent) -> IngressResult:
         with self._lock:
+            if (
+                self.expected_terminal_instance_id is not None
+                and event.terminal_instance_id != self.expected_terminal_instance_id
+            ):
+                raise QmtIngressIdentityError("unexpected terminal_instance_id")
             if self.expected_account_fingerprint is None:
                 # Pin the first valid account identity for the lifetime of this
                 # host ingress instance. A later account switch is rejected.

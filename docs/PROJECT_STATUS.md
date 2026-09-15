@@ -13,7 +13,7 @@ Updated: 2026-09-16
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
 | P3 Big QMT read-only | **PASS — multi-hour read/recovery/archive + V05 run_time deployment calibration complete** |
-| P4 Big QMT execution bridge | **SHADOW CODE GATE PASS — durable command-result/OMS reconciliation added; no live broker mutation** |
+| P4 Big QMT execution bridge | **SHADOW CODE GATE PASS — manifest-validated multi-terminal discovery; no live broker mutation** |
 | P5 Shadow / simulation / live canary | NOT STARTED |
 | Live trading allowed | **NO** |
 | Real QMT submit implemented | **NO** |
@@ -40,12 +40,14 @@ calibration remain required before promotion from code gate to deployment gate.
 
 ## Multi-terminal spool isolation
 
-Galaxy and Guojin no longer share a spool root. Deployment uses independent
-`D:\BigQMTData\spool\galaxy` and `D:\BigQMTData\spool\guojin` namespaces, with
-one fingerprint-pinned Host consumer per leaf. V05 supports the broker-neutral
-`BIGQMT_SPOOL_BASE` + `BIGQMT_INSTANCE_ID` pair; `BIGQMT_SPOOL_DIR` remains an
-exact-path override. This isolation changes transport routing only and grants no
-trading authority.
+Galaxy and Guojin no longer share a spool root. Two standalone V05 files embed
+their deployment instance and atomically publish `instance.json` under
+`D:\BigQMTData\spool\<instance_id>`. Host contains no broker registry: without
+arguments it enumerates immediate child directories, validates each manifest
+against the matching-session `bridge_ready`, and asks the operator to select.
+`--instance-id` is an optional shortcut with identical validation. Each Host
+process remains pinned to one terminal instance and account fingerprint. This
+isolation changes transport routing only and grants no trading authority.
 
 ## P3 read plane
 
@@ -83,9 +85,14 @@ V05 deployment calibration additionally proved:
 
 ## P4 shadow execution plane
 
-Bridge: `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py`
+Bridge template: `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py`
 
-Build: `p4-shadow-command-spool-4`
+Standalone deployments:
+
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py`
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py`
+
+Build: `p4-shadow-command-spool-5`
 
 Safety state:
 
@@ -157,7 +164,7 @@ QMT command results are durably journaled in OMS schema v5. Duplicate/conflictin
 
 | Verification | State |
 | --- | --- |
-| Latest verified Python suite | **214 passed on Python 3.12** |
+| Latest verified Python suite | **217 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | Broker mutation-call static audit | **PASS** |
 | FSM implementation/formal conformance | **PASS** |

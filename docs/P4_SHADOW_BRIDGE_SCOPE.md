@@ -111,7 +111,12 @@ The detailed runbook and acceptance gate are in `P4_ORDER_DEAL_BROKER_TOKEN_CALI
 
 ## V05 QMT bridge
 
-`qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py`:
+Deploy one standalone instance file:
+
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py`
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py`
+
+Both are generated from `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py` and are:
 
 - Python 3.6 compatible
 - execution mode `SHADOW`
@@ -124,6 +129,7 @@ The detailed runbook and acceptance gate are in `P4_ORDER_DEAL_BROKER_TOKEN_CALI
 - claimed-command restart recovery is conservative UNKNOWN
 - no socket/thread/process dependency
 - no live broker mutation call surface
+- fixed to an instance-specific spool leaf with no environment-variable setup
 
 ## Runtime probe
 

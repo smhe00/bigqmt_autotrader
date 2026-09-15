@@ -1,80 +1,94 @@
-# P4 multi-terminal spool isolation
+# P4 multi-terminal spool discovery and isolation
 
 Date: 2026-09-16
 
 ## Decision
 
-Every running Big QMT terminal has an independent spool namespace. The
-deployment names are operator-owned terminal instance identifiers, not
-broker-detection logic:
+Each Big QMT terminal runs a standalone V05 strategy with an embedded instance
+identifier. The Host contains no broker names, broker profiles, account-type
+assumptions, or instance registry. It knows only the spool base directory:
+
+```text
+D:\BigQMTData\spool
+```
+
+The supplied standalone deployments create:
 
 ```text
 D:\BigQMTData\spool\
   galaxy\
+    instance.json
     inbox\
-    processed\
-    quarantine\
     commands\
   guojin\
+    instance.json
     inbox\
-    processed\
-    quarantine\
     commands\
 ```
 
-Account capability discovery remains broker-neutral. V05 still probes standard
-QMT account types from runtime evidence and never selects a behavior profile by
-broker name.
+The names `galaxy` and `guojin` occur only in the generated QMT deployment
+files and their filesystem directories. Adding another terminal does not
+require a Host code change.
 
-## QMT process configuration
+## First discovery
 
-Set both variables in the parent process before starting each QMT terminal:
+Start Big QMT and its V05 strategy before starting Host. During initialization,
+V05 atomically publishes `instance.json`, then emits `bridge_ready` with the
+same terminal instance, session, account fingerprint, account type, build, and
+safety capabilities.
 
-```powershell
-$env:BIGQMT_SPOOL_BASE = 'D:\BigQMTData\spool'
-$env:BIGQMT_INSTANCE_ID = 'galaxy'
-# Start the Galaxy QMT executable from this PowerShell process.
+With no arguments, Host enumerates only immediate child directories of the
+spool base. A directory becomes selectable only when all of these agree:
+
+```text
+directory leaf name
+  == instance.json.terminal_instance_id
+  == bridge_ready.terminal_instance_id
 ```
 
-Use `guojin` in a separate parent process for the Guojin terminal. Instance IDs
-must be lowercase ASCII letters, digits, `_`, or `-`, with a maximum length of
-32 characters.
+Host also pins and verifies the manifest session, account fingerprint, account
+type, protocol versions, bridge build, `execution_mode=SHADOW`, and all three
+disabled trading flags. It derives the path from the trusted base plus validated
+leaf name and never accepts an absolute path from the manifest.
 
-`BIGQMT_SPOOL_DIR` remains an exact-path override for tests and controlled
-deployments. For example, setting it to
-`D:\BigQMTData\spool\galaxy` selects that directory directly.
-
-The former common `D:\BigQMTData\spool` leaf layout is retained only as
-historical calibration evidence. New terminal sessions must write to an
-instance-specific child directory; historical files are not migrated or mixed
-into either new stream.
-
-## Host and probe binding
-
-Run one Host process per terminal namespace. Never point a single Host process
-at the common parent directory.
+If no valid instance exists, Host waits. When one or more instances validate,
+it displays a numbered selection menu:
 
 ```powershell
-python -m bigqmt_autotrader.qmt.host `
-  --spool-dir D:\BigQMTData\spool\galaxy `
-  --expected-account-fingerprint <galaxy-stock-fingerprint>
+python -m bigqmt_autotrader.qmt.host
 ```
 
-All shadow and calibration probes must use the same terminal-specific leaf:
+For repeatable startup, the optional shortcut selects a discovered directory
+but performs exactly the same manifest and event validation:
 
 ```powershell
-python -m bigqmt_autotrader.qmt.shadow_probe `
-  --spool-dir D:\BigQMTData\spool\galaxy `
-  --account-fingerprint <galaxy-stock-fingerprint> `
-  snapshot
+python -m bigqmt_autotrader.qmt.host --instance-id galaxy
+python -m bigqmt_autotrader.qmt.host --instance-id guojin
 ```
 
-## Safety invariants
+## Standalone QMT files
 
-- an instance directory has exactly one QMT producer;
-- its Host consumer is pinned to that instance's selected account fingerprint;
-- commands are published only to that instance's `commands/inbox`;
-- archives and quarantine remain inside the instance leaf;
-- account discovery does not grant submit or cancel authority;
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py`
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py`
+
+They are complete Python 3.6-compatible strategies with no runtime child-module
+or environment-variable dependency. Both are generated from the broker-neutral
+V05 template. CI fails if either generated file differs from its template plus
+embedded instance identifier.
+
+## Fail-closed rules
+
+- only lowercase ASCII letters, digits, `_`, and `-` are accepted in an
+  instance ID, with a maximum of 32 characters;
+- symbolic links and Windows reparse-point directories are rejected;
+- malformed, oversized, stale, or mismatched manifests are not selectable;
+- a matching `bridge_ready` from the manifest session is mandatory;
+- ingestion rejects any later event with another terminal instance ID;
+- each Host process consumes one selected instance only;
+- commands, quarantine, conflicts, and archives stay inside that instance leaf;
 - `TRADING_ENABLED=False`, `live_submit=false`, and `live_cancel=false` remain
   unchanged.
+
+The former common spool layout is retained only as historical calibration
+evidence. Its structural directories do not contain a valid instance manifest
+and are ignored by discovery.

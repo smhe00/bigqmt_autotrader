@@ -1,11 +1,16 @@
 import ast
 import importlib.util
 import json
+import os
 from pathlib import Path
 import time
 
 
 BRIDGE = Path(__file__).resolve().parents[2] / "qmt_side" / "BIGQMT_EXECUTION_BRIDGE_V05.py"
+DEPLOYMENTS = {
+    "galaxy": BRIDGE.with_name("BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py"),
+    "guojin": BRIDGE.with_name("BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py"),
+}
 
 
 def load_bridge():
@@ -13,6 +18,8 @@ def load_bridge():
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
+    module.TERMINAL_INSTANCE_ID = "test"
+    module.SPOOL_ROOT_OVERRIDE = os.environ.get("BIGQMT_SPOOL_DIR")
     return module
 
 
@@ -132,6 +139,15 @@ def test_v05_is_python36_parseable_and_has_no_broker_mutation_calls():
     assert "subprocess" not in imports
 
 
+def test_v05_standalone_deployments_are_python36_parseable_and_instance_fixed():
+    for instance_id, path in DEPLOYMENTS.items():
+        source = path.read_text(encoding="utf-8")
+        ast.parse(source, filename=str(path), feature_version=(3, 6))
+        assert '__BIGQMT_INSTANCE_ID__' not in source
+        assert 'TERMINAL_INSTANCE_ID = "' + instance_id + '"' in source
+        assert 'SPOOL_BASE_DIR = r"D:\\BigQMTData\\spool"' in source
+
+
 def test_v05_registers_one_second_command_and_five_minute_snapshot_timers(tmp_path, monkeypatch):
     monkeypatch.setenv("BIGQMT_SPOOL_DIR", str(tmp_path))
     bridge = load_bridge()
@@ -145,16 +161,24 @@ def test_v05_registers_one_second_command_and_five_minute_snapshot_timers(tmp_pa
     assert bridge.capabilities()["live_submit"] is False
     assert bridge.capabilities()["live_cancel"] is False
     assert bridge.capabilities()["linked_account_discovery"] == "read_only_runtime_probe"
+    manifest = json.loads((tmp_path / "instance.json").read_text(encoding="utf-8"))
+    assert manifest["terminal_instance_id"] == "test"
+    assert manifest["session_id"] == bridge._STATE.session_id
+    assert manifest["account_fingerprint"] == bridge._STATE.account_fingerprint
+    assert manifest["live_submit"] is False
+    assert manifest["live_cancel"] is False
+    events = event_frames(tmp_path)
+    assert all(event["terminal_instance_id"] == "test" for event in events)
 
 
 def test_v05_resolves_broker_neutral_instance_spool_namespace(tmp_path, monkeypatch):
     monkeypatch.delenv("BIGQMT_SPOOL_DIR", raising=False)
-    monkeypatch.setenv("BIGQMT_SPOOL_BASE", str(tmp_path))
-    monkeypatch.setenv("BIGQMT_INSTANCE_ID", "galaxy")
     bridge = load_bridge()
+    bridge.SPOOL_BASE_DIR = str(tmp_path)
+    bridge.TERMINAL_INSTANCE_ID = "galaxy"
 
     assert bridge._spool_root() == str((tmp_path / "galaxy").resolve())
-    assert bridge._spool_dir_source() == "instance_environment"
+    assert bridge._spool_dir_source() == "embedded_instance"
     assert bridge.capabilities()["spool_instance_id"] == "galaxy"
 
 

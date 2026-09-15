@@ -9,14 +9,18 @@ from typing import Any
 
 from .archive import DailyArchiveResult, DailySpoolArchiver, SHANGHAI_TZ
 from .ingestion import QmtHostIngestion
+from .instances import DEFAULT_SPOOL_BASE, QmtInstance, QmtInstanceError, discover_instances, load_instance
 from .receiver import IngressResult, LocalQmtReceiver, QmtIngressBuffer
 from .spool import FileSpoolReceiver
 
 
 STATUS_PREFIX = "BIGQMT_HOST_STATUS="
+_ACTIVE_INSTANCE_ID: str | None = None
 
 
 def _safe_status(status: str, payload: dict[str, Any]) -> None:
+    if _ACTIVE_INSTANCE_ID is not None and "instance_id" not in payload:
+        payload = {"instance_id": _ACTIVE_INSTANCE_ID, **payload}
     print(
         STATUS_PREFIX
         + json.dumps(
@@ -171,11 +175,60 @@ def _archive_due_days(
 def _spool_dir_source(explicit_cli: str | None) -> str:
     if explicit_cli:
         return "cli"
-    if os.environ.get("BIGQMT_SPOOL_DIR"):
-        return "environment"
-    if os.environ.get("BIGQMT_SPOOL_BASE") or os.environ.get("BIGQMT_INSTANCE_ID"):
-        return "instance_environment"
-    return "temp"
+    return "discovered_instance"
+
+
+def _choose_instance(instances: tuple[QmtInstance, ...]) -> QmtInstance:
+    print("Discovered valid QMT instances:", flush=True)
+    for index, instance in enumerate(instances, start=1):
+        print(
+            f"[{index}] {instance.instance_id}  SHADOW  {instance.account_type}  "
+            f"session={instance.session_id}",
+            flush=True,
+        )
+    while True:
+        try:
+            selected = input("Select instance: ").strip()
+        except EOFError as exc:
+            raise SystemExit("--instance-id is required when stdin is not interactive") from exc
+        if selected.isdigit() and 1 <= int(selected) <= len(instances):
+            return instances[int(selected) - 1]
+        print("Invalid selection.", flush=True)
+
+
+def _resolve_spool_instance(args: argparse.Namespace) -> QmtInstance:
+    if args.spool_dir:
+        root = os.path.abspath(os.path.expanduser(args.spool_dir))
+        instance_id = os.path.basename(root)
+        if args.instance_id is not None and args.instance_id != instance_id:
+            raise SystemExit("--instance-id must match the --spool-dir leaf name")
+        try:
+            return load_instance(os.path.dirname(root), instance_id)
+        except QmtInstanceError as exc:
+            raise SystemExit(str(exc)) from exc
+
+    spool_base = os.path.abspath(os.path.expanduser(args.spool_base))
+    if args.instance_id is not None:
+        try:
+            return load_instance(spool_base, args.instance_id)
+        except QmtInstanceError as exc:
+            raise SystemExit(str(exc)) from exc
+
+    waiting_logged = False
+    while True:
+        instances = discover_instances(spool_base)
+        if instances:
+            return _choose_instance(instances)
+        if not waiting_logged:
+            _safe_status(
+                "instance_waiting",
+                {"spool_base": spool_base, "reason": "no_valid_instance_manifest"},
+            )
+            waiting_logged = True
+        try:
+            time.sleep(1.0)
+        except KeyboardInterrupt as exc:
+            raise SystemExit("instance discovery cancelled") from exc
 
 
 def _status_summary_payload(
@@ -223,16 +276,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--transport",
         choices=("spool", "tcp"),
         default="spool",
-        help="spool is the Guojin QMT production path; tcp is retained for tests/future runtimes",
+        help="spool is the production path; tcp is retained for tests/future runtimes",
     )
     parser.add_argument("--spool-dir", default=None)
+    parser.add_argument("--spool-base", default=str(DEFAULT_SPOOL_BASE))
+    parser.add_argument("--instance-id", default=None)
     parser.add_argument("--poll-interval", type=float, default=0.2)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=18765)
     parser.add_argument(
         "--expected-account-fingerprint",
         default=None,
-        help="Optional sha256:... fingerprint. If omitted, first valid event is pinned.",
+        help="Optional assertion; spool mode always pins the value from instance.json.",
     )
     parser.add_argument(
         "--auto-archive",
@@ -252,7 +307,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _ACTIVE_INSTANCE_ID
     args = build_parser().parse_args(argv)
+    explicit_spool_dir = args.spool_dir
     if args.poll_interval <= 0:
         raise SystemExit("--poll-interval must be positive")
     if args.archive_quiet_seconds < 0:
@@ -262,8 +319,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.status_summary_interval <= 0:
         raise SystemExit("--status-summary-interval must be positive")
 
+    instance: QmtInstance | None = None
+    expected_account_fingerprint = args.expected_account_fingerprint
+    if args.transport == "spool":
+        instance = _resolve_spool_instance(args)
+        if (
+            expected_account_fingerprint is not None
+            and expected_account_fingerprint != instance.account_fingerprint
+        ):
+            raise SystemExit("--expected-account-fingerprint conflicts with instance.json")
+        expected_account_fingerprint = instance.account_fingerprint
+        args.spool_dir = str(instance.root)
+        _ACTIVE_INSTANCE_ID = instance.instance_id
+
     ingress = QmtIngressBuffer(
-        expected_account_fingerprint=args.expected_account_fingerprint
+        expected_account_fingerprint=expected_account_fingerprint,
+        expected_terminal_instance_id=instance.instance_id if instance is not None else None,
     )
     ingestion = QmtHostIngestion()
     stats = {
@@ -334,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
                 "port": receiver.port,
                 "trading_enabled": False,
                 "account_pin_mode": (
-                    "explicit" if args.expected_account_fingerprint else "first_valid_event"
+                    "explicit" if expected_account_fingerprint else "first_valid_event"
                 ),
                 "auto_archive": False,
             },
@@ -361,11 +432,14 @@ def main(argv: list[str] | None = None) -> int:
             "transport": "file_spool",
             "trading_enabled": False,
             "account_pin_mode": (
-                "explicit" if args.expected_account_fingerprint else "first_valid_event"
+                "instance_manifest"
             ),
+            "manifest_session_id": instance.session_id if instance is not None else None,
+            "manifest_account_type": instance.account_type if instance is not None else None,
+            "manifest_bridge_build": instance.bridge_build if instance is not None else None,
             "spool_root": resolved_spool_root,
             "spool_inbox": str(spool.inbox.resolve()),
-            "spool_dir_source": _spool_dir_source(args.spool_dir),
+            "spool_dir_source": _spool_dir_source(explicit_spool_dir),
             "auto_archive": args.auto_archive,
             "archive_policy": "past_days_only",
             "archive_quiet_seconds": args.archive_quiet_seconds,
