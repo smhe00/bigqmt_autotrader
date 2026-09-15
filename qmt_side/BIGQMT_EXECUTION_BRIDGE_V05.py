@@ -25,7 +25,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p4-shadow-command-spool-2"
+BRIDGE_BUILD = "p4-shadow-command-spool-3"
 TRADING_ENABLED = False
 READ_ONLY_ENABLED = True
 EXECUTION_MODE = "SHADOW"
@@ -104,6 +104,8 @@ class _RuntimeState(object):
         self.last_account_state_monotonic = 0.0
         self.account_callbacks_suppressed = 0
         self.account_callbacks_emitted = 0
+        self.detected_account_types = set()
+        self.linked_account_callbacks_suppressed = 0
         self.orphan_recovery_done = False
         self.commands_claimed = 0
         self.commands_processed = 0
@@ -201,6 +203,7 @@ def capabilities():
         "command_transport": "file_spool_atomic_claim",
         "account_callback_dedup": True,
         "callback_account_identity_guard": True,
+        "linked_account_callback_policy": "suppress_non_selected_detected_type",
         "account_callback_heartbeat_seconds": ACCOUNT_CALLBACK_HEARTBEAT_SECONDS,
         "methods": [
             "ping",
@@ -502,6 +505,7 @@ def _snapshot_summary(snapshot):
         "transport_failures": _STATE.transport_failures,
         "account_callbacks_suppressed": _STATE.account_callbacks_suppressed,
         "account_callbacks_emitted": _STATE.account_callbacks_emitted,
+        "linked_account_callbacks_suppressed": _STATE.linked_account_callbacks_suppressed,
     }
 
 
@@ -650,6 +654,12 @@ def read_account_capabilities(account_id=None, selected_account_type=None, query
         for record in records
         if record["status"] in ("DETECTED", "DEGRADED")
     ]
+    # Keep every type positively observed during this bridge session.  Some
+    # terminals deliver ACCOUNT callbacks for all linked account types after a
+    # model binds the shared fund account.  These observations must not enter
+    # the selected OMS stream, but they are expected linked-account traffic and
+    # must not create an error storm.
+    _STATE.detected_account_types.update(detected)
     payload = {
         "selected_account_type": selected_account_type,
         "detected_account_types": detected,
@@ -671,6 +681,7 @@ def read_account_capabilities(account_id=None, selected_account_type=None, query
                 "unconfirmed_count": len(
                     [record for record in records if record["status"] == "UNCONFIRMED"]
                 ),
+                "linked_account_callbacks_suppressed": _STATE.linked_account_callbacks_suppressed,
                 "live_submit": False,
                 "live_cancel": False,
             },
@@ -988,6 +999,18 @@ def _callback_matches_selected_account(event_type, obj):
         and expected_broker_type is not None
         and observed_broker_type != expected_broker_type
     ):
+        detected_codes = set(
+            BROKER_TYPE_CODES.get(account_type)
+            for account_type in _STATE.detected_account_types
+            if BROKER_TYPE_CODES.get(account_type) is not None
+        )
+        if observed_broker_type in detected_codes:
+            # Preserve the single-account OMS callback contract.  The linked
+            # account is already represented by account_capabilities; silently
+            # suppress its callback instead of misrouting it or reporting a
+            # false identity violation on every terminal heartbeat.
+            _STATE.linked_account_callbacks_suppressed += 1
+            return False
         _runtime_error(
             "CALLBACK_ACCOUNT_TYPE_MISMATCH",
             None,

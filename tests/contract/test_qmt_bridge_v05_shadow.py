@@ -211,6 +211,36 @@ def test_v05_rejects_cross_type_callback_from_selected_oms_stream(tmp_path, monk
     monkeypatch.setenv("BIGQMT_SPOOL_DIR", str(tmp_path))
     bridge = load_bridge()
     bridge._set_account_state("SECRET_ACCOUNT", "STOCK")
+    linked_account = account_obj()
+    linked_account.m_strAccountID = "SECRET_ACCOUNT"
+    linked_account.m_nBrokerType = 7
+
+    bridge.account_callback(None, linked_account)
+
+    events = event_frames(tmp_path)
+    assert not [event for event in events if event["event_type"] == "account"]
+    errors = [event for event in events if event["event_type"] == "bridge_error"]
+    assert errors[-1]["payload"]["code"] == "CALLBACK_ACCOUNT_TYPE_MISMATCH"
+
+
+def test_v05_suppresses_detected_linked_account_callback_without_oms_misrouting(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("BIGQMT_SPOOL_DIR", str(tmp_path))
+    bridge = load_bridge()
+    bridge._set_account_state("SECRET_ACCOUNT", "STOCK")
+
+    def query(account_id, account_type, data_type):
+        if data_type == "position":
+            return []
+        if account_type not in {"STOCK", "HUGANGTONG"}:
+            return []
+        row = account_obj()
+        row.m_strAccountID = account_id
+        row.m_nBrokerType = {"STOCK": 2, "HUGANGTONG": 7}[account_type]
+        return [row]
+
+    bridge.read_account_capabilities(query_fn=query, emit=False)
     position = Obj()
     position.m_strAccountID = "SECRET_ACCOUNT"
     position.m_nBrokerType = 7
@@ -221,8 +251,8 @@ def test_v05_rejects_cross_type_callback_from_selected_oms_stream(tmp_path, monk
 
     events = event_frames(tmp_path)
     assert not [event for event in events if event["event_type"] == "position"]
-    errors = [event for event in events if event["event_type"] == "bridge_error"]
-    assert errors[-1]["payload"]["code"] == "CALLBACK_ACCOUNT_TYPE_MISMATCH"
+    assert not [event for event in events if event["event_type"] == "bridge_error"]
+    assert bridge._STATE.linked_account_callbacks_suppressed == 1
 
 
 def test_v05_shadow_submit_claims_processes_and_emits_result(tmp_path, monkeypatch):

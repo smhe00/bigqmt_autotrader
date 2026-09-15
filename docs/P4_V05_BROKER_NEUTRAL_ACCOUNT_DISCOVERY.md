@@ -59,11 +59,14 @@ identity, risk policy, broker evidence mapping, or OMS authority.
 
 ## Callback boundary
 
-The current OMS callback stream remains single-account. When a callback exposes
-an account ID or numeric broker type that conflicts with the selected account,
-V05 emits a bridge error and refuses to place that callback in the selected
-account stream. Automatic cross-account ORDER/DEAL routing remains disabled
-until callback identity has been calibrated on each target terminal.
+The current OMS callback stream remains single-account. A callback for a
+non-selected account type that was positively detected during the current
+bridge session is suppressed and counted; it is already represented by the
+read-only `account_capabilities` projection and must never be misrouted into the
+selected OMS account. An account-ID mismatch or a numeric broker type not seen
+by runtime discovery still emits a bridge error and fails closed. Automatic
+cross-account ORDER/DEAL routing remains disabled until callback identity has
+been calibrated on each target terminal.
 
 ## Safety boundary
 
@@ -73,3 +76,19 @@ until callback identity has been calibrated on each target terminal.
 - discovered account types never become trading allowlist entries
 - no real broker mutation API is added
 - SHADOW command semantics are unchanged
+
+## Galaxy runtime calibration (2026-09-16)
+
+Galaxy QMT 2.1.26.1 session `5f675ce73bfe4ee39c67303b5ea7291a`
+provided broker-neutral startup evidence for `STOCK`, `HUGANGTONG`, and
+`SHENGANGTONG`. All three account records and their positions were observed;
+the other four standard candidates remained `UNCONFIRMED`. Host accepted both
+`account_capabilities` events and both selected-account snapshots, retained
+seven candidate records in the linked-account view, reached
+`read_model_healthy=true`, and reported zero transport or semantic quarantine.
+
+The same run showed that Galaxy broadcasts periodic ACCOUNT callbacks for both
+linked Stock Connect types to a model bound to STOCK. Build
+`p4-shadow-command-spool-3` suppresses these positively detected non-selected
+callbacks from the selected OMS stream and counts them for diagnostics. Unknown
+types and account-ID mismatches continue to fail closed.

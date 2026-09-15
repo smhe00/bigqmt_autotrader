@@ -8,7 +8,7 @@ Updated: 2026-09-16
 | Host Python baseline | **CPython 3.12** |
 | QMT-side syntax target | **Built-in Python 3.6 compatible** |
 | Observed Guojin QMT runtime | **CPython 3.6.8 / QMT 2.1.19.0** |
-| Observed Galaxy QMT terminal | **QMT 2.1.26.1; V05 broker-neutral discovery runtime calibration pending** |
+| Observed Galaxy QMT terminal | **QMT 2.1.26.1; V05 discovered STOCK / HUGANGTONG / SHENGANGTONG; linked callback suppression fix pending redeploy** |
 | P0 / G0 | **PASS** |
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
@@ -28,11 +28,15 @@ ACCOUNT/POSITION observations are transported in `account_capabilities` and
 retained by Host in a separate read-only view. Missing, `None`, mismatched and
 exception results remain `UNCONFIRMED` or `DEGRADED`; they are never interpreted
 as empty accounts. The selected OMS account identity and SHADOW command boundary
-remain unchanged, and cross-type callbacks fail closed.
+remain unchanged. Positively detected non-selected account callbacks are
+suppressed from the single-account OMS stream; unknown types still fail closed.
 
-Code/tests: **PASS**. Real-terminal calibration of the new V05 discovery event
-is still required on both Galaxy and Guojin before this capability is promoted
-from code gate to deployment gate.
+Galaxy discovery: **PASS** for startup ACCOUNT/POSITION probing of `STOCK`,
+`HUGANGTONG`, and `SHENGANGTONG`. The terminal also demonstrated that linked
+ACCOUNT callbacks are delivered to the selected STOCK model instance; the
+bridge now suppresses and counts those known linked callbacks without routing
+them into the selected OMS stream. Redeployment verification and Guojin
+calibration remain required before promotion from code gate to deployment gate.
 
 ## P3 read plane
 
@@ -72,7 +76,7 @@ V05 deployment calibration additionally proved:
 
 Bridge: `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py`
 
-Build: `p4-shadow-command-spool-1`
+Build: `p4-shadow-command-spool-3`
 
 Safety state:
 
@@ -144,7 +148,7 @@ QMT command results are durably journaled in OMS schema v5. Duplicate/conflictin
 
 | Verification | State |
 | --- | --- |
-| Latest verified Python suite | **197 passed on Python 3.12** |
+| Latest verified Python suite | **207 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | Broker mutation-call static audit | **PASS** |
 | FSM implementation/formal conformance | **PASS** |
