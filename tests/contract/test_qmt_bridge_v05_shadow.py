@@ -147,6 +147,17 @@ def test_v05_registers_one_second_command_and_five_minute_snapshot_timers(tmp_pa
     assert bridge.capabilities()["linked_account_discovery"] == "read_only_runtime_probe"
 
 
+def test_v05_resolves_broker_neutral_instance_spool_namespace(tmp_path, monkeypatch):
+    monkeypatch.delenv("BIGQMT_SPOOL_DIR", raising=False)
+    monkeypatch.setenv("BIGQMT_SPOOL_BASE", str(tmp_path))
+    monkeypatch.setenv("BIGQMT_INSTANCE_ID", "galaxy")
+    bridge = load_bridge()
+
+    assert bridge._spool_root() == str((tmp_path / "galaxy").resolve())
+    assert bridge._spool_dir_source() == "instance_environment"
+    assert bridge.capabilities()["spool_instance_id"] == "galaxy"
+
+
 def test_v05_discovers_linked_accounts_by_runtime_evidence_not_broker_name(tmp_path, monkeypatch):
     monkeypatch.setenv("BIGQMT_SPOOL_DIR", str(tmp_path))
     bridge = load_bridge()

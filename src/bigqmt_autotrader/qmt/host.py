@@ -173,6 +173,8 @@ def _spool_dir_source(explicit_cli: str | None) -> str:
         return "cli"
     if os.environ.get("BIGQMT_SPOOL_DIR"):
         return "environment"
+    if os.environ.get("BIGQMT_SPOOL_BASE") or os.environ.get("BIGQMT_INSTANCE_ID"):
+        return "instance_environment"
     return "temp"
 
 

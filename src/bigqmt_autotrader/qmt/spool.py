@@ -13,12 +13,29 @@ from .receiver import IngressResult, QmtIngressBuffer, QmtIngressIdentityError
 
 
 DEFAULT_SPOOL_DIRNAME = "bigqmt_autotrader_spool"
+SPOOL_BASE_ENV = "BIGQMT_SPOOL_BASE"
+INSTANCE_ID_ENV = "BIGQMT_INSTANCE_ID"
+
+
+def _valid_instance_id(value: str | None) -> bool:
+    if not value or len(value) > 32:
+        return False
+    allowed = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_-")
+    return value == value.lower() and all(char in allowed for char in value)
 
 
 def default_spool_root() -> Path:
     explicit = os.environ.get("BIGQMT_SPOOL_DIR")
     if explicit:
         return Path(explicit)
+    spool_base = os.environ.get(SPOOL_BASE_ENV)
+    instance_id = os.environ.get(INSTANCE_ID_ENV)
+    if bool(spool_base) != bool(instance_id):
+        raise ValueError(f"{SPOOL_BASE_ENV} and {INSTANCE_ID_ENV} must be configured together")
+    if spool_base and instance_id:
+        if not _valid_instance_id(instance_id):
+            raise ValueError("invalid BIGQMT_INSTANCE_ID")
+        return Path(spool_base) / instance_id
     return Path(tempfile.gettempdir()) / DEFAULT_SPOOL_DIRNAME
 
 

@@ -131,7 +131,7 @@ Safe read-only timer test:
 
 ```powershell
 python -m bigqmt_autotrader.qmt.shadow_probe `
-  --spool-dir D:\BigQMTData\spool `
+  --spool-dir D:\BigQMTData\spool\galaxy `
   --account-fingerprint <sha256:...> `
   snapshot
 ```
@@ -140,7 +140,7 @@ Safe shadow order transport test:
 
 ```powershell
 python -m bigqmt_autotrader.qmt.shadow_probe `
-  --spool-dir D:\BigQMTData\spool `
+  --spool-dir D:\BigQMTData\spool\galaxy `
   --account-fingerprint <sha256:...> `
   submit `
   --client-order-id p4-shadow-001 `

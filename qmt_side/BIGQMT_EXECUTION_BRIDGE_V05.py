@@ -25,7 +25,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p4-shadow-command-spool-3"
+BRIDGE_BUILD = "p4-shadow-command-spool-4"
 TRADING_ENABLED = False
 READ_ONLY_ENABLED = True
 EXECUTION_MODE = "SHADOW"
@@ -59,6 +59,8 @@ COMMAND_MAX_FRAME_BYTES = 64 * 1024
 TRANSPORT_FLUSH_BATCH = 64
 COMMAND_BATCH = 16
 SPOOL_DIRNAME = "bigqmt_autotrader_spool"
+SPOOL_BASE_ENV = "BIGQMT_SPOOL_BASE"
+INSTANCE_ID_ENV = "BIGQMT_INSTANCE_ID"
 COMMAND_TYPES = ("SUBMIT_LIMIT", "CANCEL_ORDER", "REQUEST_SNAPSHOT")
 
 
@@ -119,6 +121,8 @@ _STATE = _RuntimeState()
 def _spool_dir_source():
     if os.environ.get("BIGQMT_SPOOL_DIR"):
         return "environment"
+    if os.environ.get(SPOOL_BASE_ENV) or os.environ.get(INSTANCE_ID_ENV):
+        return "instance_environment"
     if os.environ.get("TEMP") or os.environ.get("TMP"):
         return "temp"
     return "cwd"
@@ -129,11 +133,35 @@ def _spool_root():
     if explicit:
         base = os.path.expanduser(explicit)
     else:
-        base = os.environ.get("TEMP") or os.environ.get("TMP")
-        if not base:
-            base = os.getcwd()
-        base = os.path.join(base, SPOOL_DIRNAME)
+        spool_base = os.environ.get(SPOOL_BASE_ENV)
+        instance_id = os.environ.get(INSTANCE_ID_ENV)
+        if bool(spool_base) != bool(instance_id):
+            raise TransportError(
+                "%s and %s must be configured together" % (SPOOL_BASE_ENV, INSTANCE_ID_ENV)
+            )
+        if spool_base and instance_id:
+            if not _valid_instance_id(instance_id):
+                raise TransportError("invalid BIGQMT_INSTANCE_ID")
+            base = os.path.join(os.path.expanduser(spool_base), instance_id)
+        else:
+            base = os.environ.get("TEMP") or os.environ.get("TMP")
+            if not base:
+                base = os.getcwd()
+            base = os.path.join(base, SPOOL_DIRNAME)
     return os.path.abspath(os.path.normpath(base))
+
+
+def _valid_instance_id(value):
+    value = _text(value)
+    if not value or len(value) > 32:
+        return False
+    allowed = "abcdefghijklmnopqrstuvwxyz0123456789_-"
+    return value == value.lower() and all(char in allowed for char in value)
+
+
+def _spool_instance_id():
+    value = os.environ.get(INSTANCE_ID_ENV)
+    return value if _valid_instance_id(value) else None
 
 
 def _spool_inbox():
@@ -198,6 +226,8 @@ def capabilities():
         "query_types": list(QUERY_TYPES),
         "account_type_probe_candidates": list(STANDARD_ACCOUNT_TYPES),
         "linked_account_discovery": "read_only_runtime_probe",
+        "spool_isolation": "explicit_root_or_instance_namespace",
+        "spool_instance_id": _spool_instance_id(),
         "callbacks": ["account", "position", "order", "deal"],
         "transport": "file_spool_atomic_rename",
         "command_transport": "file_spool_atomic_claim",

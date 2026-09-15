@@ -89,6 +89,6 @@ seven candidate records in the linked-account view, reached
 
 The same run showed that Galaxy broadcasts periodic ACCOUNT callbacks for both
 linked Stock Connect types to a model bound to STOCK. Build
-`p4-shadow-command-spool-3` suppresses these positively detected non-selected
+`p4-shadow-command-spool-4` suppresses these positively detected non-selected
 callbacks from the selected OMS stream and counts them for diagnostics. Unknown
 types and account-ID mismatches continue to fail closed.

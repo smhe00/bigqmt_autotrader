@@ -42,7 +42,7 @@ Read-only report command:
 
 ```powershell
 python -m bigqmt_autotrader.qmt.calibration_probe `
-  --spool-dir D:\BigQMTData\spool `
+  --spool-dir D:\BigQMTData\spool\galaxy `
   --expected-account-fingerprint <sha256:...> `
   --client-order-id <known-durable-client-order-id>
 ```

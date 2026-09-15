@@ -38,11 +38,20 @@ bridge now suppresses and counts those known linked callbacks without routing
 them into the selected OMS stream. Redeployment verification and Guojin
 calibration remain required before promotion from code gate to deployment gate.
 
+## Multi-terminal spool isolation
+
+Galaxy and Guojin no longer share a spool root. Deployment uses independent
+`D:\BigQMTData\spool\galaxy` and `D:\BigQMTData\spool\guojin` namespaces, with
+one fingerprint-pinned Host consumer per leaf. V05 supports the broker-neutral
+`BIGQMT_SPOOL_BASE` + `BIGQMT_INSTANCE_ID` pair; `BIGQMT_SPOOL_DIR` remains an
+exact-path override. This isolation changes transport routing only and grants no
+trading authority.
+
 ## P3 read plane
 
 | Capability | State |
 | --- | --- |
-| Fixed spool root | **PASS — `D:\BigQMTData\spool`** |
+| Isolated spool roots | **PASS — `D:\BigQMTData\spool\galaxy` and `D:\BigQMTData\spool\guojin`** |
 | ACCOUNT/POSITION/ORDER/DEAL active query | **PASS at query/schema level — calibrated snapshot: 1 / 8 / 1 / 2 rows, `query_errors=[]`** |
 | Callback subscription | **PASS — `ContextInfo.set_account(account)`** |
 | ACCOUNT callback | **PASS** |
@@ -76,7 +85,7 @@ V05 deployment calibration additionally proved:
 
 Bridge: `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py`
 
-Build: `p4-shadow-command-spool-3`
+Build: `p4-shadow-command-spool-4`
 
 Safety state:
 
@@ -148,7 +157,7 @@ QMT command results are durably journaled in OMS schema v5. Duplicate/conflictin
 
 | Verification | State |
 | --- | --- |
-| Latest verified Python suite | **207 passed on Python 3.12** |
+| Latest verified Python suite | **214 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | Broker mutation-call static audit | **PASS** |
 | FSM implementation/formal conformance | **PASS** |
