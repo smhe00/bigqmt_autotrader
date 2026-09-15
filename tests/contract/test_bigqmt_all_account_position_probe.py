@@ -97,4 +97,3 @@ def test_none_and_exception_are_not_reported_as_empty_positions():
     assert hgt["error_code"] == "POSITION_QUERY_RETURNED_NONE"
     assert sgt["status"] == "QUERY_FAILED"
     assert sgt["error_type"] == "RuntimeError"
-

@@ -158,4 +158,3 @@ def handlebar(ContextInfo):
 
 if globals().get("account") and callable(globals().get("get_trade_detail_data")):
     run_once()
-
