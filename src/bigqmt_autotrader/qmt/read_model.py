@@ -32,6 +32,7 @@ class QmtReadModel:
     def __init__(self) -> None:
         self._view: QmtSnapshotView | None = None
         self._needs_resync = True
+        self._linked_accounts: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def view(self) -> QmtSnapshotView | None:
@@ -41,9 +42,31 @@ class QmtReadModel:
     def healthy(self) -> bool:
         return self._view is not None and self._view.healthy and not self._needs_resync
 
+    @property
+    def linked_accounts(self) -> tuple[Mapping[str, Any], ...]:
+        """Latest broker-agnostic read-only account capability observations."""
+        return self._linked_accounts
+
     def apply(self, result: IngressResult) -> QmtSnapshotView | None:
         event = result.event
         self._needs_resync = result.needs_resync
+
+        if event.event_type == "account_capabilities":
+            self._linked_accounts = tuple(
+                {
+                    **dict(record),
+                    "account": [dict(row) for row in record["account"]],
+                    "positions": [dict(row) for row in record["positions"]],
+                    "query_errors": [dict(row) for row in record["query_errors"]],
+                }
+                for record in event.payload["accounts"]
+            )
+            if self._view is not None:
+                self._view = self._replace(
+                    sequence=event.sequence,
+                    timestamp_ms=event.timestamp_ms,
+                )
+            return self._view
 
         if event.event_type == "snapshot":
             self._view = self._from_snapshot(event, healthy=not result.needs_resync)

@@ -1,6 +1,6 @@
 # Project Status
 
-Updated: 2026-09-15
+Updated: 2026-09-16
 
 | Item | State |
 | --- | --- |
@@ -8,6 +8,7 @@ Updated: 2026-09-15
 | Host Python baseline | **CPython 3.12** |
 | QMT-side syntax target | **Built-in Python 3.6 compatible** |
 | Observed Guojin QMT runtime | **CPython 3.6.8 / QMT 2.1.19.0** |
+| Observed Galaxy QMT terminal | **QMT 2.1.26.1; V05 broker-neutral discovery runtime calibration pending** |
 | P0 / G0 | **PASS** |
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
@@ -18,6 +19,20 @@ Updated: 2026-09-15
 | Real QMT submit implemented | **NO** |
 | Real QMT cancel implemented | **NO** |
 | P2 execution-authority policy | **SIMULATION only** |
+
+## Broker-neutral account discovery
+
+V05 now probes the standard QMT account-type namespace at runtime instead of
+selecting a Galaxy- or Guojin-specific profile. Confirmed linked-account
+ACCOUNT/POSITION observations are transported in `account_capabilities` and
+retained by Host in a separate read-only view. Missing, `None`, mismatched and
+exception results remain `UNCONFIRMED` or `DEGRADED`; they are never interpreted
+as empty accounts. The selected OMS account identity and SHADOW command boundary
+remain unchanged, and cross-type callbacks fail closed.
+
+Code/tests: **PASS**. Real-terminal calibration of the new V05 discovery event
+is still required on both Galaxy and Guojin before this capability is promoted
+from code gate to deployment gate.
 
 ## P3 read plane
 

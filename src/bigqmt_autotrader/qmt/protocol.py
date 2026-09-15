@@ -22,6 +22,7 @@ _ALLOWED_EVENT_TYPES = frozenset(
         "bridge_ready",
         "bridge_error",
         "command_result",
+        "account_capabilities",
     }
 )
 
@@ -95,6 +96,8 @@ class QmtEvent:
             _validate_snapshot_payload(payload)
         elif event_type == "command_result":
             _validate_command_result_payload(payload)
+        elif event_type == "account_capabilities":
+            _validate_account_capabilities_payload(payload)
 
         return cls(
             protocol_version=protocol_version,
@@ -118,6 +121,47 @@ def _validate_snapshot_payload(payload: Mapping[str, Any]) -> None:
     for key in ("account", "positions", "orders", "deals"):
         if any(not isinstance(row, Mapping) for row in payload[key]):
             raise QmtProtocolError(f"snapshot {key} rows must be objects")
+
+
+def _validate_account_capabilities_payload(payload: Mapping[str, Any]) -> None:
+    selected = payload.get("selected_account_type")
+    detected = payload.get("detected_account_types")
+    accounts = payload.get("accounts")
+    if not isinstance(selected, str) or not selected:
+        raise QmtProtocolError("account_capabilities selected_account_type must be non-empty")
+    if not isinstance(detected, list) or any(
+        not isinstance(item, str) or not item for item in detected
+    ):
+        raise QmtProtocolError("account_capabilities detected_account_types must be strings")
+    if len(set(detected)) != len(detected):
+        raise QmtProtocolError("account_capabilities detected_account_types must be unique")
+    if not isinstance(accounts, list) or not accounts:
+        raise QmtProtocolError("account_capabilities accounts must be a non-empty list")
+    seen_types: set[str] = set()
+    observed_detected: list[str] = []
+    for record in accounts:
+        if not isinstance(record, Mapping):
+            raise QmtProtocolError("account_capabilities account record must be an object")
+        account_type = record.get("account_type")
+        fingerprint = record.get("account_fingerprint")
+        status = record.get("status")
+        if not isinstance(account_type, str) or not account_type or account_type in seen_types:
+            raise QmtProtocolError("account_capabilities account_type must be unique")
+        seen_types.add(account_type)
+        if not isinstance(fingerprint, str) or not _ACCOUNT_FINGERPRINT_RE.fullmatch(fingerprint):
+            raise QmtProtocolError("account_capabilities invalid account_fingerprint")
+        if status not in {"DETECTED", "DEGRADED", "UNCONFIRMED"}:
+            raise QmtProtocolError("account_capabilities invalid status")
+        for key in ("account", "positions", "query_errors"):
+            rows = record.get(key)
+            if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
+                raise QmtProtocolError(f"account_capabilities {key} must contain objects")
+        if status in {"DETECTED", "DEGRADED"}:
+            observed_detected.append(account_type)
+    if detected != observed_detected:
+        raise QmtProtocolError("account_capabilities detected types do not match records")
+    if payload.get("live_submit") is not False or payload.get("live_cancel") is not False:
+        raise QmtProtocolError("account_capabilities cannot grant live trading authority")
 
 
 def _validate_command_result_payload(payload: Mapping[str, Any]) -> None:

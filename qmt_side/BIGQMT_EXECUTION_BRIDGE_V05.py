@@ -25,7 +25,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p4-shadow-command-spool-1"
+BRIDGE_BUILD = "p4-shadow-command-spool-2"
 TRADING_ENABLED = False
 READ_ONLY_ENABLED = True
 EXECUTION_MODE = "SHADOW"
@@ -36,6 +36,24 @@ SNAPSHOT_TIMER_PERIOD = "300nSecond"
 TIMER_START = "2000-01-01 00:00:00"
 MAX_QUEUED_EVENTS = 512
 QUERY_TYPES = ("ACCOUNT", "POSITION", "ORDER", "DEAL")
+STANDARD_ACCOUNT_TYPES = (
+    "STOCK",
+    "CREDIT",
+    "FUTURE",
+    "FUTURE_OPTION",
+    "STOCK_OPTION",
+    "HUGANGTONG",
+    "SHENGANGTONG",
+)
+BROKER_TYPE_CODES = {
+    "FUTURE": 1,
+    "STOCK": 2,
+    "CREDIT": 3,
+    "FUTURE_OPTION": 5,
+    "STOCK_OPTION": 6,
+    "HUGANGTONG": 7,
+    "SHENGANGTONG": 11,
+}
 TRANSPORT_MAX_FRAME_BYTES = 1024 * 1024
 COMMAND_MAX_FRAME_BYTES = 64 * 1024
 TRANSPORT_FLUSH_BATCH = 64
@@ -176,12 +194,22 @@ def capabilities():
         "command_tick_period": COMMAND_TICK_PERIOD,
         "snapshot_timer_period": SNAPSHOT_TIMER_PERIOD,
         "query_types": list(QUERY_TYPES),
+        "account_type_probe_candidates": list(STANDARD_ACCOUNT_TYPES),
+        "linked_account_discovery": "read_only_runtime_probe",
         "callbacks": ["account", "position", "order", "deal"],
         "transport": "file_spool_atomic_rename",
         "command_transport": "file_spool_atomic_claim",
         "account_callback_dedup": True,
+        "callback_account_identity_guard": True,
         "account_callback_heartbeat_seconds": ACCOUNT_CALLBACK_HEARTBEAT_SECONDS,
-        "methods": ["ping", "capabilities", "read_snapshot", "drain_events", "flush_transport"],
+        "methods": [
+            "ping",
+            "capabilities",
+            "read_snapshot",
+            "read_account_capabilities",
+            "drain_events",
+            "flush_transport",
+        ],
     }
 
 
@@ -242,6 +270,11 @@ def _fingerprint(account_id, account_type):
         return None
     raw = (str(account_type or "") + ":" + str(account_id)).encode("utf-8")
     return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _account_type(value):
+    text = _text(value)
+    return text.upper() if text else None
 
 
 def _normalize_account(obj):
@@ -526,6 +559,125 @@ def read_snapshot(account_id=None, account_type=None, query_fn=None, emit=True):
     return snapshot
 
 
+def _account_probe_record(account_id, selected_account_type, candidate, query):
+    record = {
+        "account_type": candidate,
+        "account_fingerprint": _fingerprint(account_id, candidate),
+        "status": "UNCONFIRMED",
+        "account": [],
+        "positions": [],
+        "query_errors": [],
+    }
+    try:
+        account_rows = query(account_id, candidate, "account")
+    except Exception as exc:
+        record["query_errors"].append(
+            {"data_type": "ACCOUNT", "error_code": "QUERY_EXCEPTION", "error_type": type(exc).__name__}
+        )
+        return record
+    if account_rows is None:
+        record["query_errors"].append(
+            {"data_type": "ACCOUNT", "error_code": "QUERY_RETURNED_NONE"}
+        )
+        return record
+    account_rows = list(account_rows)
+    if not account_rows:
+        record["query_errors"].append(
+            {"data_type": "ACCOUNT", "error_code": "ACCOUNT_NOT_OBSERVED"}
+        )
+        return record
+
+    expected_code = BROKER_TYPE_CODES.get(candidate)
+    for row in account_rows:
+        row_account_id = _text(_get(row, "m_strAccountID"))
+        if row_account_id and row_account_id != _text(account_id):
+            record["query_errors"].append(
+                {"data_type": "ACCOUNT", "error_code": "ACCOUNT_ID_MISMATCH"}
+            )
+            return record
+        broker_type = _int_value(_get(row, "m_nBrokerType"))
+        if broker_type is None:
+            if candidate != selected_account_type:
+                record["query_errors"].append(
+                    {"data_type": "ACCOUNT", "error_code": "BROKER_TYPE_UNAVAILABLE"}
+                )
+                return record
+        elif expected_code is not None and broker_type != expected_code:
+            record["query_errors"].append(
+                {"data_type": "ACCOUNT", "error_code": "BROKER_TYPE_MISMATCH"}
+            )
+            return record
+
+    record["account"] = [_normalize_account(row) for row in account_rows]
+    record["status"] = "DETECTED"
+    try:
+        position_rows = query(account_id, candidate, "position")
+    except Exception as exc:
+        record["status"] = "DEGRADED"
+        record["query_errors"].append(
+            {"data_type": "POSITION", "error_code": "QUERY_EXCEPTION", "error_type": type(exc).__name__}
+        )
+        return record
+    if position_rows is None:
+        record["status"] = "DEGRADED"
+        record["query_errors"].append(
+            {"data_type": "POSITION", "error_code": "QUERY_RETURNED_NONE"}
+        )
+        return record
+    record["positions"] = [_normalize_position(row) for row in list(position_rows)]
+    return record
+
+
+def read_account_capabilities(account_id=None, selected_account_type=None, query_fn=None, emit=True):
+    """Probe standard QMT account types without identifying a broker vendor."""
+    account_id = account_id if account_id is not None else _STATE.account_id
+    selected_account_type = (
+        selected_account_type if selected_account_type is not None else _STATE.account_type
+    )
+    selected_account_type = _account_type(selected_account_type)
+    if not account_id or not selected_account_type:
+        raise ReadOnlyBridgeError("QMT account binding is unavailable")
+    query = _resolve_query_fn(query_fn)
+    candidates = list(STANDARD_ACCOUNT_TYPES)
+    if selected_account_type not in candidates:
+        candidates.insert(0, selected_account_type)
+    records = [
+        _account_probe_record(account_id, selected_account_type, candidate, query)
+        for candidate in candidates
+    ]
+    detected = [
+        record["account_type"]
+        for record in records
+        if record["status"] in ("DETECTED", "DEGRADED")
+    ]
+    payload = {
+        "selected_account_type": selected_account_type,
+        "detected_account_types": detected,
+        "accounts": records,
+        "live_submit": False,
+        "live_cancel": False,
+    }
+    if emit:
+        _enqueue("account_capabilities", "active_query", payload)
+        _safe_log(
+            "account_capabilities",
+            {
+                "selected_account_type": selected_account_type,
+                "detected_account_types": detected,
+                "probe_count": len(records),
+                "degraded_count": len(
+                    [record for record in records if record["status"] == "DEGRADED"]
+                ),
+                "unconfirmed_count": len(
+                    [record for record in records if record["status"] == "UNCONFIRMED"]
+                ),
+                "live_submit": False,
+                "live_cancel": False,
+            },
+        )
+    return payload
+
+
 def _set_account_state(account_id, account_type):
     _STATE.account_id = account_id
     _STATE.account_type = account_type
@@ -711,6 +863,7 @@ def _process_claimed(claimed_path, name):
     command_type = command.get("command_type")
     if command_type == "REQUEST_SNAPSHOT":
         try:
+            read_account_capabilities()
             read_snapshot()
             flush_transport()
             result_status = "SNAPSHOT_EMITTED"
@@ -774,6 +927,7 @@ def after_init(ContextInfo):
     if not _STATE.initialized and not _bind_runtime(ContextInfo):
         return
     try:
+        read_account_capabilities()
         read_snapshot()
         flush_transport()
     except Exception as exc:
@@ -797,6 +951,7 @@ def periodic_snapshot_timer(ContextInfo):
     if not _STATE.initialized and not _bind_runtime(ContextInfo):
         return
     try:
+        read_account_capabilities()
         read_snapshot()
         flush_transport()
     except Exception as exc:
@@ -817,7 +972,34 @@ def _callback_event(event_type, payload, log_extra=None):
     flush_transport()
 
 
+def _callback_matches_selected_account(event_type, obj):
+    observed_account_id = _text(_get(obj, "m_strAccountID"))
+    if observed_account_id and observed_account_id != _text(_STATE.account_id):
+        _runtime_error(
+            "CALLBACK_ACCOUNT_ID_MISMATCH",
+            None,
+            {"event_type": event_type},
+        )
+        return False
+    observed_broker_type = _int_value(_get(obj, "m_nBrokerType"))
+    expected_broker_type = BROKER_TYPE_CODES.get(_account_type(_STATE.account_type))
+    if (
+        observed_broker_type is not None
+        and expected_broker_type is not None
+        and observed_broker_type != expected_broker_type
+    ):
+        _runtime_error(
+            "CALLBACK_ACCOUNT_TYPE_MISMATCH",
+            None,
+            {"event_type": event_type, "observed_broker_type": observed_broker_type},
+        )
+        return False
+    return True
+
+
 def account_callback(ContextInfo, accountInfo):
+    if not _callback_matches_selected_account("account", accountInfo):
+        return
     payload = _normalize_account(accountInfo)
     now = time.monotonic()
     digest = _payload_digest(payload)
@@ -851,14 +1033,20 @@ def account_callback(ContextInfo, accountInfo):
 
 
 def position_callback(ContextInfo, positionInfo):
+    if not _callback_matches_selected_account("position", positionInfo):
+        return
     _callback_event("position", _normalize_position(positionInfo))
 
 
 def order_callback(ContextInfo, orderInfo):
+    if not _callback_matches_selected_account("order", orderInfo):
+        return
     _callback_event("order", _normalize_order(orderInfo))
 
 
 def deal_callback(ContextInfo, dealInfo):
+    if not _callback_matches_selected_account("deal", dealInfo):
+        return
     _callback_event("deal", _normalize_deal(dealInfo))
 
 

@@ -96,6 +96,24 @@ def _event_summary(result: IngressResult, ingestion: QmtHostIngestion) -> dict[s
                 "price": event.payload.get("price"),
             }
         )
+    elif event.event_type == "account_capabilities":
+        records = event.payload.get("accounts", [])
+        payload.update(
+            {
+                "selected_account_type": event.payload.get("selected_account_type"),
+                "detected_account_types": event.payload.get("detected_account_types", []),
+                "account_probe_count": len(records),
+                "detected_account_count": sum(
+                    1 for record in records if record.get("status") == "DETECTED"
+                ),
+                "degraded_account_count": sum(
+                    1 for record in records if record.get("status") == "DEGRADED"
+                ),
+                "unconfirmed_account_count": sum(
+                    1 for record in records if record.get("status") == "UNCONFIRMED"
+                ),
+            }
+        )
     return payload
 
 
@@ -108,7 +126,15 @@ def _should_log_event(
     event_type = result.event.event_type
     if result.needs_resync or quarantined:
         return True
-    if event_type in {"bridge_ready", "bridge_error", "snapshot", "order", "deal", "command_result"}:
+    if event_type in {
+        "bridge_ready",
+        "bridge_error",
+        "snapshot",
+        "account_capabilities",
+        "order",
+        "deal",
+        "command_result",
+    }:
         return True
     if event_type == "account" and not deduplicated:
         return True
@@ -159,6 +185,8 @@ def _status_summary_payload(
     return {
         "events_seen": stats["events_seen"],
         "snapshots_seen": stats["snapshots_seen"],
+        "account_capabilities_seen": stats.get("account_capabilities_seen", 0),
+        "linked_accounts_observed": len(ingestion.read_model.linked_accounts),
         "account_events_seen": stats["account_events_seen"],
         "account_events_deduplicated": stats["account_events_deduplicated"],
         "position_events_seen": stats["position_events_seen"],
@@ -239,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     stats = {
         "events_seen": 0,
         "snapshots_seen": 0,
+        "account_capabilities_seen": 0,
         "account_events_seen": 0,
         "account_events_deduplicated": 0,
         "position_events_seen": 0,
@@ -255,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
         stats["events_seen"] += 1
         if event_type == "snapshot":
             stats["snapshots_seen"] += 1
+        elif event_type == "account_capabilities":
+            stats["account_capabilities_seen"] += 1
         elif event_type == "account":
             stats["account_events_seen"] += 1
             if ingest_result.deduplicated:

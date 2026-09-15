@@ -144,6 +144,85 @@ def test_v05_registers_one_second_command_and_five_minute_snapshot_timers(tmp_pa
     assert bridge.TRADING_ENABLED is False
     assert bridge.capabilities()["live_submit"] is False
     assert bridge.capabilities()["live_cancel"] is False
+    assert bridge.capabilities()["linked_account_discovery"] == "read_only_runtime_probe"
+
+
+def test_v05_discovers_linked_accounts_by_runtime_evidence_not_broker_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("BIGQMT_SPOOL_DIR", str(tmp_path))
+    bridge = load_bridge()
+    bridge._set_account_state("SECRET_ACCOUNT", "STOCK")
+
+    account_codes = {"STOCK": 2, "HUGANGTONG": 7, "SHENGANGTONG": 11}
+
+    def query(account_id, account_type, data_type):
+        assert account_id == "SECRET_ACCOUNT"
+        if account_type not in account_codes:
+            return []
+        if data_type == "account":
+            row = account_obj()
+            row.m_strAccountID = account_id
+            row.m_nBrokerType = account_codes[account_type]
+            return [row]
+        if data_type == "position":
+            position = Obj()
+            position.m_strInstrumentID = "00700"
+            position.m_strExchangeID = "HGT" if account_type == "HUGANGTONG" else "SGT"
+            position.m_nVolume = account_codes[account_type]
+            return [position]
+        raise AssertionError(data_type)
+
+    payload = bridge.read_account_capabilities(query_fn=query)
+
+    assert payload["detected_account_types"] == ["STOCK", "HUGANGTONG", "SHENGANGTONG"]
+    assert payload["live_submit"] is False
+    assert payload["live_cancel"] is False
+    records = {record["account_type"]: record for record in payload["accounts"]}
+    assert records["STOCK"]["status"] == "DETECTED"
+    assert records["HUGANGTONG"]["positions"][0]["symbol"] == "00700.HGT"
+    assert records["SHENGANGTONG"]["positions"][0]["symbol"] == "00700.SGT"
+    assert records["CREDIT"]["status"] == "UNCONFIRMED"
+    assert "SECRET_ACCOUNT" not in json.dumps(payload)
+
+
+def test_v05_does_not_treat_none_or_wrong_broker_type_as_discovered(monkeypatch, tmp_path):
+    monkeypatch.setenv("BIGQMT_SPOOL_DIR", str(tmp_path))
+    bridge = load_bridge()
+    bridge._set_account_state("SECRET_ACCOUNT", "STOCK")
+
+    def query(account_id, account_type, data_type):
+        if data_type != "account":
+            return []
+        if account_type == "STOCK":
+            return None
+        row = account_obj()
+        row.m_strAccountID = account_id
+        row.m_nBrokerType = 2
+        return [row]
+
+    payload = bridge.read_account_capabilities(query_fn=query, emit=False)
+
+    assert payload["detected_account_types"] == []
+    records = {record["account_type"]: record for record in payload["accounts"]}
+    assert records["STOCK"]["query_errors"][0]["error_code"] == "QUERY_RETURNED_NONE"
+    assert records["HUGANGTONG"]["query_errors"][0]["error_code"] == "BROKER_TYPE_MISMATCH"
+
+
+def test_v05_rejects_cross_type_callback_from_selected_oms_stream(tmp_path, monkeypatch):
+    monkeypatch.setenv("BIGQMT_SPOOL_DIR", str(tmp_path))
+    bridge = load_bridge()
+    bridge._set_account_state("SECRET_ACCOUNT", "STOCK")
+    position = Obj()
+    position.m_strAccountID = "SECRET_ACCOUNT"
+    position.m_nBrokerType = 7
+    position.m_strInstrumentID = "00700"
+    position.m_strExchangeID = "HGT"
+
+    bridge.position_callback(None, position)
+
+    events = event_frames(tmp_path)
+    assert not [event for event in events if event["event_type"] == "position"]
+    errors = [event for event in events if event["event_type"] == "bridge_error"]
+    assert errors[-1]["payload"]["code"] == "CALLBACK_ACCOUNT_TYPE_MISMATCH"
 
 
 def test_v05_shadow_submit_claims_processes_and_emits_result(tmp_path, monkeypatch):
