@@ -418,3 +418,29 @@ BROKER_MUTATION_UNKNOWN
 6. production `galaxy/guojin` mutation call surface 仍为零，除非未来经过独立、明确的生产授权 Gate。
 
 当前 API v1 **不授予 LIVE_CANARY 或生产实盘权限**。
+
+## 13. 与 Broker Evidence Contract v1 的分层关系
+
+Bridge API v1 的职责截止在“可信地传递 raw broker observation 与 control-plane result”。它**不定义**某个原始 QMT 状态码应该成为哪个 OMS lifecycle 状态。
+
+该语义由独立的 [`BROKER_EVIDENCE_CONTRACT_V1_ZH.md`](BROKER_EVIDENCE_CONTRACT_V1_ZH.md) 冻结：
+
+```text
+BigQMT Bridge API v1
+    ↓ ORDER / DEAL / active query observation
+broker-specific calibrated mapper
+    ↓
+Broker Evidence Contract v1
+    ↓
+EvidenceReplay
+    ↓
+OMS FSM
+```
+
+因此：
+
+- `Bridge API v1` 证明 transport/session/identity/control-plane 边界；
+- `Broker Evidence Contract v1` 证明哪些 broker facts 有资格推进 OMS，以及如何做单调聚合和 terminal-conflict fail-close；
+- broker-specific mapper 只能实现这两个协议之间的适配，不能自行创造新的 OMS 语义。
+
+任何将 `command_result`、submit/cancel API return、未知 raw status 或 identity mismatch 提升为 `BrokerEvidence` 的变更，同时违反两个 v1 contract，必须拒绝进入生产 Gate。
