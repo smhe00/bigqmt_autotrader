@@ -33,6 +33,8 @@ jobs:
         run: python tools/verify_bridge_protocol_exhaustive.py
       - name: Bridge Schema / implementation drift
         run: python tools/verify_bridge_schema_contract.py
+      - name: Broker Evidence contract / schema conformance
+        run: python tools/verify_broker_evidence_contract.py
       - name: Audit broker side-effect call surface
         run: python tools/audit_side_effect_calls.py
       - name: Verify standalone QMT deployment files
@@ -86,3 +88,7 @@ jobs:
         run: |
           cd formal
           java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config BrokerEvidenceBoundary.cfg BrokerEvidenceBoundary.tla
+      - name: TLC - Broker Evidence Contract v1
+        run: |
+          cd formal
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config BrokerEvidenceContract.cfg BrokerEvidenceContract.tla
