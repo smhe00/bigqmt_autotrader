@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bigqmt-autotrader.local/schemas/broker_evidence/v1/broker_evidence.schema.json",
+  "title": "BrokerEvidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evidence_version",
+    "source",
+    "source_kind",
+    "source_event_id",
+    "mapper_profile",
+    "semantic_digest",
+    "account_fingerprint",
+    "client_order_id",
+    "broker_token",
+    "broker_order_id",
+    "order_ref",
+    "trade_id",
+    "evidence_type",
+    "requested_status",
+    "filled_quantity",
+    "observed_at_ms",
+    "raw_payload_ref"
+  ],
+  "properties": {
+    "evidence_version": {"const": "1"},
+    "source": {"type": "string", "minLength": 1, "maxLength": 128},
+    "source_kind": {"enum": ["ORDER_CALLBACK", "DEAL_CALLBACK", "ACTIVE_ORDER_QUERY", "ACTIVE_DEAL_QUERY"]},
+    "source_event_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "mapper_profile": {"type": "string", "minLength": 1, "maxLength": 128},
+    "semantic_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "account_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "client_order_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "broker_token": {"type": ["string", "null"], "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "broker_order_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+    "order_ref": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+    "trade_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+    "evidence_type": {"enum": ["ORDER_ACCEPTED", "PARTIAL_FILL", "FULL_FILL", "ORDER_CANCELLED", "ORDER_REJECTED"]},
+    "requested_status": {"enum": ["ACKNOWLEDGED", "PARTIALLY_FILLED", "FILLED", "CANCELLED", "REJECTED"]},
+    "filled_quantity": {"type": "integer", "minimum": 0},
+    "observed_at_ms": {"type": "integer", "minimum": 1},
+    "raw_payload_ref": {"type": "string", "minLength": 1, "maxLength": 512},
+    "raw_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "order_status": {"type": ["string", "integer", "null"]},
+        "submit_status": {"type": ["string", "integer", "null"]}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"evidence_type": {"const": "ORDER_ACCEPTED"}}},
+      "then": {"properties": {"requested_status": {"const": "ACKNOWLEDGED"}, "filled_quantity": {"const": 0}, "broker_order_id": {"type": "string", "minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"evidence_type": {"const": "PARTIAL_FILL"}}},
+      "then": {"properties": {"requested_status": {"const": "PARTIALLY_FILLED"}, "filled_quantity": {"type": "integer", "minimum": 1}, "broker_order_id": {"type": "string", "minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"evidence_type": {"const": "FULL_FILL"}}},
+      "then": {"properties": {"requested_status": {"const": "FILLED"}, "filled_quantity": {"type": "integer", "minimum": 1}, "broker_order_id": {"type": "string", "minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"evidence_type": {"const": "ORDER_CANCELLED"}}},
+      "then": {"properties": {"requested_status": {"const": "CANCELLED"}, "broker_order_id": {"type": "string", "minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"evidence_type": {"const": "ORDER_REJECTED"}}},
+      "then": {"properties": {"requested_status": {"const": "REJECTED"}, "filled_quantity": {"const": 0}}}
+    },
+    {
+      "if": {"properties": {"source_kind": {"enum": ["DEAL_CALLBACK", "ACTIVE_DEAL_QUERY"]}}},
+      "then": {"properties": {"evidence_type": {"enum": ["PARTIAL_FILL", "FULL_FILL"]}}}
+    },
+    {
+      "if": {"properties": {"source_kind": {"const": "DEAL_CALLBACK"}}},
+      "then": {"properties": {"trade_id": {"type": "string", "minLength": 1}}}
+    }
+  ]
+}
