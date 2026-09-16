@@ -5,8 +5,8 @@ Personal production-grade automated trading execution platform using **Big QMT a
 ## Safety status
 
 The project has passed **P0 / G0**, **P1 Offline OMS**, **P2 Deterministic Risk
-Engine**, **P3 Big QMT read-only**, and the **P4 SHADOW deployment gate**. P5
-now has a code-complete, account-pinned Guojin simulation calibration path.
+Engine**, **P3 Big QMT read-only**, and the **P4 SHADOW deployment gate**. The
+account-pinned P5 Guojin simulation submit/cancel/fill calibration has passed.
 
 - Host-side development baseline: **Python 3.12**.
 - QMT-side bridge remains **Python 3.6 syntax compatible** for the built-in QMT runtime.
@@ -59,7 +59,7 @@ Market/account state
 3. **P2 — PASS**: deterministic four-level pre-trade risk engine and OMS-owned risk-to-submit boundary.
 4. **P3 — PASS**: Big QMT read-only query/callback transport, recovery/archive, and Guojin V05 timer calibration are complete.
 5. **P4 — SHADOW DEPLOYMENT GATE PASS**: durable command round-trip and OMS reconciliation are implemented without production mutation.
-6. **P5 — SIMULATION MUTATION CODE GATE PASS**: `guojin_sim` is fingerprint-pinned and tightly bounded; QMT redeployment and ORDER/DEAL calibration are pending.
+6. **P5 — BOUNDED SIMULATION CALIBRATION PASS**: `guojin_sim` completed token-matched submit, cancel, ORDER and DEAL calibration; OMS evidence mapping and all production mutation remain disabled.
 
 No phase may skip directly to live trading.
 

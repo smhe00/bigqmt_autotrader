@@ -2,6 +2,10 @@
 
 Date: 2026-09-16
 
+Runtime result: **PASS**. See `P5_GATE_RESULT_20260916.md` for the bounded
+submit/cancel/fill evidence. This document remains the permanent safety
+contract for that calibration surface.
+
 ## Authorization and scope
 
 The operator authorized broker mutation only for the Guojin simulated account
@@ -111,3 +115,21 @@ CI regenerates every standalone file and fails on drift. AST audits require:
   simulation executor, in the `guojin_sim` artifact;
 - Python 3.6 syntax compatibility for every QMT deployment;
 - command-result separation from OMS broker evidence.
+
+## Calibrated runtime facts
+
+The authorized `guojin_sim` run completed both planned paths in QMT session
+`876fe6929be643e386d0e86b8b52f566`:
+
+- resting BUY: broker order `10951`, exact token preserved, raw terminal status
+  `54`, zero fill, cancel signal sent;
+- fill BUY: broker order `10968`, exact token preserved in ORDER and DEAL, raw
+  terminal status `56`, 100 filled at `4.544`, trade `50037292`;
+- active-query snapshot sequence `63` converged to the same two ORDER rows and
+  one DEAL row with `query_errors=[]`;
+- the read-only probe matched all 7 ORDER/DEAL callback observations to the two
+  registered durable client identities;
+- ORDER/DEAL stayed quarantined and no OMS broker-evidence mapper was enabled.
+
+Raw status numbers above are recorded observations, not a general semantic
+mapping or authority to enter an OMS terminal state.

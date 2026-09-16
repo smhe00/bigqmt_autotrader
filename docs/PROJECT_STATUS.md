@@ -14,7 +14,7 @@ Updated: 2026-09-16
 | P2 Risk engine | **PASS** |
 | P3 Big QMT read-only | **PASS — multi-hour read/recovery/archive + V05 run_time deployment calibration complete** |
 | P4 Big QMT execution bridge | **SHADOW DEPLOYMENT GATE PASS** |
-| P5 Shadow / simulation / live canary | **SIMULATION MUTATION CODE GATE PASS — QMT redeployment/calibration pending** |
+| P5 Shadow / simulation / live canary | **BOUNDED GUOJIN_SIM MUTATION CALIBRATION PASS — OMS evidence mapper/live canary not enabled** |
 | Production-account live trading allowed | **NO — galaxy/guojin remain source-level disabled** |
 | QMT submit implemented | **GUOJIN_SIM ONLY — pinned simulation calibration artifact** |
 | QMT cancel implemented | **GUOJIN_SIM ONLY — exact broker ID + broker-token match required** |
@@ -96,6 +96,16 @@ Guojin simulation instance calibration (`guojin_sim`) additionally proved:
   `live_side_effect=false`; submit/cancel returned only `SHADOW_ACCEPTED`;
 - Host-only restart recovery from snapshot sequence 13 through command-result
   sequence 14 with zero backlog and zero quarantine.
+- fingerprint-pinned mutation session `876fe6929be643e386d0e86b8b52f566`
+  completed the two-submit calibration limit;
+- resting order `10951` preserved broker token
+  `BQ81ab7c6ddc8e40932700` and was cancelled with zero fill;
+- fill order `10968` preserved broker token `BQ07a45d26d31b03b3a1ed` in both
+  ORDER and DEAL, filling 100 `510300.SH` at `4.544` under trade `50037292`;
+- active-query snapshot sequence 63 converged to 2 ORDER / 1 DEAL rows with no
+  query errors and the same broker identities;
+- the read-only calibration probe classified all 7 callback ORDER/DEAL rows as
+  `MATCHED_KNOWN_TOKEN`; no OMS broker-evidence mapping was enabled.
 
 ## P4 shadow execution plane
 
@@ -190,15 +200,15 @@ Host diagnostics now expose `session_id`; `command_result` logs include command/
 
 ### ORDER/DEAL calibration boundary
 
-A read-only calibration projection now recognizes broker tokens only when QMT `remark` exactly matches `BQ[0-9a-f]{20}`. It records raw `broker_order_id`, `order_ref`, `trade_id`, QMT status/submit-status codes and quantities. It deliberately performs **no QMT-status → OMS-status mapping yet**. That mapping requires observed Guojin ORDER/DEAL broker evidence before it can be trusted.
+A read-only calibration projection recognizes broker tokens only when QMT `remark` exactly matches `BQ[0-9a-f]{20}`. It records raw `broker_order_id`, `order_ref`, `trade_id`, QMT status/submit-status codes and quantities. Guojin simulation has now proved exact token preservation across cancel and fill lifecycles. The projection deliberately performs **no QMT-status → OMS-status mapping yet**; raw simulation codes are not promoted into production-grade broker semantics.
 
-QMT command results are durably journaled in OMS schema v5. Duplicate/conflicting command or QMT session/sequence identities fail closed. The `QmtBrokerTokenCalibration` observer matches only exact pre-registered tokens and never generates broker evidence; ORDER/DEAL remain quarantined until the separate calibration gate passes.
+QMT command results are durably journaled in OMS schema v5. Duplicate/conflicting command or QMT session/sequence identities fail closed. The `QmtBrokerTokenCalibration` observer matches only exact pre-registered tokens and never generates broker evidence; ORDER/DEAL remain quarantined until a separate OMS evidence-mapping gate passes.
 
 ## Verification
 
 | Verification | State |
 | --- | --- |
-| Latest verified Python suite | **234 passed on Python 3.12** |
+| Latest verified Python suite | **235 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | Broker mutation-call static audit | **PASS** |
 | FSM implementation/formal conformance | **PASS** |
@@ -220,13 +230,14 @@ QMT command results are durably journaled in OMS schema v5. Duplicate/conflictin
 - P4 shadow gate: `docs/P4_GATE_RESULT_20260915.md`
 - P4 ORDER/DEAL token calibration: `docs/P4_ORDER_DEAL_BROKER_TOKEN_CALIBRATION.md`
 - P5 simulation mutation gate: `docs/P5_GUOJIN_SIMULATION_MUTATION_GATE.md`
+- P5 simulation calibration result: `docs/P5_GATE_RESULT_20260916.md`
 
 ## Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment gate PASS. P5 simulation mutation
-code gate PASS; Guojin simulation QMT redeployment and ORDER/DEAL calibration
-remain pending. Production-account live trading remains disabled.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment gate PASS. P5 bounded Guojin
+simulation submit/cancel/fill calibration PASS. OMS broker-evidence mapping,
+LIVE_CANARY, and all production-account mutation remain disabled.**
 
-The next checkpoint is a maximum-100-share Guojin simulation calibration using
-the pinned `guojin_sim` artifact. No mutation authority exists in the Galaxy or
-Guojin production-account artifacts.
+The next checkpoint is a separately reviewed OMS evidence-mapping contract
+based on replay-safe ORDER/DEAL/query convergence. No mutation authority exists
+in the Galaxy or Guojin production-account artifacts.

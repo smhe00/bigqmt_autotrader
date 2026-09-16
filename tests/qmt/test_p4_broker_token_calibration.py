@@ -6,7 +6,6 @@ from bigqmt_autotrader.qmt import (
 )
 from bigqmt_autotrader.qmt.calibration_probe import build_report
 
-
 FP = "sha256:" + "e" * 64
 
 
@@ -69,9 +68,7 @@ def test_unknown_or_malformed_remark_is_never_guessed():
     calibration = QmtBrokerTokenCalibration()
     calibration.register(FP, "cid-cal-001")
 
-    unknown = calibration.observe(
-        qmt_event(1, "order", {"remark": "BQ" + "f" * 20})
-    )
+    unknown = calibration.observe(qmt_event(1, "order", {"remark": "BQ" + "f" * 20}))
     malformed = calibration.observe(qmt_event(2, "deal", {"remark": "cid-cal-001"}))
     missing = calibration.observe(qmt_event(3, "deal", {"remark": None}))
 
@@ -150,3 +147,66 @@ def test_read_only_probe_scans_without_modifying_spool_files(tmp_path):
     }
     assert path.read_bytes() == before_bytes
     assert after_stat.st_mtime_ns == before_stat.st_mtime_ns
+
+
+def test_guojin_sim_observed_cancel_and_fill_lifecycle_stays_calibration_only():
+    """Lock the 2026-09-16 broker-token calibration evidence as raw facts.
+
+    These codes are intentionally not translated into OMS states here.  The
+    regression protects correlation and the evidence boundary, not an inferred
+    broker status mapping.
+    """
+    calibration = QmtBrokerTokenCalibration()
+    cancel_token = calibration.register(FP, "simcal-510300-cancel-20260916-01")
+    fill_token = calibration.register(FP, "simcal-510300-fill-20260916-01")
+
+    observed = [
+        (30, "order", cancel_token, None, None, 50, 51, 0, None),
+        (31, "order", cancel_token, "10951", None, 50, 51, 0, None),
+        (38, "order", cancel_token, "10951", None, 54, 51, 0, None),
+        (45, "order", fill_token, None, None, 50, 51, 0, None),
+        (46, "order", fill_token, "10968", None, 50, 51, 0, None),
+        (48, "order", fill_token, "10968", None, 56, 51, 100, None),
+        (50, "deal", fill_token, "10968", "50037292", None, None, None, 100),
+    ]
+
+    for (
+        sequence,
+        event_type,
+        token,
+        order_id,
+        trade_id,
+        status,
+        submit,
+        filled,
+        qty,
+    ) in observed:
+        calibration.observe(
+            qmt_event(
+                sequence,
+                event_type,
+                {
+                    "remark": token,
+                    "broker_order_id": order_id,
+                    "trade_id": trade_id,
+                    "status_code": status,
+                    "submit_status_code": submit,
+                    "filled_quantity": filled,
+                    "quantity": qty,
+                },
+            )
+        )
+
+    assert calibration.summary() == {
+        "observations": 7,
+        "dispositions": {"MATCHED_KNOWN_TOKEN": 7},
+        "broker_evidence_mapping_enabled": False,
+        "live_submit": False,
+        "live_cancel": False,
+    }
+    assert calibration.records[2].broker_order_id == "10951"
+    assert calibration.records[2].status_code == 54
+    assert calibration.records[5].filled_quantity == 100
+    assert calibration.records[5].status_code == 56
+    assert calibration.records[6].trade_id == "50037292"
+    assert calibration.records[6].quantity == 100

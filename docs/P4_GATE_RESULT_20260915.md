@@ -4,9 +4,9 @@
 
 **SHADOW CODE GATE: PASS**
 
-**ORDER/DEAL broker lifecycle calibration: PENDING**
+**ORDER/DEAL broker-token lifecycle calibration: PASS IN AUTHORIZED GUOJIN SIMULATION**
 
-**Live broker mutation: DISABLED, UNIMPLEMENTED, NOT AUTHORIZED**
+**Production-account broker mutation: DISABLED, UNIMPLEMENTED, NOT AUTHORIZED**
 
 ## Passed evidence
 
@@ -21,8 +21,18 @@
 - QMT bridge Python 3.6 syntax and broker-mutation static audits pass.
 - FSM exhaustive conformance remains 196/196, and all six pinned TLA+ models pass TLC 2.19 with no errors.
 
-## Remaining gate
+## Simulation calibration update — 2026-09-16
 
-Collect and review real/simulation ORDER and DEAL callback/query fixtures for exact `m_strRemark` preservation and raw QMT status semantics. This is observation-only. It does not authorize adding or invoking a real submit/cancel path.
+The separately authorized, fingerprint-pinned `guojin_sim` artifact completed
+the bounded runtime calibration. Seven callback ORDER/DEAL observations all
+preserved and matched their registered exact `m_strRemark` broker tokens. One
+order was accepted and cancelled without a fill; the other filled 100 shares
+and produced a token-matched DEAL.
+
+The detailed evidence is in `P5_GATE_RESULT_20260916.md`. This closes the token
+transport/calibration question, but does not enable an OMS status mapper:
+ORDER/DEAL remain quarantined and raw QMT codes remain uninterpreted facts.
+
+## Historical baseline
 
 The 2026-09-15 07:40 UTC+08 read-only probe scanned 29 current spool frames and found 54 historical snapshot ORDER/DEAL rows, all with missing remarks and no callback samples. This is a valid fail-closed baseline, not a token-calibration pass.
