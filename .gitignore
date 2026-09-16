@@ -19,5 +19,7 @@ logs/
 secrets/
 qmt_userdata/
 *.log
+*~
+.*.un~
 .formal-tools/
 states/

@@ -14,6 +14,11 @@ P4 shadow contract:
 """
 from __future__ import print_function
 
+# Deployment settings: edit these two lines when creating another standalone
+# QMT instance. The instance ID becomes the spool child-directory name.
+SPOOL_BASE_DIR = r"D:\BigQMTData\spool"
+TERMINAL_INSTANCE_ID = "__BIGQMT_INSTANCE_ID__"
+
 import hashlib
 import json
 import os
@@ -58,8 +63,6 @@ TRANSPORT_MAX_FRAME_BYTES = 1024 * 1024
 COMMAND_MAX_FRAME_BYTES = 64 * 1024
 TRANSPORT_FLUSH_BATCH = 64
 COMMAND_BATCH = 16
-SPOOL_BASE_DIR = r"D:\BigQMTData\spool"
-TERMINAL_INSTANCE_ID = "__BIGQMT_INSTANCE_ID__"
 SPOOL_ROOT_OVERRIDE = None
 INSTANCE_MANIFEST_VERSION = "1"
 INSTANCE_MANIFEST_NAME = "instance.json"

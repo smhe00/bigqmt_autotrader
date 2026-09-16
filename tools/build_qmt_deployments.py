@@ -10,6 +10,7 @@ TOKEN = "__BIGQMT_INSTANCE_ID__"
 DEPLOYMENTS = {
     "galaxy": ROOT / "qmt_side" / "BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py",
     "guojin": ROOT / "qmt_side" / "BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py",
+    "guojin_sim": ROOT / "qmt_side" / "BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py",
 }
 
 

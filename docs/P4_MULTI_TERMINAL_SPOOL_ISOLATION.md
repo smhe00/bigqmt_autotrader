@@ -24,11 +24,15 @@ D:\BigQMTData\spool\
     instance.json
     inbox\
     commands\
+  guojin_sim\
+    instance.json
+    inbox\
+    commands\
 ```
 
-The names `galaxy` and `guojin` occur only in the generated QMT deployment
-files and their filesystem directories. Adding another terminal does not
-require a Host code change.
+The names `galaxy`, `guojin`, and `guojin_sim` occur only in the generated QMT
+deployment files and their filesystem directories. Adding another terminal
+does not require a Host code change.
 
 ## First discovery
 
@@ -64,17 +68,29 @@ but performs exactly the same manifest and event validation:
 ```powershell
 python -m bigqmt_autotrader.qmt.host --instance-id galaxy
 python -m bigqmt_autotrader.qmt.host --instance-id guojin
+python -m bigqmt_autotrader.qmt.host --instance-id guojin_sim
 ```
 
 ## Standalone QMT files
 
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py`
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py`
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py`
 
 They are complete Python 3.6-compatible strategies with no runtime child-module
-or environment-variable dependency. Both are generated from the broker-neutral
-V05 template. CI fails if either generated file differs from its template plus
+or environment-variable dependency. All are generated from the broker-neutral
+V05 template. CI fails if any generated file differs from its template plus
 embedded instance identifier.
+
+For operator visibility, each standalone file keeps its only two deployment
+settings directly below the module header and future import:
+
+```python
+SPOOL_BASE_DIR = r"D:\BigQMTData\spool"
+TERMINAL_INSTANCE_ID = "guojin_sim"
+```
+
+The supplied files are generated and should not otherwise be edited by hand.
 
 ## Fail-closed rules
 

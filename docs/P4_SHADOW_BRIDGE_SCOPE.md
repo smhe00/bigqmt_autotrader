@@ -115,6 +115,7 @@ Deploy one standalone instance file:
 
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py`
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py`
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py`
 
 Both are generated from `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py` and are:
 

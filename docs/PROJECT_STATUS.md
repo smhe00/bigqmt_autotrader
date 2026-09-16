@@ -7,8 +7,8 @@ Updated: 2026-09-16
 | Product target | Personal production-grade Big QMT execution platform |
 | Host Python baseline | **CPython 3.12** |
 | QMT-side syntax target | **Built-in Python 3.6 compatible** |
-| Observed Guojin QMT runtime | **CPython 3.6.8 / QMT 2.1.19.0** |
-| Observed Galaxy QMT terminal | **QMT 2.1.26.1; V05 discovered STOCK / HUGANGTONG / SHENGANGTONG; linked callback suppression fix pending redeploy** |
+| Observed Guojin QMT runtime | **CPython 3.6.8 / QMT 2.1.19.0; live-account and simulation instances PASS** |
+| Observed Galaxy QMT terminal | **QMT 2.1.26.1; V05 discovered STOCK / HUGANGTONG / SHENGANGTONG; linked callback suppression PASS** |
 | P0 / G0 | **PASS** |
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
@@ -35,13 +35,15 @@ Galaxy discovery: **PASS** for startup ACCOUNT/POSITION probing of `STOCK`,
 `HUGANGTONG`, and `SHENGANGTONG`. The terminal also demonstrated that linked
 ACCOUNT callbacks are delivered to the selected STOCK model instance; the
 bridge now suppresses and counts those known linked callbacks without routing
-them into the selected OMS stream. Redeployment verification and Guojin
-calibration remain required before promotion from code gate to deployment gate.
+them into the selected OMS stream. Galaxy redeployment and both Guojin
+live-account and simulation-instance startup calibrations passed with healthy
+read models, no query errors, no backlog, and zero quarantine.
 
 ## Multi-terminal spool isolation
 
-Galaxy and Guojin no longer share a spool root. Two standalone V05 files embed
-their deployment instance and atomically publish `instance.json` under
+Galaxy, Guojin live-account, and Guojin simulation instances do not share a
+spool root. Three standalone V05 files embed their deployment instance and
+atomically publish `instance.json` under
 `D:\BigQMTData\spool\<instance_id>`. Host contains no broker registry: without
 arguments it enumerates immediate child directories, validates each manifest
 against the matching-session `bridge_ready`, and asks the operator to select.
@@ -53,7 +55,7 @@ isolation changes transport routing only and grants no trading authority.
 
 | Capability | State |
 | --- | --- |
-| Isolated spool roots | **PASS — `D:\BigQMTData\spool\galaxy` and `D:\BigQMTData\spool\guojin`** |
+| Isolated spool roots | **PASS — `galaxy`, `guojin`, and `guojin_sim` independently discovered and healthy** |
 | ACCOUNT/POSITION/ORDER/DEAL active query | **PASS at query/schema level — calibrated snapshot: 1 / 8 / 1 / 2 rows, `query_errors=[]`** |
 | Callback subscription | **PASS — `ContextInfo.set_account(account)`** |
 | ACCOUNT callback | **PASS** |
@@ -91,6 +93,7 @@ Standalone deployments:
 
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py`
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py`
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py`
 
 Build: `p4-shadow-command-spool-5`
 

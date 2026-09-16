@@ -10,6 +10,7 @@ BRIDGE = Path(__file__).resolve().parents[2] / "qmt_side" / "BIGQMT_EXECUTION_BR
 DEPLOYMENTS = {
     "galaxy": BRIDGE.with_name("BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py"),
     "guojin": BRIDGE.with_name("BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py"),
+    "guojin_sim": BRIDGE.with_name("BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py"),
 }
 
 
@@ -146,6 +147,8 @@ def test_v05_standalone_deployments_are_python36_parseable_and_instance_fixed():
         assert '__BIGQMT_INSTANCE_ID__' not in source
         assert 'TERMINAL_INSTANCE_ID = "' + instance_id + '"' in source
         assert 'SPOOL_BASE_DIR = r"D:\\BigQMTData\\spool"' in source
+        assert source.index("SPOOL_BASE_DIR =") < source.index("import hashlib")
+        assert source.index("TERMINAL_INSTANCE_ID =") < source.index("import hashlib")
 
 
 def test_v05_registers_one_second_command_and_five_minute_snapshot_timers(tmp_path, monkeypatch):

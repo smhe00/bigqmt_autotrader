@@ -17,7 +17,7 @@ from __future__ import print_function
 # Deployment settings: edit these two lines when creating another standalone
 # QMT instance. The instance ID becomes the spool child-directory name.
 SPOOL_BASE_DIR = r"D:\BigQMTData\spool"
-TERMINAL_INSTANCE_ID = "guojin"
+TERMINAL_INSTANCE_ID = "guojin_sim"
 
 import hashlib
 import json
