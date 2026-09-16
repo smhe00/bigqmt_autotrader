@@ -85,6 +85,16 @@ V05 deployment calibration additionally proved:
 - `REQUEST_SNAPSHOT` Host→QMT→Host round-trip completed with `SNAPSHOT_EMITTED`, `live_side_effect=false`;
 - the read model remained healthy with zero quarantine/backlog.
 
+Guojin simulation instance calibration (`guojin_sim`) additionally proved:
+
+- independent manifest/session/spool identity under `D:\BigQMTData\spool\guojin_sim`;
+- startup and 300-second periodic snapshots with 1 STOCK account, 2 positions,
+  no query errors, and a healthy Host read model;
+- `REQUEST_SNAPSHOT`, `SUBMIT_LIMIT`, and `CANCEL_ORDER` round trips with
+  `live_side_effect=false`; submit/cancel returned only `SHADOW_ACCEPTED`;
+- Host-only restart recovery from snapshot sequence 13 through command-result
+  sequence 14 with zero backlog and zero quarantine.
+
 ## P4 shadow execution plane
 
 Bridge template: `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py`
@@ -129,6 +139,10 @@ Implemented command types:
 - `SUBMIT_LIMIT` — SHADOW only
 - `CANCEL_ORDER` — SHADOW only
 - `REQUEST_SNAPSHOT` — real read-only snapshot request
+
+The safe `shadow_probe` CLI exposes all three command types. Its cancel path
+publishes only to the durable SHADOW command spool and never invokes a broker
+cancel API.
 
 Order identity:
 

@@ -33,6 +33,14 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--quantity", type=int, required=True)
     submit.add_argument("--limit-price", required=True)
     submit.add_argument("--ttl-seconds", type=int, default=30)
+
+    cancel = sub.add_parser(
+        "cancel",
+        help="Publish a SHADOW cancel command; V05 does not call a broker cancel API",
+    )
+    cancel.add_argument("--client-order-id", required=True)
+    cancel.add_argument("--broker-order-id", required=True)
+    cancel.add_argument("--ttl-seconds", type=int, default=30)
     return parser
 
 
@@ -50,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
             created_ms=now_ms,
             expires_ms=expires_ms,
         )
-    else:
+    elif args.command == "submit":
         command = spool.publish_submit(
             account_fingerprint=args.account_fingerprint,
             client_order_id=args.client_order_id,
@@ -58,6 +66,14 @@ def main(argv: list[str] | None = None) -> int:
             side=args.side,
             quantity=args.quantity,
             limit_price=args.limit_price,
+            created_ms=now_ms,
+            expires_ms=expires_ms,
+        )
+    else:
+        command = spool.publish_cancel(
+            account_fingerprint=args.account_fingerprint,
+            client_order_id=args.client_order_id,
+            broker_order_id=args.broker_order_id,
             created_ms=now_ms,
             expires_ms=expires_ms,
         )

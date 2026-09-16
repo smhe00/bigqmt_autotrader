@@ -157,6 +157,18 @@ python -m bigqmt_autotrader.qmt.shadow_probe `
   --limit-price 1.00
 ```
 
+SHADOW cancel calibration is also available and never calls a broker cancel
+API:
+
+```powershell
+python -m bigqmt_autotrader.qmt.shadow_probe `
+  --spool-dir D:\BigQMTData\spool\guojin_sim `
+  --account-fingerprint $fp `
+  cancel `
+  --client-order-id guojin-sim-cal-001 `
+  --broker-order-id shadow-calibration-only
+```
+
 The second command still has **zero broker trading side effect** under V05; it validates command identity, 1-second consumption, durable claim/process and return-event flow only.
 
 ## Explicitly out of scope for this checkpoint
