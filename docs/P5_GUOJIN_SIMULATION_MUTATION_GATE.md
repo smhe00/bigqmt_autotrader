@@ -133,3 +133,9 @@ The authorized `guojin_sim` run completed both planned paths in QMT session
 
 Raw status numbers above are recorded observations, not a general semantic
 mapping or authority to enter an OMS terminal state.
+
+The same trading session also passed negative-path checks for terminal-order
+cancel, token/order mismatch, stale session, wrong account, expiry, malformed
+transport, publisher validation, per-session submit exhaustion, and Host outage
+recovery. See `P5_GATE_RESULT_20260916.md`. None produced a new broker mutation;
+the command spool finished with zero `unknown` commands.

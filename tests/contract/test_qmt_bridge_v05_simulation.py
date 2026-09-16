@@ -8,7 +8,6 @@ import pytest
 
 from bigqmt_autotrader.qmt.commands import broker_token_for
 
-
 BRIDGE = (
     Path(__file__).resolve().parents[2]
     / "qmt_side"
@@ -25,7 +24,9 @@ class Obj:
 
 
 def load_bridge():
-    spec = importlib.util.spec_from_file_location("bigqmt_bridge_v05_guojin_sim", BRIDGE)
+    spec = importlib.util.spec_from_file_location(
+        "bigqmt_bridge_v05_guojin_sim", BRIDGE
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -63,7 +64,9 @@ def command(bridge, command_type="SUBMIT_LIMIT"):
 
 
 def called_names(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path), feature_version=(3, 6))
+    tree = ast.parse(
+        path.read_text(encoding="utf-8"), filename=str(path), feature_version=(3, 6)
+    )
     return {
         node.func.id
         for node in ast.walk(tree)
@@ -85,7 +88,9 @@ def test_broker_mutation_surface_exists_only_in_pinned_simulation_artifact():
 def test_simulation_submit_is_pinned_bounded_and_preserves_broker_token(monkeypatch):
     bridge = load_bridge()
     observed = []
-    monkeypatch.setattr(bridge, "passorder", lambda *args: observed.append(args), raising=False)
+    monkeypatch.setattr(
+        bridge, "passorder", lambda *args: observed.append(args), raising=False
+    )
 
     result = bridge._execute_order_command(command(bridge), object())
 
@@ -112,7 +117,9 @@ def test_simulation_submit_safety_gate_rejects_out_of_scope_command(
 ):
     bridge = load_bridge()
     observed = []
-    monkeypatch.setattr(bridge, "passorder", lambda *args: observed.append(args), raising=False)
+    monkeypatch.setattr(
+        bridge, "passorder", lambda *args: observed.append(args), raising=False
+    )
     candidate = command(bridge)
     candidate["payload"][field] = value
 
@@ -156,7 +163,9 @@ def test_simulation_cancel_rejects_order_with_other_remark(monkeypatch):
     order.m_strOrderSysID = "broker-001"
     order.m_strRemark = "not-our-token"
     cancel_calls = []
-    monkeypatch.setattr(bridge, "get_trade_detail_data", lambda *_args: [order], raising=False)
+    monkeypatch.setattr(
+        bridge, "get_trade_detail_data", lambda *_args: [order], raising=False
+    )
     monkeypatch.setattr(
         bridge,
         "cancel",
@@ -168,3 +177,47 @@ def test_simulation_cancel_rejects_order_with_other_remark(monkeypatch):
         bridge._execute_order_command(command(bridge, "CANCEL_ORDER"), object())
 
     assert cancel_calls == []
+
+
+def test_simulation_cancel_reports_terminal_order_without_calling_cancel(monkeypatch):
+    bridge = load_bridge()
+    candidate = command(bridge, "CANCEL_ORDER")
+    order = Obj()
+    order.m_strOrderSysID = "broker-001"
+    order.m_strRemark = candidate["broker_token"]
+    cancel_calls = []
+    monkeypatch.setattr(
+        bridge, "get_trade_detail_data", lambda *_args: [order], raising=False
+    )
+    monkeypatch.setattr(bridge, "can_cancel_order", lambda *_args: False, raising=False)
+    monkeypatch.setattr(
+        bridge,
+        "cancel",
+        lambda *args: cancel_calls.append(args) or True,
+        raising=False,
+    )
+
+    result = bridge._execute_order_command(candidate, object())
+
+    assert result == ("SIMULATION_CANCEL_NOT_CANCELLABLE", False)
+    assert cancel_calls == []
+    assert bridge._STATE.simulation_cancel_calls == 0
+
+
+def test_simulation_submit_session_limit_rejects_before_third_broker_call(monkeypatch):
+    bridge = load_bridge()
+    submit_calls = []
+    monkeypatch.setattr(
+        bridge,
+        "passorder",
+        lambda *args: submit_calls.append(args),
+        raising=False,
+    )
+
+    bridge._execute_order_command(command(bridge), object())
+    bridge._execute_order_command(command(bridge), object())
+    with pytest.raises(bridge.CommandError, match="session limit reached"):
+        bridge._execute_order_command(command(bridge), object())
+
+    assert len(submit_calls) == 2
+    assert bridge._STATE.simulation_submit_calls == 2

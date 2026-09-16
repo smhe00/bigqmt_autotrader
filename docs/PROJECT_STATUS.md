@@ -106,6 +106,10 @@ Guojin simulation instance calibration (`guojin_sim`) additionally proved:
   query errors and the same broker identities;
 - the read-only calibration probe classified all 7 callback ORDER/DEAL rows as
   `MATCHED_KNOWN_TOKEN`; no OMS broker-evidence mapping was enabled.
+- same-session robustness checks covered idempotent/conflicting publication,
+  terminal-order cancel, token/order mismatch, stale session, wrong account,
+  expiry, malformed transport, submit-limit exhaustion, and Host outage replay;
+  final command state was 10 processed / 8 rejected / 0 unknown.
 
 ## P4 shadow execution plane
 
@@ -208,7 +212,7 @@ QMT command results are durably journaled in OMS schema v5. Duplicate/conflictin
 
 | Verification | State |
 | --- | --- |
-| Latest verified Python suite | **235 passed on Python 3.12** |
+| Latest verified Python suite | **237 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | Broker mutation-call static audit | **PASS** |
 | FSM implementation/formal conformance | **PASS** |

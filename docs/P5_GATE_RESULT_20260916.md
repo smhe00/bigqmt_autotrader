@@ -97,3 +97,37 @@ or callback ordering apply to a production account. Any future OMS evidence
 mapper needs a separately reviewed status contract, replay/idempotency tests,
 active-query convergence rules, and a new explicit Gate. Production mutation
 remains out of scope.
+
+## Trading-session robustness matrix
+
+A second pass during the continuous trading session exercised normal and
+abnormal control paths without resetting the QMT session or expanding its
+mutation allowance.
+
+| Scenario | Observed result | Broker mutation |
+| --- | --- | --- |
+| snapshot request | `SNAPSHOT_EMITTED` | none |
+| identical durable command republish | same stored path; one QMT execution | none |
+| same command ID with different content | Host `QmtCommandConflict` | none |
+| cancel fully filled order `10968` | `SIMULATION_CANCEL_NOT_CANCELLABLE` | none |
+| repeat cancel terminal order `10951` | `SIMULATION_CANCEL_NOT_CANCELLABLE` | none |
+| wrong client/token for broker order | `REJECTED_SAFETY_GATE` | none |
+| nonexistent broker order | `REJECTED_SAFETY_GATE` | none |
+| third submit in a two-submit session | `REJECTED_SAFETY_GATE` | none |
+| stale QMT session authorization | `REJECTED_SAFETY_GATE` | none |
+| wrong account fingerprint | parser `COMMAND_REJECTED` | none |
+| expired durable command | `REJECTED_EXPIRED` | none |
+| malformed JSON / unsupported transport | parser `COMMAND_REJECTED` | none |
+| incomplete `.tmp` publication | ignored until removed | none |
+| publisher wrong confirmation / quantity / symbol / TTL / price | rejected before inbox | none |
+| Host without simulation opt-in | startup rejected | none |
+| Host stopped while QMT handles snapshot | QMT completed; Host replayed on restart | none |
+
+The final command directories contained 10 processed, 8 rejected, zero inbox,
+zero claimed, and zero unknown commands. Host recovery selected snapshot
+sequence `156`, replayed through command-result sequence `196`, and remained
+healthy with zero pending event frames.
+
+Further broker-facing order variants require a fresh QMT strategy session
+because the hard two-submit session allowance was correctly exhausted. That
+reset is an explicit operator action; it is not performed automatically.
