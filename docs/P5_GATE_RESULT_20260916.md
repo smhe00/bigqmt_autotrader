@@ -161,3 +161,19 @@ contains a cancel for the exact account, client order ID, and broker order ID.
 New cancel command IDs are deterministic for that identity. A lagging active
 query alone therefore cannot cause an automatic or operator CLI recancel; the
 order must reconcile or be resolved manually.
+
+## Same-evening read-only closeout
+
+No further broker mutation was attempted while order `13423` remained raw
+status `50`. With Host stopped, QMT durably emitted current-session sequences
+`145` through `147`, including a requested snapshot and
+`SNAPSHOT_EMITTED`. Host restart recovered from snapshot sequence `144`,
+consumed the three offline frames, and returned to `read_model_healthy=true`
+with zero pending or quarantined transport frames.
+
+Instance-isolation inspection found empty event and command inboxes for all
+three instances. `galaxy` and `guojin` manifests remained SHADOW with
+`trading_enabled=false`, `live_submit=false`, and `live_cancel=false`;
+`guojin_sim` alone advertised the pinned simulation-calibration capability.
+The AST side-effect audit again found zero broker mutation calls in the
+template, Galaxy, and Guojin production artifacts.

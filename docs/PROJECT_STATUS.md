@@ -149,6 +149,9 @@ Simulation-only safety state (`guojin_sim`):
 - simulation cancel publication is once-only per exact account/client/broker
   identity across inbox, claimed, processed, rejected, and unknown command
   states; query lag cannot trigger an automatic repeat cancel.
+- current-session Host-offline snapshot persistence and restart recovery were
+  revalidated after the after-hours broker tests (sequences 144 through 147,
+  healthy with zero backlog); all three instance command inboxes were empty.
 
 Timing:
 
