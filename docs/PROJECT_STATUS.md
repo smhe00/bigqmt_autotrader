@@ -146,6 +146,9 @@ Simulation-only safety state (`guojin_sim`):
 - Host and publisher each require separate explicit simulation authorization;
 - simulation dispatch results never enter the OMS SHADOW result journal and
   cannot create broker ACK state.
+- simulation cancel publication is once-only per exact account/client/broker
+  identity across inbox, claimed, processed, rejected, and unknown command
+  states; query lag cannot trigger an automatic repeat cancel.
 
 Timing:
 

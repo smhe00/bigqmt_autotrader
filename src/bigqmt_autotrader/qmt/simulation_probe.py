@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -11,6 +12,52 @@ from .instances import QmtInstanceError, load_instance
 
 
 CONFIRMATION = "AUTHORIZE_SIMULATION_CALIBRATION"
+
+
+def _cancel_command_id(
+    account_fingerprint: str, client_order_id: str, broker_order_id: str
+) -> str:
+    digest = hashlib.sha256(
+        (
+            account_fingerprint
+            + "\0"
+            + client_order_id
+            + "\0"
+            + broker_order_id
+        ).encode("utf-8")
+    ).hexdigest()
+    return "simcancel-" + digest[:32]
+
+
+def _existing_cancel_path(
+    spool: QmtCommandSpool,
+    *,
+    account_fingerprint: str,
+    client_order_id: str,
+    broker_order_id: str,
+) -> Path | None:
+    for state_dir in (
+        spool.inbox,
+        spool.claimed,
+        spool.processed,
+        spool.rejected,
+        spool.unknown,
+    ):
+        for path in state_dir.glob("*.json"):
+            try:
+                frame = json.loads(path.read_text(encoding="utf-8"))
+                command = frame["command"]
+            except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+                continue
+            if (
+                command.get("command_type") == "CANCEL_ORDER"
+                and command.get("account_fingerprint") == account_fingerprint
+                and command.get("client_order_id") == client_order_id
+                and isinstance(command.get("payload"), dict)
+                and command["payload"].get("broker_order_id") == broker_order_id
+            ):
+                return path
+    return None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,12 +148,28 @@ def main(argv: list[str] | None = None) -> int:
             expected_qmt_session_id=instance.session_id,
         )
     else:
+        existing = _existing_cancel_path(
+            spool,
+            account_fingerprint=instance.account_fingerprint,
+            client_order_id=args.client_order_id,
+            broker_order_id=args.broker_order_id,
+        )
+        if existing is not None:
+            raise SystemExit(
+                "cancel already published for this client_order_id and "
+                "broker_order_id; reconcile or resolve manually: " + str(existing)
+            )
         command = spool.publish_cancel(
             account_fingerprint=instance.account_fingerprint,
             client_order_id=args.client_order_id,
             broker_order_id=args.broker_order_id,
             created_ms=now_ms,
             expires_ms=expires_ms,
+            command_id=_cancel_command_id(
+                instance.account_fingerprint,
+                args.client_order_id,
+                args.broker_order_id,
+            ),
             simulation_calibration=True,
             expected_qmt_session_id=instance.session_id,
         )

@@ -137,3 +137,27 @@ finite `guojin_sim` session fuses to 2,000 submit calls and 2,000 cancel calls
 for extended simulation testing. The historical two-submit evidence above is
 unchanged. Host manifest validation and the QMT-side anti-tamper gate both
 require the new values; production `guojin` and `galaxy` remain mutation-free.
+
+## After-hours broker findings
+
+Build `p5-simulation-calibration-2` was restarted as QMT session
+`95f8c96efcf84a2e8badfabf0822ab28`. A `510300.SH` BUY 100 order at the bridge
+ceiling price `100000` reached the Guojin simulation counter and was rejected
+with raw status `57`, error `2147483647`, and counter detail `[120279]` stating
+that a Shanghai order price must be below `10000`. The deterministic broker
+token remained intact.
+
+A second BUY 100 at `4.400` was accepted after normal trading hours as broker
+order `13423`, raw status `50`, with 100 remaining and CNY 440 frozen. QMT
+`cancel()` returned `True`, but repeated active snapshots continued to expose
+raw status `50`. Two QMT cancel calls returned a sent signal while the query
+surface remained unchanged; a later manual terminal cancel then produced
+counter error `-61 / [251013] cannot cancel repeatedly`. This proves that a
+successful cancel signal can establish broker-side cancel-pending state before
+the query surface changes.
+
+The simulation publisher now fails closed if any command-spool state already
+contains a cancel for the exact account, client order ID, and broker order ID.
+New cancel command IDs are deterministic for that identity. A lagging active
+query alone therefore cannot cause an automatic or operator CLI recancel; the
+order must reconcile or be resolved manually.

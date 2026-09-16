@@ -110,3 +110,32 @@ def test_simulation_probe_rejects_more_than_100_shares(tmp_path, monkeypatch):
                 "10.00",
             ]
         )
+
+
+def test_simulation_probe_never_republishes_same_cancel_target(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        "bigqmt_autotrader.qmt.simulation_probe._load_authorized_instance",
+        lambda _path: instance(tmp_path),
+    )
+    arguments = [
+        "--spool-dir",
+        str(tmp_path),
+        "--confirm",
+        CONFIRMATION,
+        "cancel",
+        "--client-order-id",
+        "cid-001",
+        "--broker-order-id",
+        "broker-001",
+    ]
+
+    assert main(arguments) == 0
+    first_status = json.loads(capsys.readouterr().out)
+    assert first_status["command_id"].startswith("simcancel-")
+
+    with pytest.raises(SystemExit, match="cancel already published"):
+        main(arguments)
+
+    assert len(list((tmp_path / "commands" / "inbox").glob("*.json"))) == 1
