@@ -1,8 +1,10 @@
 #encoding:gbk
-"""Big QMT P4 shadow bridge using durable local file spools.
+"""Big QMT P4/P5 bridge using durable local file spools.
 
 Target: broker-neutral Big QMT built-in CPython 3.6.8 runtime.
-No socket/thread/process dependency. No live trading mutation calls.
+No socket/thread/process dependency. The base template is SHADOW-only; the
+deployment generator injects a tightly pinned simulation-calibration executor
+only into the dedicated simulation artifact.
 
 P4 shadow contract:
 - broker-state callbacks publish immediately to the event spool;
@@ -19,6 +21,18 @@ from __future__ import print_function
 SPOOL_BASE_DIR = r"D:\BigQMTData\spool"
 TERMINAL_INSTANCE_ID = "galaxy"
 
+# The deployment generator may replace this block only for a pinned simulation
+# artifact. Production-account artifacts retain these fail-closed values.
+EXECUTION_MODE = "SHADOW"
+TRADING_ENABLED = False
+LIVE_SUBMIT_ENABLED = False
+LIVE_CANCEL_ENABLED = False
+SIMULATION_ONLY = False
+AUTHORIZED_ACCOUNT_FINGERPRINT = None
+SIMULATION_MAX_ORDER_QUANTITY = 0
+SIMULATION_MAX_SUBMIT_CALLS = 0
+SIMULATION_MAX_CANCEL_CALLS = 0
+
 import hashlib
 import json
 import os
@@ -31,9 +45,7 @@ TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
 BRIDGE_BUILD = "p4-shadow-command-spool-5"
-TRADING_ENABLED = False
 READ_ONLY_ENABLED = True
-EXECUTION_MODE = "SHADOW"
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
 COMMAND_TICK_PERIOD = "1nSecond"
@@ -118,6 +130,8 @@ class _RuntimeState(object):
         self.commands_processed = 0
         self.commands_rejected = 0
         self.commands_unknown = 0
+        self.simulation_submit_calls = 0
+        self.simulation_cancel_calls = 0
 
 
 _STATE = _RuntimeState()
@@ -195,9 +209,14 @@ def _instance_manifest():
         "account_type": _text(_STATE.account_type),
         "created_ms": int(time.time() * 1000),
         "execution_mode": EXECUTION_MODE,
-        "trading_enabled": False,
-        "live_submit": False,
-        "live_cancel": False,
+        "trading_enabled": TRADING_ENABLED,
+        "live_submit": LIVE_SUBMIT_ENABLED,
+        "live_cancel": LIVE_CANCEL_ENABLED,
+        "simulation_only": SIMULATION_ONLY,
+        "authorized_account_fingerprint": AUTHORIZED_ACCOUNT_FINGERPRINT,
+        "max_order_quantity": SIMULATION_MAX_ORDER_QUANTITY,
+        "max_submit_calls_per_session": SIMULATION_MAX_SUBMIT_CALLS,
+        "max_cancel_calls_per_session": SIMULATION_MAX_CANCEL_CALLS,
     }
 
 
@@ -237,7 +256,7 @@ def ping():
         "bridge_build": BRIDGE_BUILD,
         "execution_mode": EXECUTION_MODE,
         "read_only_enabled": True,
-        "trading_enabled": False,
+        "trading_enabled": TRADING_ENABLED,
     }
 
 
@@ -250,10 +269,15 @@ def capabilities():
         "bridge_build": BRIDGE_BUILD,
         "execution_mode": EXECUTION_MODE,
         "read_only_enabled": True,
-        "trading_enabled": False,
-        "live_submit": False,
-        "live_cancel": False,
-        "shadow_commands": True,
+        "trading_enabled": TRADING_ENABLED,
+        "live_submit": LIVE_SUBMIT_ENABLED,
+        "live_cancel": LIVE_CANCEL_ENABLED,
+        "simulation_only": SIMULATION_ONLY,
+        "authorized_account_fingerprint": AUTHORIZED_ACCOUNT_FINGERPRINT,
+        "max_order_quantity": SIMULATION_MAX_ORDER_QUANTITY,
+        "max_submit_calls_per_session": SIMULATION_MAX_SUBMIT_CALLS,
+        "max_cancel_calls_per_session": SIMULATION_MAX_CANCEL_CALLS,
+        "shadow_commands": not TRADING_ENABLED,
         "command_tick_period": COMMAND_TICK_PERIOD,
         "snapshot_timer_period": SNAPSHOT_TIMER_PERIOD,
         "query_types": list(QUERY_TYPES),
@@ -729,8 +753,10 @@ def read_account_capabilities(account_id=None, selected_account_type=None, query
         "selected_account_type": selected_account_type,
         "detected_account_types": detected,
         "accounts": records,
-        "live_submit": False,
-        "live_cancel": False,
+        "execution_mode": EXECUTION_MODE,
+        "live_submit": LIVE_SUBMIT_ENABLED,
+        "live_cancel": LIVE_CANCEL_ENABLED,
+        "simulation_only": SIMULATION_ONLY,
     }
     if emit:
         _enqueue("account_capabilities", "active_query", payload)
@@ -747,8 +773,10 @@ def read_account_capabilities(account_id=None, selected_account_type=None, query
                     [record for record in records if record["status"] == "UNCONFIRMED"]
                 ),
                 "linked_account_callbacks_suppressed": _STATE.linked_account_callbacks_suppressed,
-                "live_submit": False,
-                "live_cancel": False,
+                "execution_mode": EXECUTION_MODE,
+                "live_submit": LIVE_SUBMIT_ENABLED,
+                "live_cancel": LIVE_CANCEL_ENABLED,
+                "simulation_only": SIMULATION_ONLY,
             },
         )
     return payload
@@ -779,6 +807,23 @@ def _bind_runtime(ContextInfo):
         _runtime_error("ACCOUNT_BINDING_UNAVAILABLE")
         return False
     _set_account_state(account_id, account_type)
+    if TRADING_ENABLED:
+        mutation_gate_valid = (
+            EXECUTION_MODE == "SIMULATION_CALIBRATION"
+            and LIVE_SUBMIT_ENABLED is True
+            and LIVE_CANCEL_ENABLED is True
+            and SIMULATION_ONLY is True
+            and _spool_instance_id() is not None
+            and isinstance(AUTHORIZED_ACCOUNT_FINGERPRINT, str)
+            and _STATE.account_fingerprint == AUTHORIZED_ACCOUNT_FINGERPRINT
+            and _account_type(_STATE.account_type) == "STOCK"
+            and SIMULATION_MAX_ORDER_QUANTITY == 100
+            and SIMULATION_MAX_SUBMIT_CALLS == 2
+            and SIMULATION_MAX_CANCEL_CALLS == 2
+        )
+        if not mutation_gate_valid:
+            _runtime_error("SIMULATION_MUTATION_GATE_INVALID")
+            return False
     try:
         inbox = _ensure_spool()
     except Exception as exc:
@@ -871,10 +916,15 @@ def _read_command_frame(path):
             raise CommandError("missing client_order_id")
         if not isinstance(broker_token, str) or not broker_token or len(broker_token) >= 24:
             raise CommandError("invalid broker_token")
+        expected_token = "BQ" + hashlib.sha256(
+            (account_fingerprint + "\0" + client_order_id).encode("utf-8")
+        ).hexdigest()[:20]
+        if broker_token != expected_token:
+            raise CommandError("broker_token identity mismatch")
     return command
 
 
-def _command_result(command, result_status):
+def _command_result(command, result_status, live_side_effect=False):
     payload = {
         "command_id": command.get("command_id"),
         "command_type": command.get("command_type"),
@@ -882,7 +932,7 @@ def _command_result(command, result_status):
         "broker_token": command.get("broker_token"),
         "result_status": result_status,
         "execution_mode": EXECUTION_MODE,
-        "live_side_effect": False,
+        "live_side_effect": bool(live_side_effect),
     }
     _enqueue("command_result", "command_spool", payload)
     _safe_log("command_result", payload)
@@ -907,7 +957,10 @@ def _recover_orphaned_claims():
             command = _read_command_frame(source)
             _atomic_move(source, target)
             _STATE.commands_unknown += 1
-            _command_result(command, "UNKNOWN_ORPHANED")
+            if TRADING_ENABLED and command.get("command_type") != "REQUEST_SNAPSHOT":
+                _command_result(command, "SIMULATION_ORPHANED_UNKNOWN", True)
+            else:
+                _command_result(command, "UNKNOWN_ORPHANED", False)
         except Exception as exc:
             try:
                 if os.path.isfile(source):
@@ -928,7 +981,12 @@ def _reject_claimed(claimed_path, name, code, exc=None):
     _runtime_error(code, exc, {"file": name})
 
 
-def _process_claimed(claimed_path, name):
+def _execute_order_command(command, ContextInfo):
+    """SHADOW default replaced only in the generated simulation artifact."""
+    return "SHADOW_ACCEPTED", False
+
+
+def _process_claimed(claimed_path, name, ContextInfo):
     try:
         command = _read_command_frame(claimed_path)
     except Exception as exc:
@@ -956,18 +1014,40 @@ def _process_claimed(claimed_path, name):
             _runtime_error("COMMAND_SNAPSHOT_FAILED", exc, {"command_id": command.get("command_id")})
             return
     else:
-        # Deliberately no passorder/cancel call in P4 shadow. This validates the
-        # transport/idempotency/timing contract before any broker side effect is
-        # authorized.
-        result_status = "SHADOW_ACCEPTED"
+        try:
+            result_status, live_side_effect = _execute_order_command(command, ContextInfo)
+        except CommandError as exc:
+            target = os.path.join(_command_dir("rejected"), name)
+            _atomic_move(claimed_path, target)
+            _STATE.commands_rejected += 1
+            _command_result(command, "REJECTED_SAFETY_GATE", False)
+            _runtime_error(
+                "COMMAND_SAFETY_GATE_REJECTED",
+                exc,
+                {"command_id": command.get("command_id")},
+            )
+            return
+        except Exception as exc:
+            # Broker APIs are asynchronous. An exception cannot prove that no
+            # mutation escaped, so fail to UNKNOWN and never retry.
+            target = os.path.join(_command_dir("unknown"), name)
+            _atomic_move(claimed_path, target)
+            _STATE.commands_unknown += 1
+            _command_result(command, "SIMULATION_MUTATION_UNKNOWN", True)
+            _runtime_error(
+                "COMMAND_SIMULATION_MUTATION_UNKNOWN",
+                exc,
+                {"command_id": command.get("command_id")},
+            )
+            return
 
     target = os.path.join(_command_dir("processed"), name)
     _atomic_move(claimed_path, target)
     _STATE.commands_processed += 1
-    _command_result(command, result_status)
+    _command_result(command, result_status, live_side_effect if command_type != "REQUEST_SNAPSHOT" else False)
 
 
-def _drain_command_inbox(max_items=COMMAND_BATCH):
+def _drain_command_inbox(ContextInfo, max_items=COMMAND_BATCH):
     _recover_orphaned_claims()
     inbox_dir = _command_dir("inbox")
     claimed_dir = _command_dir("claimed")
@@ -987,7 +1067,7 @@ def _drain_command_inbox(max_items=COMMAND_BATCH):
             _atomic_move(source, target)
             _STATE.commands_claimed += 1
             claimed += 1
-            _process_claimed(target, name)
+            _process_claimed(target, name, ContextInfo)
         except Exception as exc:
             if os.path.isfile(target):
                 unknown = os.path.join(_command_dir("unknown"), name)
@@ -1026,7 +1106,7 @@ def command_tick(ContextInfo):
     if not _STATE.initialized and not _bind_runtime(ContextInfo):
         return
     flush_transport()
-    _drain_command_inbox()
+    _drain_command_inbox(ContextInfo)
 
 
 def periodic_snapshot_timer(ContextInfo):

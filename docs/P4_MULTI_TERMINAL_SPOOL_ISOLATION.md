@@ -102,8 +102,13 @@ The supplied files are generated and should not otherwise be edited by hand.
 - ingestion rejects any later event with another terminal instance ID;
 - each Host process consumes one selected instance only;
 - commands, quarantine, conflicts, and archives stay inside that instance leaf;
-- `TRADING_ENABLED=False`, `live_submit=false`, and `live_cancel=false` remain
-  unchanged.
+- `galaxy` and `guojin` require `TRADING_ENABLED=False`, `live_submit=false`,
+  and `live_cancel=false`, and their generated source contains zero broker
+  mutation calls;
+- a `SIMULATION_CALIBRATION` manifest is rejected unless Host is explicitly
+  started with `--allow-simulation-mutation`, the manifest fingerprint is
+  self-pinned, `simulation_only=true`, and all fixed quantity/session limits
+  match the reviewed contract.
 
 The former common spool layout is retained only as historical calibration
 evidence. Its structural directories do not contain a valid instance manifest

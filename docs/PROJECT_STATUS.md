@@ -13,11 +13,11 @@ Updated: 2026-09-16
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS** |
 | P3 Big QMT read-only | **PASS — multi-hour read/recovery/archive + V05 run_time deployment calibration complete** |
-| P4 Big QMT execution bridge | **SHADOW CODE GATE PASS — manifest-validated multi-terminal discovery; no live broker mutation** |
-| P5 Shadow / simulation / live canary | NOT STARTED |
-| Live trading allowed | **NO** |
-| Real QMT submit implemented | **NO** |
-| Real QMT cancel implemented | **NO** |
+| P4 Big QMT execution bridge | **SHADOW DEPLOYMENT GATE PASS** |
+| P5 Shadow / simulation / live canary | **SIMULATION MUTATION CODE GATE PASS — QMT redeployment/calibration pending** |
+| Production-account live trading allowed | **NO — galaxy/guojin remain source-level disabled** |
+| QMT submit implemented | **GUOJIN_SIM ONLY — pinned simulation calibration artifact** |
+| QMT cancel implemented | **GUOJIN_SIM ONLY — exact broker ID + broker-token match required** |
 | P2 execution-authority policy | **SIMULATION only** |
 
 ## Broker-neutral account discovery
@@ -48,8 +48,10 @@ atomically publish `instance.json` under
 arguments it enumerates immediate child directories, validates each manifest
 against the matching-session `bridge_ready`, and asks the operator to select.
 `--instance-id` is an optional shortcut with identical validation. Each Host
-process remains pinned to one terminal instance and account fingerprint. This
-isolation changes transport routing only and grants no trading authority.
+process remains pinned to one terminal instance and account fingerprint. A
+simulation mutation instance is hidden unless Host is started with
+`--allow-simulation-mutation`, and its manifest must pin the current account
+fingerprint and every calibration limit.
 
 ## P3 read plane
 
@@ -105,9 +107,11 @@ Standalone deployments:
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py`
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py`
 
-Build: `p4-shadow-command-spool-5`
+Production-account build: `p4-shadow-command-spool-5`
 
-Safety state:
+Simulation calibration build: `p5-simulation-calibration-1`
+
+Production-account safety state (`galaxy`, `guojin`):
 
 - `TRADING_ENABLED=False`
 - `execution_mode=SHADOW`
@@ -115,6 +119,19 @@ Safety state:
 - `live_cancel=False`
 - no `passorder`, order-lots, cancel/task mutation call surface
 - QMT-side remains single-threaded and Python 3.6 compatible
+
+Simulation-only safety state (`guojin_sim`):
+
+- exact account fingerprint pinned in the generated standalone file;
+- `execution_mode=SIMULATION_CALIBRATION`, never LIVE/LIVE_ARMED;
+- only A-share BUY, exactly 100 shares, limit price, maximum two submit calls
+  per QMT session;
+- cancel requires one exact active-query match on both broker order ID and the
+  deterministic `BQ...` broker token;
+- commands must carry the current QMT session and explicit simulation marker;
+- Host and publisher each require separate explicit simulation authorization;
+- simulation dispatch results never enter the OMS SHADOW result journal and
+  cannot create broker ACK state.
 
 Timing:
 
@@ -181,7 +198,7 @@ QMT command results are durably journaled in OMS schema v5. Duplicate/conflictin
 
 | Verification | State |
 | --- | --- |
-| Latest verified Python suite | **217 passed on Python 3.12** |
+| Latest verified Python suite | **234 passed on Python 3.12** |
 | QMT-side Python 3.6 syntax contract | **PASS** |
 | Broker mutation-call static audit | **PASS** |
 | FSM implementation/formal conformance | **PASS** |
@@ -202,9 +219,14 @@ QMT command results are durably journaled in OMS schema v5. Duplicate/conflictin
 - P4 shadow boundary: `docs/P4_SHADOW_BRIDGE_SCOPE.md`
 - P4 shadow gate: `docs/P4_GATE_RESULT_20260915.md`
 - P4 ORDER/DEAL token calibration: `docs/P4_ORDER_DEAL_BROKER_TOKEN_CALIBRATION.md`
+- P5 simulation mutation gate: `docs/P5_GUOJIN_SIMULATION_MUTATION_GATE.md`
 
 ## Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW code gate PASS; ORDER/DEAL broker lifecycle calibration remains pending. Live trading remains disabled and unimplemented.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment gate PASS. P5 simulation mutation
+code gate PASS; Guojin simulation QMT redeployment and ORDER/DEAL calibration
+remain pending. Production-account live trading remains disabled.**
 
-The next checkpoint is observation-only ORDER/DEAL + `m_strRemark` calibration using the documented quarantine path. No broker mutation gate may be opened from the current status.
+The next checkpoint is a maximum-100-share Guojin simulation calibration using
+the pinned `guojin_sim` artifact. No mutation authority exists in the Galaxy or
+Guojin production-account artifacts.

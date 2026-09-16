@@ -1,8 +1,10 @@
-# P4 Big QMT Shadow Bridge Scope
+# P4 Big QMT Shadow Bridge Scope and P5 Simulation Exception
 
 ## Current state
 
-**P4: SHADOW CODE GATE PASS — round-trip and OMS reconciliation implemented; live broker mutation not implemented.**
+**P4: SHADOW DEPLOYMENT GATE PASS. Galaxy and Guojin production-account
+artifacts remain SHADOW-only. A separately authorized P5 mutation surface now
+exists only in the account-pinned `guojin_sim` artifact.**
 
 The purpose of the first P4 checkpoint is to calibrate the asynchronous execution plumbing against Guojin QMT without creating broker side effects.
 
@@ -117,7 +119,8 @@ Deploy one standalone instance file:
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py`
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py`
 
-Both are generated from `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py` and are:
+All are generated from `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py`. The Galaxy
+and Guojin production-account artifacts are:
 
 - Python 3.6 compatible
 - execution mode `SHADOW`
@@ -131,6 +134,12 @@ Both are generated from `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05.py` and are:
 - no socket/thread/process dependency
 - no live broker mutation call surface
 - fixed to an instance-specific spool leaf with no environment-variable setup
+
+The generator injects the two broker mutation calls only into
+`BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py`. That artifact pins the observed
+simulation account fingerprint, accepts only current-session explicitly marked
+calibration commands, limits submit to exactly 100 A-share BUY shares, and
+requires broker-order-ID plus broker-token equality before cancel.
 
 ## Runtime probe
 
@@ -171,12 +180,21 @@ python -m bigqmt_autotrader.qmt.shadow_probe `
 
 The second command still has **zero broker trading side effect** under V05; it validates command identity, 1-second consumption, durable claim/process and return-event flow only.
 
-## Explicitly out of scope for this checkpoint
+## P5 simulation exception
 
-- `passorder`
-- real cancel
+The separately authorized simulation workflow is documented in
+`P5_GUOJIN_SIMULATION_MUTATION_GATE.md`. A simulation command result reports
+only API dispatch/return status. It is not broker ACK evidence; ORDER/DEAL
+callback or active-query evidence remains required.
+
+## Still explicitly out of scope
+
+- any `passorder` or cancel call in `galaxy` or `guojin`
+- any production-account mutation
 - LIVE_CANARY / LIVE_ARMED
 - treating QMT callback status codes as calibrated broker lifecycle evidence
 - automatic resend after UNKNOWN
 
-Those require a separate, explicitly authorized mutation gate after ORDER/DEAL and status-code calibration. The current code contains no real broker mutation call.
+Those require a separate authorization after simulation ORDER/DEAL and
+status-code calibration. Static CI requires zero mutation calls in the
+production-account template and generated artifacts.

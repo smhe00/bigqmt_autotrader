@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import importlib.util
 import json
 import os
@@ -93,7 +94,11 @@ def base_command(bridge, command_id="cmd-001", command_type="SUBMIT_LIMIT"):
         "account_fingerprint": bridge._STATE.account_fingerprint,
         "command_type": command_type,
         "client_order_id": "cid-001",
-        "broker_token": "BQ" + "a" * 20,
+        "broker_token": "BQ"
+        + hashlib.sha256(
+            (bridge._STATE.account_fingerprint + "\0" + "cid-001").encode("utf-8")
+        )
+        .hexdigest()[:20],
         "payload": {"symbol": "000001.SZ", "side": "BUY", "quantity": 100, "limit_price": "10.5"},
     }
     if command_type == "REQUEST_SNAPSHOT":

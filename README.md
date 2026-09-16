@@ -4,13 +4,16 @@ Personal production-grade automated trading execution platform using **Big QMT a
 
 ## Safety status
 
-The project has passed **P0 / G0**, **P1 Offline OMS**, and **P2 Deterministic Risk Engine**. **P3 Big QMT read-only integration is now in progress.**
+The project has passed **P0 / G0**, **P1 Offline OMS**, **P2 Deterministic Risk
+Engine**, **P3 Big QMT read-only**, and the **P4 SHADOW deployment gate**. P5
+now has a code-complete, account-pinned Guojin simulation calibration path.
 
 - Host-side development baseline: **Python 3.12**.
 - QMT-side bridge remains **Python 3.6 syntax compatible** for the built-in QMT runtime.
-- Live trading is **not enabled**.
-- Real QMT order submission is **not implemented**.
-- Real QMT cancellation is **not implemented**.
+- Production-account live trading is **not enabled**.
+- QMT broker mutation exists only in the fingerprint-pinned `guojin_sim`
+  calibration artifact; Galaxy and Guojin production artifacts contain zero
+  submit/cancel API calls.
 - The P3 QMT-side adapter can read and normalize `ACCOUNT`, `POSITION`, `ORDER`, and `DEAL` snapshots and callback facts.
 - The adapter stores full normalized facts only in a bounded in-memory queue; QMT logs contain safe summaries only.
 - No QMT mutation function is called by the P3 adapter.
@@ -38,12 +41,12 @@ Market/account state
         |
         +---- Current execution: deterministic simulated driver
         |
-        +---- P3 read-only facts: Big QMT adapter (IN PROGRESS)
+        +---- P3 read-only facts: Big QMT adapter (PASS)
         |
   future localhost transport
         |
         v
- QMT-side Read-Only Bridge -- Python 3.6-compatible, no trading calls
+ QMT-side bridge -- Python 3.6; production SHADOW / pinned simulation calibration
         |
         v
   Guojin QMT 2.1.19.0
@@ -55,8 +58,8 @@ Market/account state
 2. **P1 — PASS**: crash-recoverable offline OMS with SQLite WAL, fencing, replay and reconciliation.
 3. **P2 — PASS**: deterministic four-level pre-trade risk engine and OMS-owned risk-to-submit boundary.
 4. **P3 — PASS**: Big QMT read-only query/callback transport, recovery/archive, and Guojin V05 timer calibration are complete.
-5. **P4 — SHADOW CODE GATE PASS**: durable command round-trip and OMS reconciliation are implemented; ORDER/DEAL calibration remains pending and live submit/cancel are absent.
-6. **P5 — NOT STARTED**: shadow, simulation, then tightly limited live canary.
+5. **P4 — SHADOW DEPLOYMENT GATE PASS**: durable command round-trip and OMS reconciliation are implemented without production mutation.
+6. **P5 — SIMULATION MUTATION CODE GATE PASS**: `guojin_sim` is fingerprint-pinned and tightly bounded; QMT redeployment and ORDER/DEAL calibration are pending.
 
 No phase may skip directly to live trading.
 
@@ -88,8 +91,10 @@ P3 implementation candidate additionally verifies:
 - `get_trade_detail_data()` query results are normalized for account, position, order and deal facts;
 - raw account IDs are excluded from normalized output in favor of a SHA-256 account fingerprint;
 - QMT log output excludes cash balances, quantities, order IDs, trade IDs and raw account IDs;
-- source-level tests reject broker mutation call surfaces and thread/process imports;
-- real submit/cancel stubs remain hard-disabled.
+- source-level tests reject broker mutation calls in the template and both
+  production-account artifacts;
+- static audit permits exactly one submit and one cancel call only inside the
+  reviewed `guojin_sim` executor.
 
 ## Local development
 

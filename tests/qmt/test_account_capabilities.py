@@ -83,6 +83,20 @@ def test_capability_event_cannot_grant_live_authority():
         encode_transport_frame(capability_event(value))
 
 
+def test_capability_event_allows_explicit_simulation_only_authority():
+    value = payload()
+    value.update(
+        {
+            "execution_mode": "SIMULATION_CALIBRATION",
+            "simulation_only": True,
+            "live_submit": True,
+            "live_cancel": True,
+        }
+    )
+
+    assert encode_transport_frame(capability_event(value))
+
+
 def test_capability_event_rejects_detected_list_that_disagrees_with_records():
     value = payload()
     value["detected_account_types"] = ["STOCK"]

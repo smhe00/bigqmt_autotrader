@@ -30,6 +30,11 @@ class QmtInstance:
     account_type: str
     bridge_build: str
     created_ms: int
+    execution_mode: str
+    trading_enabled: bool
+    live_submit: bool
+    live_cancel: bool
+    simulation_only: bool
 
 
 def valid_instance_id(value: str) -> bool:
@@ -83,7 +88,12 @@ def _latest_bridge_ready(root: Path) -> QmtEvent:
     return max(ready_events, key=lambda event: (event.timestamp_ms, event.sequence, event.session_id))
 
 
-def load_instance(spool_base: str | os.PathLike[str], instance_id: str) -> QmtInstance:
+def load_instance(
+    spool_base: str | os.PathLike[str],
+    instance_id: str,
+    *,
+    allow_simulation_mutation: bool = False,
+) -> QmtInstance:
     if not valid_instance_id(instance_id):
         raise QmtInstanceError("invalid instance_id")
     base = Path(spool_base).expanduser().resolve()
@@ -97,12 +107,31 @@ def load_instance(spool_base: str | os.PathLike[str], instance_id: str) -> QmtIn
         "terminal_instance_id": instance_id,
         "protocol_version": BRIDGE_PROTOCOL_VERSION,
         "transport_version": TRANSPORT_VERSION,
-        "execution_mode": "SHADOW",
-        "trading_enabled": False,
-        "live_submit": False,
-        "live_cancel": False,
     }
     for key, expected in required.items():
+        if manifest.get(key) != expected:
+            raise QmtInstanceError(f"instance manifest mismatch: {key}")
+
+    execution_mode = manifest.get("execution_mode")
+    if execution_mode == "SHADOW":
+        safety_required = {
+            "trading_enabled": False,
+            "live_submit": False,
+            "live_cancel": False,
+        }
+    elif execution_mode == "SIMULATION_CALIBRATION" and allow_simulation_mutation:
+        safety_required = {
+            "trading_enabled": True,
+            "live_submit": True,
+            "live_cancel": True,
+            "simulation_only": True,
+            "max_order_quantity": 100,
+            "max_submit_calls_per_session": 2,
+            "max_cancel_calls_per_session": 2,
+        }
+    else:
+        raise QmtInstanceError("instance execution mode is not authorized")
+    for key, expected in safety_required.items():
         if manifest.get(key) != expected:
             raise QmtInstanceError(f"instance manifest mismatch: {key}")
 
@@ -121,6 +150,9 @@ def load_instance(spool_base: str | os.PathLike[str], instance_id: str) -> QmtIn
         raise QmtInstanceError("invalid instance bridge_build")
     if isinstance(created_ms, bool) or not isinstance(created_ms, int) or created_ms <= 0:
         raise QmtInstanceError("invalid instance created_ms")
+    if execution_mode == "SIMULATION_CALIBRATION":
+        if manifest.get("authorized_account_fingerprint") != fingerprint:
+            raise QmtInstanceError("simulation instance account fingerprint is not pinned")
 
     ready = _latest_bridge_ready(root)
     if ready.session_id != session_id:
@@ -132,14 +164,15 @@ def load_instance(spool_base: str | os.PathLike[str], instance_id: str) -> QmtIn
     capabilities = ready.payload.get("capabilities")
     if not isinstance(capabilities, dict):
         raise QmtInstanceError("bridge_ready capabilities missing")
-    for key, expected in {
+    capability_required = {
         "bridge_build": bridge_build,
-        "execution_mode": "SHADOW",
-        "trading_enabled": False,
-        "live_submit": False,
-        "live_cancel": False,
+        "execution_mode": execution_mode,
+        **safety_required,
         "spool_instance_id": instance_id,
-    }.items():
+    }
+    if execution_mode == "SIMULATION_CALIBRATION":
+        capability_required["authorized_account_fingerprint"] = fingerprint
+    for key, expected in capability_required.items():
         if capabilities.get(key) != expected:
             raise QmtInstanceError(f"bridge_ready capability mismatch: {key}")
 
@@ -151,10 +184,19 @@ def load_instance(spool_base: str | os.PathLike[str], instance_id: str) -> QmtIn
         account_type=account_type,
         bridge_build=bridge_build,
         created_ms=created_ms,
+        execution_mode=execution_mode,
+        trading_enabled=bool(manifest.get("trading_enabled")),
+        live_submit=bool(manifest.get("live_submit")),
+        live_cancel=bool(manifest.get("live_cancel")),
+        simulation_only=manifest.get("simulation_only") is True,
     )
 
 
-def discover_instances(spool_base: str | os.PathLike[str]) -> tuple[QmtInstance, ...]:
+def discover_instances(
+    spool_base: str | os.PathLike[str],
+    *,
+    allow_simulation_mutation: bool = False,
+) -> tuple[QmtInstance, ...]:
     base = Path(spool_base).expanduser().resolve()
     if not base.is_dir() or _is_link_or_reparse(base):
         return ()
@@ -163,7 +205,13 @@ def discover_instances(spool_base: str | os.PathLike[str]) -> tuple[QmtInstance,
         if not child.is_dir() or not valid_instance_id(child.name):
             continue
         try:
-            instances.append(load_instance(base, child.name))
+            instances.append(
+                load_instance(
+                    base,
+                    child.name,
+                    allow_simulation_mutation=allow_simulation_mutation,
+                )
+            )
         except QmtInstanceError:
             continue
     return tuple(instances)

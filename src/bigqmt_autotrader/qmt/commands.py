@@ -117,18 +117,28 @@ class QmtCommandSpool:
         expires_ms: int,
         command_id: str | None = None,
         created_ms: int | None = None,
+        simulation_calibration: bool = False,
+        expected_qmt_session_id: str | None = None,
     ) -> QmtCommand:
+        payload: dict[str, Any] = {
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+            "limit_price": limit_price,
+        }
+        if simulation_calibration:
+            payload.update(
+                {
+                    "simulation_calibration": True,
+                    "expected_qmt_session_id": expected_qmt_session_id,
+                }
+            )
         command = self._build(
             command_type=QmtCommandType.SUBMIT_LIMIT,
             account_fingerprint=account_fingerprint,
             client_order_id=client_order_id,
             broker_token=broker_token_for(account_fingerprint, client_order_id),
-            payload={
-                "symbol": symbol,
-                "side": side,
-                "quantity": quantity,
-                "limit_price": limit_price,
-            },
+            payload=payload,
             expires_ms=expires_ms,
             command_id=command_id,
             created_ms=created_ms,
@@ -145,13 +155,23 @@ class QmtCommandSpool:
         expires_ms: int,
         command_id: str | None = None,
         created_ms: int | None = None,
+        simulation_calibration: bool = False,
+        expected_qmt_session_id: str | None = None,
     ) -> QmtCommand:
+        payload: dict[str, Any] = {"broker_order_id": broker_order_id}
+        if simulation_calibration:
+            payload.update(
+                {
+                    "simulation_calibration": True,
+                    "expected_qmt_session_id": expected_qmt_session_id,
+                }
+            )
         command = self._build(
             command_type=QmtCommandType.CANCEL_ORDER,
             account_fingerprint=account_fingerprint,
             client_order_id=client_order_id,
             broker_token=broker_token_for(account_fingerprint, client_order_id),
-            payload={"broker_order_id": broker_order_id},
+            payload=payload,
             expires_ms=expires_ms,
             command_id=command_id,
             created_ms=created_ms,
@@ -292,3 +312,8 @@ def _validate_command(command: QmtCommand) -> None:
         broker_order_id = command.payload.get("broker_order_id")
         if not isinstance(broker_order_id, str) or not broker_order_id:
             raise QmtCommandError("cancel requires broker_order_id")
+
+    if command.payload.get("simulation_calibration") is True:
+        expected_session = command.payload.get("expected_qmt_session_id")
+        if not isinstance(expected_session, str) or not expected_session:
+            raise QmtCommandError("simulation calibration requires expected_qmt_session_id")

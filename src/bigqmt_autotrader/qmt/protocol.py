@@ -170,8 +170,21 @@ def _validate_account_capabilities_payload(payload: Mapping[str, Any]) -> None:
             observed_detected.append(account_type)
     if detected != observed_detected:
         raise QmtProtocolError("account_capabilities detected types do not match records")
-    if payload.get("live_submit") is not False or payload.get("live_cancel") is not False:
-        raise QmtProtocolError("account_capabilities cannot grant live trading authority")
+    live_submit = payload.get("live_submit")
+    live_cancel = payload.get("live_cancel")
+    execution_mode = payload.get("execution_mode", "SHADOW")
+    if execution_mode == "SHADOW":
+        if live_submit is not False or live_cancel is not False:
+            raise QmtProtocolError("SHADOW account_capabilities cannot grant live authority")
+    elif execution_mode == "SIMULATION_CALIBRATION":
+        if (
+            live_submit is not True
+            or live_cancel is not True
+            or payload.get("simulation_only") is not True
+        ):
+            raise QmtProtocolError("invalid simulation account_capabilities authority")
+    else:
+        raise QmtProtocolError("account_capabilities execution_mode is unsupported")
 
 
 def _validate_command_result_payload(payload: Mapping[str, Any]) -> None:
@@ -184,23 +197,53 @@ def _validate_command_result_payload(payload: Mapping[str, Any]) -> None:
         raise QmtProtocolError("command_result command_id must be non-empty text")
     if command_type not in {"SUBMIT_LIMIT", "CANCEL_ORDER", "REQUEST_SNAPSHOT"}:
         raise QmtProtocolError("command_result has unsupported command_type")
-    allowed_by_command = {
+    shadow_allowed = {
         "SUBMIT_LIMIT": {"SHADOW_ACCEPTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"},
         "CANCEL_ORDER": {"SHADOW_ACCEPTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"},
-        "REQUEST_SNAPSHOT": {
-            "SNAPSHOT_EMITTED",
-            "REJECTED_EXPIRED",
-            "UNKNOWN_ORPHANED",
-        },
+        "REQUEST_SNAPSHOT": {"SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"},
     }
+    simulation_allowed = {
+        "SUBMIT_LIMIT": {
+            "SIMULATION_SUBMIT_CALL_RETURNED",
+            "SIMULATION_MUTATION_UNKNOWN",
+            "SIMULATION_ORPHANED_UNKNOWN",
+            "REJECTED_SAFETY_GATE",
+            "REJECTED_EXPIRED",
+        },
+        "CANCEL_ORDER": {
+            "SIMULATION_CANCEL_SIGNAL_SENT",
+            "SIMULATION_CANCEL_NOT_CANCELLABLE",
+            "SIMULATION_CANCEL_NOT_SENT",
+            "SIMULATION_MUTATION_UNKNOWN",
+            "SIMULATION_ORPHANED_UNKNOWN",
+            "REJECTED_SAFETY_GATE",
+            "REJECTED_EXPIRED",
+        },
+        "REQUEST_SNAPSHOT": {"SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"},
+    }
+    if execution_mode == "SHADOW":
+        allowed_by_command = shadow_allowed
+    elif execution_mode == "SIMULATION_CALIBRATION":
+        allowed_by_command = simulation_allowed
+    else:
+        raise QmtProtocolError("command_result execution_mode is unsupported")
     if result_status not in allowed_by_command.get(command_type, set()):
         raise QmtProtocolError("command_result status is invalid for command_type")
-    if execution_mode != "SHADOW":
-        raise QmtProtocolError("P4 command_result execution_mode must be SHADOW")
     if not isinstance(live_side_effect, bool):
         raise QmtProtocolError("command_result live_side_effect must be boolean")
-    if live_side_effect:
-        raise QmtProtocolError("P4 command_result cannot claim a live side effect")
+    if execution_mode == "SHADOW" and live_side_effect:
+        raise QmtProtocolError("SHADOW command_result cannot claim a live side effect")
+    simulation_side_effect_statuses = {
+        "SIMULATION_SUBMIT_CALL_RETURNED",
+        "SIMULATION_CANCEL_SIGNAL_SENT",
+        "SIMULATION_CANCEL_NOT_SENT",
+        "SIMULATION_MUTATION_UNKNOWN",
+        "SIMULATION_ORPHANED_UNKNOWN",
+    }
+    if execution_mode == "SIMULATION_CALIBRATION" and (
+        live_side_effect != (result_status in simulation_side_effect_statuses)
+    ):
+        raise QmtProtocolError("simulation command_result side-effect flag is inconsistent")
 
     client_order_id = payload.get("client_order_id")
     broker_token = payload.get("broker_token")

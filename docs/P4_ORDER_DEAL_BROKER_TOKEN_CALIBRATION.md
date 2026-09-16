@@ -2,15 +2,22 @@
 
 ## Purpose and safety boundary
 
-This checkpoint validates whether Guojin QMT preserves the deterministic Host `broker_token` in ORDER and DEAL `m_strRemark` fields and records the associated raw status/fill fields. It does not enable trading or translate status codes into OMS lifecycle evidence.
+This checkpoint validates whether Guojin QMT preserves the deterministic Host
+`broker_token` in ORDER and DEAL `m_strRemark` fields and records the associated
+raw status/fill fields. The user separately authorized tightly bounded broker
+mutation on the `guojin_sim` simulated account on 2026-09-16. It still does not
+translate uncalibrated QMT status codes into OMS lifecycle evidence.
 
 Hard invariants:
 
-- `TRADING_ENABLED=False`
-- `live_submit=false`
-- `live_cancel=false`
-- no real broker mutation API call
+- `galaxy` and `guojin`: `TRADING_ENABLED=False`, `live_submit=false`,
+  `live_cancel=false`, and no broker mutation call in source
+- `guojin_sim`: exact account fingerprint pin, `simulation_only=true`, 100-share
+  BUY limit, two submits/two cancels maximum per QMT session
+- mutation commands expire within 30 seconds and pin the current QMT session
+- cancel requires an exact broker-order-ID and `m_strRemark` token match
 - `SHADOW_ACCEPTED != broker ACK`
+- `SIMULATION_SUBMIT_CALL_RETURNED != broker ACK`
 - ORDER/DEAL events remain quarantined until a separately reviewed status mapping is approved
 - an unknown or malformed remark is never matched by symbol, quantity, price, time proximity or row order
 
@@ -36,13 +43,24 @@ Observation never supplies an `EvidenceMapper`, so the same event remains in sem
 
 ## Runtime calibration procedure
 
-Because V05 cannot create a real order, obtain ORDER/DEAL samples only from an independently authorized manual/simulation action or an already-existing broker record. Do not change V05 and do not ask the Host to submit or cancel.
+Deploy the reviewed `BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py`, then start Host
+with both the instance selection and the explicit simulation flag:
+
+```powershell
+python -m bigqmt_autotrader.qmt.host `
+  --instance-id guojin_sim `
+  --allow-simulation-mutation
+```
+
+Publish mutation commands only through `simulation_probe`; the older
+`shadow_probe` deliberately omits the required current-session marker and is
+rejected by the simulation bridge.
 
 Read-only report command:
 
 ```powershell
 python -m bigqmt_autotrader.qmt.calibration_probe `
-  --spool-dir D:\BigQMTData\spool\galaxy `
+  --spool-dir D:\BigQMTData\spool\guojin_sim `
   --expected-account-fingerprint <sha256:...> `
   --client-order-id <known-durable-client-order-id>
 ```
@@ -83,4 +101,6 @@ All of the following require reviewer approval:
 6. Unknown token, missing remark, account mismatch, conflicting broker ID, overfill and status regression all fail closed.
 7. A code review confirms command results remain separate from broker evidence.
 
-Until all seven pass, `broker_evidence_mapping_enabled` remains false, ORDER/DEAL remain quarantined, and P4 remains SHADOW only.
+Until all seven pass, `broker_evidence_mapping_enabled` remains false and
+ORDER/DEAL remain quarantined. The simulation mutation exception does not
+advance or authorize production-account execution.

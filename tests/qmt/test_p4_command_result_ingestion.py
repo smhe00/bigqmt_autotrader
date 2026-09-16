@@ -97,6 +97,47 @@ def test_command_result_advances_sequence_without_faking_broker_state():
     assert host.read_model.healthy is True
 
 
+def test_simulation_dispatch_result_is_logged_but_never_sent_to_oms_sink():
+    class Sink:
+        def __init__(self):
+            self.calls = []
+
+        def ingest_execution_command_result(self, **kwargs):
+            self.calls.append(kwargs)
+
+    sink = Sink()
+    ingress = QmtIngressBuffer(expected_account_fingerprint=FP)
+    host = QmtHostIngestion(command_result_sink=sink)
+    host.handle(ingress.ingest_frame(encode_transport_frame(event(1, "snapshot", snapshot_payload()))))
+    token = broker_token_for(FP, "cid-sim-001")
+
+    outcome = host.handle(
+        ingress.ingest_frame(
+            encode_transport_frame(
+                event(
+                    2,
+                    "command_result",
+                    {
+                        "command_id": "sim-submit-001",
+                        "command_type": "SUBMIT_LIMIT",
+                        "client_order_id": "cid-sim-001",
+                        "broker_token": token,
+                        "result_status": "SIMULATION_SUBMIT_CALL_RETURNED",
+                        "execution_mode": "SIMULATION_CALIBRATION",
+                        "live_side_effect": True,
+                    },
+                )
+            )
+        )
+    )
+
+    assert outcome.command_result_ingested is False
+    assert outcome.evidence_ingested is False
+    assert outcome.quarantined is False
+    assert sink.calls == []
+    assert host.read_model.view is not None
+    assert host.read_model.view.sequence == 2
+
 def test_command_result_cannot_claim_non_boolean_live_side_effect():
     with pytest.raises(QmtProtocolError):
         encode_transport_frame(

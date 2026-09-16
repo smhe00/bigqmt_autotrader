@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "bigqmt_autotrader"
+QMT_SIDE = ROOT / "qmt_side"
 
 ALLOWED_ATTRIBUTE_CALLS = {
     "submit_limit_order": {
@@ -134,6 +135,66 @@ def main() -> None:
                     f"expected controlled surface {name} missing from {relative}:{function}()"
                 )
 
+    qmt_mutation_names = {
+        "passorder",
+        "cancel",
+        "order_lots",
+        "algo_passorder",
+        "smart_algo_passorder",
+        "cancel_task",
+        "pause_task",
+        "resume_task",
+    }
+    qmt_paths = {
+        "template": QMT_SIDE / "BIGQMT_EXECUTION_BRIDGE_V05.py",
+        "galaxy": QMT_SIDE / "BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py",
+        "guojin": QMT_SIDE / "BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py",
+        "guojin_sim": QMT_SIDE / "BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py",
+    }
+    qmt_observed: dict[str, list[tuple[str, str, int]]] = {}
+    for deployment, path in qmt_paths.items():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        calls: list[tuple[str, str, int]] = []
+        function_stack: list[str] = []
+
+        class QmtVisitor(ast.NodeVisitor):
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                function_stack.append(node.name)
+                self.generic_visit(node)
+                function_stack.pop()
+
+            def visit_Call(self, node: ast.Call) -> None:
+                if isinstance(node.func, ast.Name) and node.func.id in qmt_mutation_names:
+                    calls.append(
+                        (
+                            node.func.id,
+                            function_stack[-1] if function_stack else "<module>",
+                            node.lineno,
+                        )
+                    )
+                self.generic_visit(node)
+
+        QmtVisitor().visit(tree)
+        qmt_observed[deployment] = calls
+
+    for deployment in ("template", "galaxy", "guojin"):
+        for name, function, line in qmt_observed[deployment]:
+            violations.append(
+                f"broker mutation {name} escaped into {deployment} QMT artifact at "
+                f"{function}():{line}"
+            )
+    sim_calls = qmt_observed["guojin_sim"]
+    expected_sim_calls = {
+        ("passorder", "_execute_order_command"),
+        ("cancel", "_execute_order_command"),
+    }
+    observed_sim_calls = {(name, function) for name, function, _line in sim_calls}
+    if observed_sim_calls != expected_sim_calls or len(sim_calls) != 2:
+        violations.append(
+            "guojin_sim QMT mutation surface must contain exactly one passorder and one "
+            "cancel call inside _execute_order_command()"
+        )
+
     if violations:
         raise SystemExit("SIDE-EFFECT SURFACE AUDIT FAILED\n" + "\n".join(violations))
 
@@ -146,6 +207,8 @@ def main() -> None:
         for name, locations in observed.items():
             rendered = ", ".join(f"{path}:{fn}()" for path, fn in sorted(locations))
             print(f"  {group} {name}: {rendered}")
+    print("  qmt simulation mutation calls: guojin_sim:_execute_order_command(passorder,cancel)")
+    print("  qmt production mutation calls: template=0, galaxy=0, guojin=0")
 
 
 if __name__ == "__main__":

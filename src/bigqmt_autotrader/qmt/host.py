@@ -182,7 +182,7 @@ def _choose_instance(instances: tuple[QmtInstance, ...]) -> QmtInstance:
     print("Discovered valid QMT instances:", flush=True)
     for index, instance in enumerate(instances, start=1):
         print(
-            f"[{index}] {instance.instance_id}  SHADOW  {instance.account_type}  "
+            f"[{index}] {instance.instance_id}  {instance.execution_mode}  {instance.account_type}  "
             f"session={instance.session_id}",
             flush=True,
         )
@@ -203,20 +203,31 @@ def _resolve_spool_instance(args: argparse.Namespace) -> QmtInstance:
         if args.instance_id is not None and args.instance_id != instance_id:
             raise SystemExit("--instance-id must match the --spool-dir leaf name")
         try:
-            return load_instance(os.path.dirname(root), instance_id)
+            return load_instance(
+                os.path.dirname(root),
+                instance_id,
+                allow_simulation_mutation=args.allow_simulation_mutation,
+            )
         except QmtInstanceError as exc:
             raise SystemExit(str(exc)) from exc
 
     spool_base = os.path.abspath(os.path.expanduser(args.spool_base))
     if args.instance_id is not None:
         try:
-            return load_instance(spool_base, args.instance_id)
+            return load_instance(
+                spool_base,
+                args.instance_id,
+                allow_simulation_mutation=args.allow_simulation_mutation,
+            )
         except QmtInstanceError as exc:
             raise SystemExit(str(exc)) from exc
 
     waiting_logged = False
     while True:
-        instances = discover_instances(spool_base)
+        instances = discover_instances(
+            spool_base,
+            allow_simulation_mutation=args.allow_simulation_mutation,
+        )
         if instances:
             return _choose_instance(instances)
         if not waiting_logged:
@@ -281,6 +292,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--spool-dir", default=None)
     parser.add_argument("--spool-base", default=str(DEFAULT_SPOOL_BASE))
     parser.add_argument("--instance-id", default=None)
+    parser.add_argument(
+        "--allow-simulation-mutation",
+        action="store_true",
+        help="Explicitly admit a manifest-pinned SIMULATION_CALIBRATION instance.",
+    )
     parser.add_argument("--poll-interval", type=float, default=0.2)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=18765)
@@ -430,7 +446,11 @@ def main(argv: list[str] | None = None) -> int:
         "ready",
         {
             "transport": "file_spool",
-            "trading_enabled": False,
+            "trading_enabled": instance.trading_enabled if instance is not None else False,
+            "execution_mode": instance.execution_mode if instance is not None else "SHADOW",
+            "live_submit": instance.live_submit if instance is not None else False,
+            "live_cancel": instance.live_cancel if instance is not None else False,
+            "simulation_only": instance.simulation_only if instance is not None else False,
             "account_pin_mode": (
                 "instance_manifest"
             ),

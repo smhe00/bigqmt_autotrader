@@ -60,6 +60,56 @@ def _write_instance(base: Path, instance_id: str = "terminal_01") -> Path:
     return root
 
 
+def _write_simulation_instance(base: Path, instance_id: str = "sim_01") -> Path:
+    root = base / instance_id
+    inbox = root / "inbox"
+    inbox.mkdir(parents=True)
+    safety = {
+        "execution_mode": "SIMULATION_CALIBRATION",
+        "trading_enabled": True,
+        "live_submit": True,
+        "live_cancel": True,
+        "simulation_only": True,
+        "authorized_account_fingerprint": FINGERPRINT,
+        "max_order_quantity": 100,
+        "max_submit_calls_per_session": 2,
+        "max_cancel_calls_per_session": 2,
+    }
+    manifest = {
+        "manifest_version": "1",
+        "terminal_instance_id": instance_id,
+        "protocol_version": "0.2",
+        "transport_version": "1",
+        "bridge_build": "p5-simulation-calibration-1",
+        "session_id": "sim-session-01",
+        "account_fingerprint": FINGERPRINT,
+        "account_type": "STOCK",
+        "created_ms": 1_700_000_000_000,
+        **safety,
+    }
+    (root / "instance.json").write_text(json.dumps(manifest), encoding="utf-8")
+    event = {
+        "protocol_version": "0.2",
+        "terminal_instance_id": instance_id,
+        "session_id": "sim-session-01",
+        "sequence": 1,
+        "timestamp_ms": 1_700_000_000_001,
+        "event_type": "bridge_ready",
+        "source": "init",
+        "account_fingerprint": FINGERPRINT,
+        "account_type": "STOCK",
+        "payload": {
+            "capabilities": {
+                "bridge_build": "p5-simulation-calibration-1",
+                "spool_instance_id": instance_id,
+                **safety,
+            }
+        },
+    }
+    (inbox / "ready.json").write_bytes(encode_transport_frame(event))
+    return root
+
+
 def test_discovers_only_manifest_and_bridge_ready_validated_children(tmp_path: Path) -> None:
     _write_instance(tmp_path, "terminal_01")
     for legacy_name in ("archive", "commands", "processed"):
@@ -121,11 +171,39 @@ def test_host_defaults_to_broker_neutral_spool_discovery() -> None:
     args = build_parser().parse_args([])
     assert args.instance_id is None
     assert args.spool_base == r"D:\BigQMTData\spool"
+    assert args.allow_simulation_mutation is False
     host_source = (Path(__file__).resolve().parents[2] / "src" / "bigqmt_autotrader" / "qmt" / "host.py").read_text(
         encoding="utf-8"
     )
     assert "galaxy" not in host_source.lower()
     assert "guojin" not in host_source.lower()
+
+
+def test_simulation_instance_requires_explicit_host_authority(tmp_path: Path) -> None:
+    _write_simulation_instance(tmp_path)
+
+    with pytest.raises(QmtInstanceError, match="not authorized"):
+        load_instance(tmp_path, "sim_01")
+    assert discover_instances(tmp_path) == ()
+
+    instance = load_instance(tmp_path, "sim_01", allow_simulation_mutation=True)
+    assert instance.execution_mode == "SIMULATION_CALIBRATION"
+    assert instance.simulation_only is True
+    assert instance.live_submit is True
+    assert instance.live_cancel is True
+    assert [item.instance_id for item in discover_instances(
+        tmp_path, allow_simulation_mutation=True
+    )] == ["sim_01"]
+
+
+def test_simulation_instance_rejects_unpinned_account(tmp_path: Path) -> None:
+    root = _write_simulation_instance(tmp_path)
+    manifest = json.loads((root / "instance.json").read_text(encoding="utf-8"))
+    manifest["authorized_account_fingerprint"] = "sha256:" + "b" * 64
+    (root / "instance.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(QmtInstanceError, match="fingerprint is not pinned"):
+        load_instance(tmp_path, "sim_01", allow_simulation_mutation=True)
 
 
 def test_host_resolves_instance_id_only_from_discovered_manifest(tmp_path: Path) -> None:
@@ -157,7 +235,11 @@ def test_host_no_argument_waits_until_qmt_manifest_exists(tmp_path: Path, monkey
     root = _write_instance(tmp_path, "terminal_01")
     instance = load_instance(tmp_path, "terminal_01")
     discoveries = iter([(), (instance,)])
-    monkeypatch.setattr(host_module, "discover_instances", lambda _base: next(discoveries))
+    monkeypatch.setattr(
+        host_module,
+        "discover_instances",
+        lambda _base, **_kwargs: next(discoveries),
+    )
     monkeypatch.setattr(host_module.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(host_module, "_choose_instance", lambda choices: choices[0])
     args = build_parser().parse_args(["--spool-base", str(tmp_path)])
