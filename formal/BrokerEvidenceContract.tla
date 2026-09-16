@@ -278,7 +278,7 @@ Ingest(e) ==
                   /\ filled' = nextFilled
                   /\ applyCount' = [applyCount EXCEPT ![lid] = @ + 1]
                   /\ brokerEvidenceSeen' = TRUE
-                  /\ terminalConflict' = terminalConflict \/ nextConflict
+                  /\ terminalConflict' = (terminalConflict \/ nextConflict)
                   /\ rankHighWater' = Max(rankHighWater, Rank(nextStatus))
                   /\ UNCHANGED <<
                        controlPromotions,
