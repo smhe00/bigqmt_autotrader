@@ -18,6 +18,8 @@ Updated: 2026-09-17
 | P4 Big QMT execution bridge | **SHADOW DEPLOYMENT GATE PASS** |
 | P5 Guojin simulation mutation calibration | **BOUNDED PASS** |
 | BigQMT Bridge API v1 | **CONTRACT + FORMAL CI GATE** |
+| Broker Evidence Contract v1 | **PROTOCOL + FORMAL CI GATE** |
+| Broker-specific raw status mapper | **NOT YET IMPLEMENTED** |
 | Production-account live trading allowed | **NO** |
 | LIVE_CANARY | **NOT ENABLED** |
 | Production Guojin/Galaxy broker mutation call surface | **ZERO** |
@@ -28,9 +30,10 @@ Updated: 2026-09-17
 
 - [`PROJECT_OVERVIEW_ZH.md`](PROJECT_OVERVIEW_ZH.md)
 
-Host↔Bridge 正式契约：
+正式协议：
 
 - [`BRIDGE_API_V1_ZH.md`](BRIDGE_API_V1_ZH.md)
+- [`BROKER_EVIDENCE_CONTRACT_V1_ZH.md`](BROKER_EVIDENCE_CONTRACT_V1_ZH.md)
 
 ## 2. Architecture boundary
 
@@ -49,7 +52,9 @@ Big QMT / Broker
 
 ORDER / DEAL / active query
   ↓
-BrokerEvidenceMapper
+broker-specific mapper
+  ↓
+Broker Evidence Contract v1
   ↓
 EvidenceReplay
   ↓
@@ -76,7 +81,7 @@ Observed Galaxy account types:
 - `HUGANGTONG`
 - `SHENGANGTONG`
 
-Galaxy linked-account ACCOUNT callbacks were observed reaching a selected STOCK model. The bridge now suppresses positively identified non-selected account callbacks from the selected OMS stream.
+Galaxy linked-account ACCOUNT callbacks were observed reaching a selected STOCK model. The bridge suppresses positively identified non-selected account callbacks from the selected OMS stream.
 
 ## 4. Multi-terminal isolation
 
@@ -91,17 +96,7 @@ D:\BigQMTData\spool\
 
 Each instance publishes `instance.json`; Host validates it against matching-session `bridge_ready`.
 
-Host pins:
-
-- terminal instance;
-- account fingerprint;
-- account type;
-- session;
-- protocol/transport versions;
-- bridge build;
-- execution mode;
-- trading flags;
-- simulation limits where applicable.
+Host pins terminal instance, account fingerprint/type, session, protocol/transport versions, bridge build, execution mode, trading flags and simulation limits where applicable.
 
 Simulation mutation instances are hidden unless Host is explicitly started with simulation authorization.
 
@@ -111,9 +106,7 @@ Verified:
 
 - ACCOUNT/POSITION/ORDER/DEAL active query;
 - callback subscription;
-- ACCOUNT callback;
-- POSITION callback;
-- event-driven ORDER/DEAL callback transport;
+- ACCOUNT/POSITION/ORDER/DEAL callback transport;
 - 300 s independent active reconcile;
 - durable atomic file publication;
 - Host session/account/sequence validation;
@@ -121,8 +114,7 @@ Verified:
 - Host-only restart recovery;
 - filesystem/semantic quarantine;
 - closed-day archive integrity;
-- account semantic duplicate suppression;
-- `dropped_events=0` / `transport_failures=0` in calibrated runs.
+- account semantic duplicate suppression.
 
 Real Guojin V05 also proved:
 
@@ -163,8 +155,6 @@ Implemented command types:
 - `CANCEL_ORDER`
 - `REQUEST_SNAPSHOT`
 
-SHADOW submit/cancel produce local control-plane results only.
-
 Critical semantic:
 
 ```text
@@ -179,41 +169,15 @@ Simulation artifact:
 
 - `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py`
 
-Safety properties:
+Safety properties include exact account fingerprint/session pinning, simulation-only authority, bounded submit/cancel fuses, exact broker-order-ID + broker-token cancel target, and no automatic blind retry.
 
-- exact account fingerprint pin;
-- `simulation_only=true`;
-- `execution_mode=SIMULATION_CALIBRATION`;
-- only reviewed A-share BUY calibration shape;
-- finite submit/cancel per-session fuse;
-- exact broker-order-ID + broker-token cancel target;
-- current QMT session pin;
-- explicit Host + publisher simulation authorization;
-- no automatic blind retry.
+Calibrated lifecycle evidence includes resting order + cancel, full fill, ORDER/DEAL callback, active ORDER/DEAL query, deterministic broker token preservation, Host outage replay, and command conflict/expiry/wrong-account/stale-session rejection.
 
-Calibrated lifecycle evidence includes:
-
-- resting order + cancel;
-- full fill;
-- ORDER callback;
-- DEAL callback;
-- active ORDER/DEAL query;
-- deterministic `BQ...` token preserved across ORDER/DEAL;
-- Host outage replay;
-- command conflict/expiry/wrong-account/stale-session rejection.
-
-After-hours testing additionally proved:
-
-- QMT cancel API success does not imply immediate query-surface state change;
-- repeated cancel can therefore be unsafe;
-- simulation publisher now prevents duplicate cancel publication for the exact account/client/broker-order identity;
-- query lag cannot trigger automatic re-cancel.
-
-Same-evening closeout revalidated Host-offline event persistence and restart recovery with zero backlog/quarantine.
+After-hours testing also proved that QMT cancel API success does not imply immediate query-surface cancellation; duplicate cancel publication is therefore suppressed.
 
 ## 8. BigQMT Bridge API v1
 
-API v1 formalizes the existing Host↔Bridge contract without changing already calibrated wire versions:
+API v1 formalizes Host↔Bridge without changing calibrated wire versions:
 
 ```text
 Discovery Contract 1
@@ -222,63 +186,83 @@ Event Protocol     0.2
 File Transport     1
 ```
 
-Three layers:
-
-1. JSON Schema wire contract;
-2. semantic contract;
-3. TLA+/TLC safety contract.
-
-Schemas:
-
-```text
-schemas/bridge/v1/
-├── instance.schema.json
-├── command.schema.json
-├── event.schema.json
-└── command_result.schema.json
-```
-
-New formal models:
-
-- `BridgeCommandProtocol`
-- `BridgeEventProtocol`
-- `BrokerEvidenceBoundary`
-
-New permanent checks:
-
-- Bridge ingress finite conformance matrix;
-- command-spool idempotency/conflict/expiry;
-- Schema ↔ implementation constant drift;
-- Schema legal/illegal sample tests.
+Permanent Gate includes JSON Schema, semantic contract, TLA+/TLC models and finite protocol conformance.
 
 Details:
 
 - [`BRIDGE_API_V1_ZH.md`](BRIDGE_API_V1_ZH.md)
 - [`FORMAL_VERIFICATION.md`](FORMAL_VERIFICATION.md)
 
-## 9. Broker evidence boundary
+## 9. Broker Evidence Contract v1
 
-Current read-only calibration projection recognizes broker tokens only when `remark` exactly matches:
+The broker→OMS evidence semantics are now frozen independently of any specific QMT raw status code.
 
-```text
-BQ[0-9a-f]{20}
-```
-
-It preserves raw broker order/trade identity and raw QMT status fields.
-
-The system still deliberately does **not** guess production-grade:
+Schema:
 
 ```text
-QMT raw status → OMS lifecycle status
+schemas/broker_evidence/v1/broker_evidence.schema.json
 ```
 
-A separately reviewed broker evidence mapper remains the next execution-safety gate.
+Allowed source classes:
 
-Until that gate passes:
+```text
+ORDER_CALLBACK
+DEAL_CALLBACK
+ACTIVE_ORDER_QUERY
+ACTIVE_DEAL_QUERY
+```
 
-- ORDER/DEAL may be observed/calibrated;
-- untrusted lifecycle interpretation is quarantined;
-- `command_result` remains control-plane only.
+Standard evidence:
+
+```text
+ORDER_ACCEPTED  -> ACKNOWLEDGED
+PARTIAL_FILL    -> PARTIALLY_FILLED
+FULL_FILL       -> FILLED
+ORDER_CANCELLED -> CANCELLED
+ORDER_REJECTED  -> REJECTED
+```
+
+Critical exclusions:
+
+```text
+command_result
+submit/cancel API return
+unknown raw status
+identity mismatch
+```
+
+do not become `BrokerEvidence`.
+
+The contract also freezes:
+
+- durable identity admission;
+- source-event dedup and same-ID/different-digest conflict handling;
+- cumulative, monotonic `filled_quantity`;
+- no timestamp/source-priority overwrite rule;
+- partial-fill + cancel semantics;
+- terminal conflict → `MANUAL_REVIEW`.
+
+Formal assets:
+
+- `formal/BrokerEvidenceContract.tla`
+- `formal/BrokerEvidenceContract.cfg`
+- `tools/verify_broker_evidence_contract.py`
+- `tests/qmt/test_broker_evidence_contract.py`
+
+Details:
+
+- [`BROKER_EVIDENCE_CONTRACT_V1_ZH.md`](BROKER_EVIDENCE_CONTRACT_V1_ZH.md)
+
+### Still pending
+
+This Gate does **not** implement or approve:
+
+```text
+Guojin raw status -> BrokerEvidence v1
+Galaxy raw status -> BrokerEvidence v1
+```
+
+Those broker-specific mapper implementations remain the next execution-safety checkpoint and must be calibrated against observed ORDER/DEAL/query facts.
 
 ## 10. Formal verification
 
@@ -293,6 +277,7 @@ Permanent models:
 - `BridgeCommandProtocol`
 - `BridgeEventProtocol`
 - `BrokerEvidenceBoundary`
+- `BrokerEvidenceContract`
 
 CI also runs:
 
@@ -300,6 +285,7 @@ CI also runs:
 - FSM exhaustive conformance;
 - Bridge protocol conformance;
 - Bridge Schema drift check;
+- Broker Evidence finite contract/schema conformance;
 - broker side-effect static audit;
 - standalone QMT deployment check.
 
@@ -309,30 +295,24 @@ No safety invariant waiver is permitted.
 
 A future QMT Market Data Bridge is planned as a separate QMT strategy.
 
-It may reuse:
-
-- discovery/versioning;
-- envelope;
-- terminal/session health principles.
-
-It must not inherit execution mutation authority.
+It may reuse discovery/versioning, envelope, terminal/session health principles, but must not inherit execution mutation authority.
 
 Planned division:
 
 ```text
-QMT Market Data Bridge → quote/tick/bar/reference
-Execution Bridge       → account/order/deal/submit/cancel
+QMT Market Data Bridge -> quote/tick/bar/reference
+Execution Bridge       -> account/order/deal/submit/cancel
 ```
 
-This is currently **architecture direction only**, not implemented functionality.
+This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. BigQMT Bridge API v1 is the formal Host↔Bridge contract. Production live trading remains disabled and unimplemented.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. BigQMT Bridge API v1 and Broker Evidence Contract v1 are permanent formal contracts. Production live trading remains disabled and unimplemented.**
 
 Next safety checkpoint:
 
-> calibrated replay-safe broker ORDER/DEAL/query → OMS evidence mapping.
+> implement and calibrate broker-specific raw ORDER/DEAL/query → BrokerEvidence v1 mappers without changing the frozen evidence semantics.
 
 Gate evidence:
 
