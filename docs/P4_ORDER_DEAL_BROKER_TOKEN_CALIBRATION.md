@@ -13,7 +13,9 @@ Hard invariants:
 - `galaxy` and `guojin`: `TRADING_ENABLED=False`, `live_submit=false`,
   `live_cancel=false`, and no broker mutation call in source
 - `guojin_sim`: exact account fingerprint pin, `simulation_only=true`, 100-share
-  BUY limit, two submits/two cancels maximum per QMT session
+  BUY limit, and 2,000 submits/2,000 cancels maximum per QMT session. The high
+  ceiling supports extended simulation testing but remains a finite runaway-loop
+  fuse.
 - mutation commands expire within 30 seconds and pin the current QMT session
 - cancel requires an exact broker-order-ID and `m_strRemark` token match
 - `SHADOW_ACCEPTED != broker ACK`

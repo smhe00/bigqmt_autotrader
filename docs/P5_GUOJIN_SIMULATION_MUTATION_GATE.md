@@ -69,8 +69,10 @@ The mutation path opens only when every layer agrees:
 - security: six-digit `.SH` or `.SZ` A-share symbol only;
 - quantity: exactly 100 shares;
 - price: explicit positive limit price;
-- maximum submit calls per QMT session: 2;
-- maximum cancel calls per QMT session: 2;
+- maximum submit calls per QMT session: 2,000;
+- maximum cancel calls per QMT session: 2,000;
+- these are finite runaway-loop fuses, not a target activity level; each
+  calibration run must still issue only the reviewed commands it needs;
 - cancel target: exactly one active-query ORDER whose broker order ID and
   `m_strRemark` both match the command;
 - no blind retry after a claimed-command crash or broker API exception.

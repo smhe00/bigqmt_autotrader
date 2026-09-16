@@ -131,3 +131,9 @@ healthy with zero pending event frames.
 Further broker-facing order variants require a fresh QMT strategy session
 because the hard two-submit session allowance was correctly exhausted. That
 reset is an explicit operator action; it is not performed automatically.
+
+Post-gate operational update: build `p5-simulation-calibration-2` raises the
+finite `guojin_sim` session fuses to 2,000 submit calls and 2,000 cancel calls
+for extended simulation testing. The historical two-submit evidence above is
+unchanged. Host manifest validation and the QMT-side anti-tamper gate both
+require the new values; production `guojin` and `galaxy` remain mutation-free.

@@ -72,15 +72,15 @@ def _write_simulation_instance(base: Path, instance_id: str = "sim_01") -> Path:
         "simulation_only": True,
         "authorized_account_fingerprint": FINGERPRINT,
         "max_order_quantity": 100,
-        "max_submit_calls_per_session": 2,
-        "max_cancel_calls_per_session": 2,
+        "max_submit_calls_per_session": 2000,
+        "max_cancel_calls_per_session": 2000,
     }
     manifest = {
         "manifest_version": "1",
         "terminal_instance_id": instance_id,
         "protocol_version": "0.2",
         "transport_version": "1",
-        "bridge_build": "p5-simulation-calibration-1",
+        "bridge_build": "p5-simulation-calibration-2",
         "session_id": "sim-session-01",
         "account_fingerprint": FINGERPRINT,
         "account_type": "STOCK",
@@ -100,7 +100,7 @@ def _write_simulation_instance(base: Path, instance_id: str = "sim_01") -> Path:
         "account_type": "STOCK",
         "payload": {
             "capabilities": {
-                "bridge_build": "p5-simulation-calibration-1",
+                "bridge_build": "p5-simulation-calibration-2",
                 "spool_instance_id": instance_id,
                 **safety,
             }

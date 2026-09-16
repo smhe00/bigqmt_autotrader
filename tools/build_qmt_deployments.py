@@ -132,7 +132,7 @@ def rendered(instance_id: str, *, simulation_mutation: bool) -> bytes:
     source = source.replace(TOKEN, instance_id)
     if simulation_mutation:
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-1"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-2"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "SIMULATION_CALIBRATION"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',
@@ -142,8 +142,10 @@ def rendered(instance_id: str, *, simulation_mutation: bool) -> bytes:
                 'AUTHORIZED_ACCOUNT_FINGERPRINT = "' + SIMULATION_FINGERPRINT + '"'
             ),
             'SIMULATION_MAX_ORDER_QUANTITY = 0': 'SIMULATION_MAX_ORDER_QUANTITY = 100',
-            'SIMULATION_MAX_SUBMIT_CALLS = 0': 'SIMULATION_MAX_SUBMIT_CALLS = 2',
-            'SIMULATION_MAX_CANCEL_CALLS = 0': 'SIMULATION_MAX_CANCEL_CALLS = 2',
+            'SIMULATION_MAX_SUBMIT_CALLS = 0': 'SIMULATION_MAX_SUBMIT_CALLS = 2000',
+            'SIMULATION_MAX_CANCEL_CALLS = 0': 'SIMULATION_MAX_CANCEL_CALLS = 2000',
+            'and SIMULATION_MAX_SUBMIT_CALLS == 2': 'and SIMULATION_MAX_SUBMIT_CALLS == 2000',
+            'and SIMULATION_MAX_CANCEL_CALLS == 2': 'and SIMULATION_MAX_CANCEL_CALLS == 2000',
             SHADOW_EXECUTOR: SIMULATION_EXECUTOR,
         }
         for before, after in replacements.items():

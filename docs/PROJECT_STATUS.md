@@ -123,7 +123,7 @@ Standalone deployments:
 
 Production-account build: `p4-shadow-command-spool-5`
 
-Simulation calibration build: `p5-simulation-calibration-1`
+Simulation calibration build: `p5-simulation-calibration-2`
 
 Production-account safety state (`galaxy`, `guojin`):
 
@@ -138,8 +138,8 @@ Simulation-only safety state (`guojin_sim`):
 
 - exact account fingerprint pinned in the generated standalone file;
 - `execution_mode=SIMULATION_CALIBRATION`, never LIVE/LIVE_ARMED;
-- only A-share BUY, exactly 100 shares, limit price, maximum two submit calls
-  per QMT session;
+- only A-share BUY, exactly 100 shares, limit price, maximum 2,000 submit calls
+  per QMT session (with the same finite ceiling for cancel calls);
 - cancel requires one exact active-query match on both broker order ID and the
   deterministic `BQ...` broker token;
 - commands must carry the current QMT session and explicit simulation marker;

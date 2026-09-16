@@ -204,7 +204,9 @@ def test_simulation_cancel_reports_terminal_order_without_calling_cancel(monkeyp
     assert bridge._STATE.simulation_cancel_calls == 0
 
 
-def test_simulation_submit_session_limit_rejects_before_third_broker_call(monkeypatch):
+def test_simulation_submit_session_limit_rejects_before_over_limit_broker_call(
+    monkeypatch,
+):
     bridge = load_bridge()
     submit_calls = []
     monkeypatch.setattr(
@@ -214,10 +216,12 @@ def test_simulation_submit_session_limit_rejects_before_third_broker_call(monkey
         raising=False,
     )
 
-    bridge._execute_order_command(command(bridge), object())
+    bridge._STATE.simulation_submit_calls = bridge.SIMULATION_MAX_SUBMIT_CALLS - 1
     bridge._execute_order_command(command(bridge), object())
     with pytest.raises(bridge.CommandError, match="session limit reached"):
         bridge._execute_order_command(command(bridge), object())
 
-    assert len(submit_calls) == 2
-    assert bridge._STATE.simulation_submit_calls == 2
+    assert len(submit_calls) == 1
+    assert (
+        bridge._STATE.simulation_submit_calls == bridge.SIMULATION_MAX_SUBMIT_CALLS
+    )
