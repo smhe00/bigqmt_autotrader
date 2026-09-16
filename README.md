@@ -1,106 +1,174 @@
 # bigqmt_autotrader
 
-Personal production-grade automated trading execution platform using **Big QMT as the broker terminal**.
+个人生产级 Big QMT 自动交易执行平台。项目把 **Big QMT 定位为券商执行终端**，策略、OMS、风险控制、数据库和恢复逻辑运行在外部 Host。
 
-## Safety status
+> 中文总览：[`docs/PROJECT_OVERVIEW_ZH.md`](docs/PROJECT_OVERVIEW_ZH.md)  
+> Host↔Bridge 正式契约：[`docs/BRIDGE_API_V1_ZH.md`](docs/BRIDGE_API_V1_ZH.md)
 
-The project has passed **P0 / G0**, **P1 Offline OMS**, **P2 Deterministic Risk
-Engine**, **P3 Big QMT read-only**, and the **P4 SHADOW deployment gate**. The
-account-pinned P5 Guojin simulation submit/cancel/fill calibration has passed.
+## 当前安全状态
 
-- Host-side development baseline: **Python 3.12**.
-- QMT-side bridge remains **Python 3.6 syntax compatible** for the built-in QMT runtime.
-- Production-account live trading is **not enabled**.
-- QMT broker mutation exists only in the fingerprint-pinned `guojin_sim`
-  calibration artifact; Galaxy and Guojin production artifacts contain zero
-  submit/cancel API calls.
-- The P3 QMT-side adapter can read and normalize `ACCOUNT`, `POSITION`, `ORDER`, and `DEAL` snapshots and callback facts.
-- The adapter stores full normalized facts only in a bounded in-memory queue; QMT logs contain safe summaries only.
-- No QMT mutation function is called by the P3 adapter.
-- Strategy code must never call QMT directly.
-- P2 `RiskPolicy` may authorize execution eligibility in **SIMULATION only**; live-named runtime modes cannot be enabled by configuration alone.
+| 项目 | 状态 |
+| --- | --- |
+| P0 / G0 订单领域模型 | **PASS** |
+| P1 Offline OMS | **PASS** |
+| P2 Deterministic Risk Engine | **PASS** |
+| P3 Big QMT read-only | **PASS** |
+| P4 SHADOW execution bridge | **DEPLOYMENT GATE PASS** |
+| P5 国金模拟账户 submit/cancel/fill 校准 | **BOUNDED CALIBRATION PASS** |
+| BigQMT Bridge API v1 | **正式契约 + 永久 CI Gate** |
+| Production live trading | **NO** |
+| LIVE_CANARY | **未启用** |
 
-The first production target remains deliberately narrow: one A-share cash account, ordinary spot equities, limit orders, low-frequency/minute-level strategies, a single OMS writer, persistent reconciliation, and explicit human control.
-
-## Architecture
+生产账户 `galaxy` / `guojin` artifact 仍然：
 
 ```text
-Market/account state
-        |
-        v
- Strategy Service  -- emits OrderIntent only
-        |
-        v
-    Risk Engine     -- P2 deterministic/fail-closed
-        |
-        v
- Execution / OMS    -- SQLite WAL, fenced single writer
-        |
-        v
-   Broker Driver  <---- callbacks/query reconciliation
-        |
-        +---- Current execution: deterministic simulated driver
-        |
-        +---- P3 read-only facts: Big QMT adapter (PASS)
-        |
-  future localhost transport
-        |
-        v
- QMT-side bridge -- Python 3.6; production SHADOW / pinned simulation calibration
-        |
-        v
-  Guojin QMT 2.1.19.0
+TRADING_ENABLED = False
+execution_mode = SHADOW
+live_submit = false
+live_cancel = false
 ```
 
-## Development gates
+并由静态审计保证 production artifact 中没有 broker mutation call surface。
 
-1. **P0 / G0 — PASS**: order-domain contract and deterministic state machine.
-2. **P1 — PASS**: crash-recoverable offline OMS with SQLite WAL, fencing, replay and reconciliation.
-3. **P2 — PASS**: deterministic four-level pre-trade risk engine and OMS-owned risk-to-submit boundary.
-4. **P3 — PASS**: Big QMT read-only query/callback transport, recovery/archive, and Guojin V05 timer calibration are complete.
-5. **P4 — SHADOW DEPLOYMENT GATE PASS**: durable command round-trip and OMS reconciliation are implemented without production mutation.
-6. **P5 — BOUNDED SIMULATION CALIBRATION PASS**: `guojin_sim` completed token-matched submit, cancel, ORDER and DEAL calibration; OMS evidence mapping and all production mutation remain disabled.
+`guojin_sim` 是 fingerprint-pinned 的 simulation calibration artifact。它能调用受限模拟账户 submit/cancel API，但**不构成生产实盘授权**。
 
-No phase may skip directly to live trading.
+## 架构
 
-## Verified properties
+```text
+Market / Account State
+        |
+        v
+    Strategy
+  emits OrderIntent
+        |
+        v
+    Risk Engine
+        |
+        v
+       OMS
+ identity/state/recovery/audit
+        |
+        v
+      Host
+        |
+ BigQMT Bridge API v1
+        |
+        v
+ Execution Bridge (QMT)
+        |
+        v
+ Big QMT / Broker
 
-Through P2:
+ORDER / DEAL / active query
+        |
+        v
+BrokerEvidenceMapper
+        |
+        v
+EvidenceReplay -> OMS FSM
+```
 
-- durable account-scoped `client_order_id` uniqueness;
-- durable order/risk/event state and startup reconciliation;
-- submit/cancel reservations committed before simulated side effects;
-- ambiguous broker outcomes never trigger blind submit/cancel retry;
-- hard-crash recovery and leader/fencing behavior are fault-tested;
-- broker evidence is deduplicated, replay-audited and monotonic;
-- pre-submit restart orphans terminate as `ABORTED` rather than becoming executable;
-- public OMS submission evaluates risk internally; callers cannot supply an accepted `RiskDecision` as execution authority;
-- deterministic risk order: Global -> Account -> Strategy -> Security/Order;
-- canonical risk snapshot SHA-256 and exact `Decimal` arithmetic;
-- stale, contradictory, unhealthy or unauthorized risk facts fail closed;
-- rejected risk decisions produce zero simulated broker submit calls;
-- P2 policy construction permits execution eligibility in `SIMULATION` only;
-- static CI audits the broker-side-effect, evidence-write, risk-evaluation and internal submit call surfaces;
-- mandatory TLA+/TLC models cover the order FSM, submit/recovery protocol, leader lease, evidence replay, pre-submit recovery and risk precedence abstractions.
+### OMS
 
-P3 implementation candidate additionally verifies:
+OMS（Order Management System）负责订单的 durable identity、生命周期、submit/cancel reservation、UNKNOWN/reconciliation、重启恢复、broker evidence 去重和审计。
 
-- QMT bridge parses as Python 3.6 syntax;
-- `account` / `accountType` runtime binding is isolated to the QMT adapter;
-- `ContextInfo.set_account(account)` is used only for read-only callback subscription;
-- `get_trade_detail_data()` query results are normalized for account, position, order and deal facts;
-- raw account IDs are excluded from normalized output in favor of a SHA-256 account fingerprint;
-- QMT log output excludes cash balances, quantities, order IDs, trade IDs and raw account IDs;
-- source-level tests reject broker mutation calls in the template and both
-  production-account artifacts;
-- static audit permits exactly one submit and one cancel call only inside the
-  reviewed `guojin_sim` executor.
+### Risk Engine
 
-## Local development
+Risk Engine 在 broker side effect 前执行 fail-closed 风险判断。策略不能直接调用 QMT/broker mutation API。
+
+## BigQMT Bridge API v1
+
+Host↔Bridge 不再只是“代码约定”，现在正式分成三层：
+
+1. **Wire Contract**：JSON Schema；
+2. **Semantic Contract**：session / sequence / duplicate / gap / UNKNOWN / resync / evidence boundary；
+3. **Safety Contract**：TLA+/TLC + Python conformance + static audit。
+
+当前 umbrella API 保留已经实机校准的 wire version：
+
+```text
+Discovery Contract 1
+Command Protocol   0.1
+Event Protocol     0.2
+File Transport     1
+```
+
+关键不变量：
+
+```text
+SHADOW_ACCEPTED != broker ACK
+```
+
+`command_result` 是 control-plane 结果，不能单独产生 `ACKNOWLEDGED / FILLED / CANCELLED` 等 OMS broker lifecycle 状态。
+
+详细规范见 [`docs/BRIDGE_API_V1_ZH.md`](docs/BRIDGE_API_V1_ZH.md)。
+
+## 已验证的 Big QMT 能力
+
+国金 Big QMT 已完成：
+
+- ACCOUNT / POSITION / ORDER / DEAL query + callback；
+- 1 秒 command timer；
+- 300 秒主动 reconcile；
+- durable file spool；
+- Host restart replay；
+- simulation submit；
+- simulation cancel；
+- resting order / full fill；
+- ORDER/DEAL broker token 保留；
+- duplicate / conflict / expiry / wrong-account / stale-session fail-close；
+- 重复撤单发布抑制；
+- Host 离线期间 QMT 事件持久化及重启恢复。
+
+Galaxy Big QMT 已完成：
+
+- STOCK / HUGANGTONG / SHENGANGTONG runtime discovery；
+- linked-account callback suppression；
+- terminal-instance spool 隔离。
+
+## 行情数据方向
+
+Execution Bridge 不会扩成 XtData 克隆。
+
+未来计划独立建设 **QMT Market Data Bridge**，专门处理 quote/tick/bar/reference data；Host 通过统一 `MarketDataService` 消费。Execution Bridge 继续保持小、可审计、只处理账户和交易执行。
+
+这部分目前是架构规划，**尚未实现**。
+
+## 形式验证
+
+永久 Gate 当前包括：
+
+- `OrderFSM`
+- `SubmitProtocol`
+- `LeaderLease`
+- `EvidenceReplay`
+- `PreSubmitRecovery`
+- `RiskPrecedence`
+- `BridgeCommandProtocol`
+- `BridgeEventProtocol`
+- `BrokerEvidenceBoundary`
+
+CI 同时执行：
+
+- Python tests；
+- FSM / Bridge protocol conformance；
+- JSON Schema contract drift check；
+- broker side-effect static audit；
+- standalone QMT deployment consistency check；
+- 全部 TLC model checking。
+
+详细说明见 [`docs/FORMAL_VERIFICATION.md`](docs/FORMAL_VERIFICATION.md)。
+
+## 本地开发
 
 ```bash
 python -m pip install -e ".[test]"
 pytest -q
+python tools/verify_fsm_exhaustive.py
+python tools/verify_bridge_protocol_exhaustive.py
+python tools/verify_bridge_schema_contract.py
 ```
 
-See `docs/PROJECT_STATUS.md`, `docs/P1_GATE_RESULT_20260912.md`, and `docs/P2_GATE_RESULT_20260913.md` for gate status and evidence.
+项目状态见 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
+
+**任何阶段都不能通过配置直接跳到生产实盘。**

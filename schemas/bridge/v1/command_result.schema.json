@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bigqmt-autotrader.local/schemas/bridge/v1/command_result.schema.json",
+  "title": "BigQMT Bridge API v1 command_result payload",
+  "type": "object",
+  "required": ["command_id", "command_type", "result_status", "execution_mode", "live_side_effect", "client_order_id", "broker_token"],
+  "properties": {
+    "command_id": {"type": "string", "minLength": 1},
+    "command_type": {"enum": ["SUBMIT_LIMIT", "CANCEL_ORDER", "REQUEST_SNAPSHOT"]},
+    "result_status": {"type": "string", "minLength": 1},
+    "execution_mode": {"enum": ["SHADOW", "SIMULATION_CALIBRATION"]},
+    "live_side_effect": {"type": "boolean"},
+    "client_order_id": {"type": ["string", "null"], "minLength": 1},
+    "broker_token": {"type": ["string", "null"], "pattern": "^BQ[0-9a-f]{20}$"}
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {"properties": {"command_type": {"const": "REQUEST_SNAPSHOT"}}, "required": ["command_type"]},
+      "then": {"properties": {"client_order_id": {"type": "null"}, "broker_token": {"type": "null"}}},
+      "else": {"properties": {"client_order_id": {"type": "string", "minLength": 1}, "broker_token": {"type": "string", "pattern": "^BQ[0-9a-f]{20}$"}}}
+    },
+    {
+      "oneOf": [
+        {"properties": {"execution_mode": {"const": "SHADOW"}, "command_type": {"const": "SUBMIT_LIMIT"}, "result_status": {"enum": ["SHADOW_ACCEPTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
+        {"properties": {"execution_mode": {"const": "SHADOW"}, "command_type": {"const": "CANCEL_ORDER"}, "result_status": {"enum": ["SHADOW_ACCEPTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
+        {"properties": {"execution_mode": {"const": "SHADOW"}, "command_type": {"const": "REQUEST_SNAPSHOT"}, "result_status": {"enum": ["SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
+        {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}, "command_type": {"const": "SUBMIT_LIMIT"}, "result_status": {"enum": ["SIMULATION_SUBMIT_CALL_RETURNED", "SIMULATION_MUTATION_UNKNOWN", "SIMULATION_ORPHANED_UNKNOWN", "REJECTED_SAFETY_GATE", "REJECTED_EXPIRED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
+        {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}, "command_type": {"const": "CANCEL_ORDER"}, "result_status": {"enum": ["SIMULATION_CANCEL_SIGNAL_SENT", "SIMULATION_CANCEL_NOT_CANCELLABLE", "SIMULATION_CANCEL_NOT_SENT", "SIMULATION_MUTATION_UNKNOWN", "SIMULATION_ORPHANED_UNKNOWN", "REJECTED_SAFETY_GATE", "REJECTED_EXPIRED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
+        {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}, "command_type": {"const": "REQUEST_SNAPSHOT"}, "result_status": {"enum": ["SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"]}}, "required": ["execution_mode", "command_type", "result_status"]}
+      ]
+    },
+    {
+      "if": {"properties": {"execution_mode": {"const": "SHADOW"}}, "required": ["execution_mode"]},
+      "then": {"properties": {"live_side_effect": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}, "result_status": {"enum": ["SIMULATION_SUBMIT_CALL_RETURNED", "SIMULATION_CANCEL_SIGNAL_SENT", "SIMULATION_CANCEL_NOT_SENT", "SIMULATION_MUTATION_UNKNOWN", "SIMULATION_ORPHANED_UNKNOWN"]}}, "required": ["execution_mode", "result_status"]},
+      "then": {"properties": {"live_side_effect": {"const": true}}},
+      "else": {
+        "if": {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}}, "required": ["execution_mode"]},
+        "then": {"properties": {"live_side_effect": {"const": false}}}
+      }
+    }
+  ]
+}

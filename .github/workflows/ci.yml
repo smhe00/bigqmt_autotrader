@@ -29,6 +29,10 @@ jobs:
         run: python -m pip install -e .
       - name: Exhaustive Python/spec conformance
         run: python tools/verify_fsm_exhaustive.py
+      - name: Bridge protocol finite conformance
+        run: python tools/verify_bridge_protocol_exhaustive.py
+      - name: Bridge Schema / implementation drift
+        run: python tools/verify_bridge_schema_contract.py
       - name: Audit broker side-effect call surface
         run: python tools/audit_side_effect_calls.py
       - name: Verify standalone QMT deployment files
@@ -70,3 +74,15 @@ jobs:
         run: |
           cd formal
           java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config RiskPrecedence.cfg RiskPrecedence.tla
+      - name: TLC - Bridge command protocol
+        run: |
+          cd formal
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config BridgeCommandProtocol.cfg BridgeCommandProtocol.tla
+      - name: TLC - Bridge event protocol
+        run: |
+          cd formal
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config BridgeEventProtocol.cfg BridgeEventProtocol.tla
+      - name: TLC - broker evidence boundary
+        run: |
+          cd formal
+          java -XX:+UseParallelGC -cp ../.formal-tools/tla2tools.jar tlc2.TLC -config BrokerEvidenceBoundary.cfg BrokerEvidenceBoundary.tla

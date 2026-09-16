@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bigqmt-autotrader.local/schemas/bridge/v1/instance.schema.json",
+  "title": "BigQMT Bridge API v1 instance manifest",
+  "type": "object",
+  "required": ["manifest_version", "terminal_instance_id", "protocol_version", "transport_version", "bridge_build", "session_id", "account_fingerprint", "account_type", "created_ms", "execution_mode", "trading_enabled", "live_submit", "live_cancel"],
+  "properties": {
+    "manifest_version": {"const": "1"},
+    "terminal_instance_id": {"type": "string", "pattern": "^[a-z0-9_-]{1,32}$"},
+    "protocol_version": {"const": "0.2"},
+    "transport_version": {"const": "1"},
+    "bridge_build": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "account_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "account_type": {"type": "string", "minLength": 1},
+    "created_ms": {"type": "integer", "minimum": 1},
+    "execution_mode": {"enum": ["SHADOW", "SIMULATION_CALIBRATION"]},
+    "trading_enabled": {"type": "boolean"},
+    "live_submit": {"type": "boolean"},
+    "live_cancel": {"type": "boolean"},
+    "simulation_only": {"type": "boolean"},
+    "authorized_account_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "max_order_quantity": {"type": "integer", "minimum": 1},
+    "max_submit_calls_per_session": {"type": "integer", "minimum": 1},
+    "max_cancel_calls_per_session": {"type": "integer", "minimum": 1}
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {"properties": {"execution_mode": {"const": "SHADOW"}}, "required": ["execution_mode"]},
+      "then": {"properties": {"trading_enabled": {"const": false}, "live_submit": {"const": false}, "live_cancel": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}}, "required": ["execution_mode"]},
+      "then": {
+        "required": ["simulation_only", "authorized_account_fingerprint", "max_order_quantity", "max_submit_calls_per_session", "max_cancel_calls_per_session"],
+        "properties": {
+          "trading_enabled": {"const": true},
+          "live_submit": {"const": true},
+          "live_cancel": {"const": true},
+          "simulation_only": {"const": true},
+          "max_order_quantity": {"const": 100},
+          "max_submit_calls_per_session": {"const": 2000},
+          "max_cancel_calls_per_session": {"const": 2000}
+        }
+      }
+    }
+  ]
+}

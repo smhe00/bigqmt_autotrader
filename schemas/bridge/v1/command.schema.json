@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bigqmt-autotrader.local/schemas/bridge/v1/command.schema.json",
+  "title": "BigQMT Bridge API v1 command transport frame",
+  "type": "object",
+  "required": ["command_transport_version", "command"],
+  "properties": {
+    "command_transport_version": {"const": "1"},
+    "command": {
+      "type": "object",
+      "required": ["command_protocol_version", "command_id", "created_ms", "expires_ms", "account_fingerprint", "command_type", "client_order_id", "broker_token", "payload"],
+      "properties": {
+        "command_protocol_version": {"const": "0.1"},
+        "command_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,80}$"},
+        "created_ms": {"type": "integer", "minimum": 1},
+        "expires_ms": {"type": "integer", "minimum": 1},
+        "account_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "command_type": {"enum": ["SUBMIT_LIMIT", "CANCEL_ORDER", "REQUEST_SNAPSHOT"]},
+        "client_order_id": {"type": ["string", "null"], "minLength": 1},
+        "broker_token": {"type": ["string", "null"], "pattern": "^BQ[0-9a-f]{20}$"},
+        "payload": {"type": "object"}
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {"properties": {"command_type": {"const": "REQUEST_SNAPSHOT"}}, "required": ["command_type"]},
+          "then": {"properties": {"client_order_id": {"type": "null"}, "broker_token": {"type": "null"}, "payload": {"type": "object", "maxProperties": 0}}}
+        },
+        {
+          "if": {"properties": {"command_type": {"const": "SUBMIT_LIMIT"}}, "required": ["command_type"]},
+          "then": {"properties": {
+            "client_order_id": {"type": "string", "minLength": 1},
+            "broker_token": {"type": "string", "pattern": "^BQ[0-9a-f]{20}$"},
+            "payload": {
+              "type": "object",
+              "required": ["symbol", "side", "quantity", "limit_price"],
+              "properties": {
+                "symbol": {"type": "string", "minLength": 1},
+                "side": {"enum": ["BUY", "SELL"]},
+                "quantity": {"type": "integer", "minimum": 1},
+                "limit_price": {"type": "string", "minLength": 1},
+                "simulation_calibration": {"const": true},
+                "expected_qmt_session_id": {"type": "string", "minLength": 1}
+              },
+              "additionalProperties": false,
+              "dependentRequired": {"simulation_calibration": ["expected_qmt_session_id"]}
+            }
+          }}
+        },
+        {
+          "if": {"properties": {"command_type": {"const": "CANCEL_ORDER"}}, "required": ["command_type"]},
+          "then": {"properties": {
+            "client_order_id": {"type": "string", "minLength": 1},
+            "broker_token": {"type": "string", "pattern": "^BQ[0-9a-f]{20}$"},
+            "payload": {
+              "type": "object",
+              "required": ["broker_order_id"],
+              "properties": {
+                "broker_order_id": {"type": "string", "minLength": 1},
+                "simulation_calibration": {"const": true},
+                "expected_qmt_session_id": {"type": "string", "minLength": 1}
+              },
+              "additionalProperties": false,
+              "dependentRequired": {"simulation_calibration": ["expected_qmt_session_id"]}
+            }
+          }}
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}
