@@ -117,6 +117,9 @@ class QmtCommandSpool:
         expires_ms: int,
         command_id: str | None = None,
         created_ms: int | None = None,
+        order_style: str | None = None,
+        market: str | None = None,
+        route_hint: str | None = None,
         simulation_calibration: bool = False,
         live_canary: bool = False,
         expected_qmt_session_id: str | None = None,
@@ -127,6 +130,12 @@ class QmtCommandSpool:
             "quantity": quantity,
             "limit_price": limit_price,
         }
+        if order_style is not None:
+            payload["order_style"] = order_style
+        if market is not None:
+            payload["market"] = market
+        if route_hint is not None:
+            payload["route_hint"] = route_hint
         if simulation_calibration and live_canary:
             raise QmtCommandError("command cannot be both simulation and live canary")
         if simulation_calibration or live_canary:
@@ -322,6 +331,17 @@ def _validate_command(command: QmtCommand) -> None:
             raise QmtCommandError("submit quantity must be positive integer")
         if not isinstance(limit_price, str) or not limit_price:
             raise QmtCommandError("submit limit_price must be text")
+        order_style = command.payload.get("order_style")
+        market = command.payload.get("market")
+        route_hint = command.payload.get("route_hint")
+        if order_style is not None and order_style != "LIMIT":
+            raise QmtCommandError("submit order_style currently supports LIMIT only")
+        if market is not None and market not in {"AUTO", "CN", "HK_CONNECT"}:
+            raise QmtCommandError("unsupported submit market")
+        if route_hint is not None and route_hint not in {"AUTO", "HGT", "SGT"}:
+            raise QmtCommandError("unsupported submit route_hint")
+        if route_hint in {"HGT", "SGT"} and market not in {None, "HK_CONNECT"}:
+            raise QmtCommandError("HGT/SGT route_hint requires HK_CONNECT market")
     elif command.command_type is QmtCommandType.CANCEL_ORDER:
         broker_order_id = command.payload.get("broker_order_id")
         if not isinstance(broker_order_id, str) or not broker_order_id:
