@@ -207,6 +207,7 @@ def _resolve_spool_instance(args: argparse.Namespace) -> QmtInstance:
                 os.path.dirname(root),
                 instance_id,
                 allow_simulation_mutation=args.allow_simulation_mutation,
+                allow_live_canary=args.allow_live_canary,
             )
         except QmtInstanceError as exc:
             raise SystemExit(str(exc)) from exc
@@ -218,6 +219,7 @@ def _resolve_spool_instance(args: argparse.Namespace) -> QmtInstance:
                 spool_base,
                 args.instance_id,
                 allow_simulation_mutation=args.allow_simulation_mutation,
+                allow_live_canary=args.allow_live_canary,
             )
         except QmtInstanceError as exc:
             raise SystemExit(str(exc)) from exc
@@ -227,6 +229,7 @@ def _resolve_spool_instance(args: argparse.Namespace) -> QmtInstance:
         instances = discover_instances(
             spool_base,
             allow_simulation_mutation=args.allow_simulation_mutation,
+            allow_live_canary=args.allow_live_canary,
         )
         if instances:
             return _choose_instance(instances)
@@ -296,6 +299,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-simulation-mutation",
         action="store_true",
         help="Explicitly admit a manifest-pinned SIMULATION_CALIBRATION instance.",
+    )
+    parser.add_argument(
+        "--allow-live-canary",
+        action="store_true",
+        help="Explicitly admit a fingerprint-pinned, one-submit LIVE_CANARY instance.",
     )
     parser.add_argument("--poll-interval", type=float, default=0.2)
     parser.add_argument("--host", default="127.0.0.1")

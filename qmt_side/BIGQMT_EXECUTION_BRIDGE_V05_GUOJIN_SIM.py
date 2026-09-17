@@ -21,8 +21,8 @@ from __future__ import print_function
 SPOOL_BASE_DIR = r"D:\BigQMTData\spool"
 TERMINAL_INSTANCE_ID = "guojin_sim"
 
-# The deployment generator may replace this block only for a pinned simulation
-# artifact. Production-account artifacts retain these fail-closed values.
+# The deployment generator may replace this block only for an explicitly pinned
+# mutation artifact. The generic template and Galaxy artifact stay fail-closed.
 EXECUTION_MODE = "SIMULATION_CALIBRATION"
 TRADING_ENABLED = True
 LIVE_SUBMIT_ENABLED = True
@@ -808,21 +808,32 @@ def _bind_runtime(ContextInfo):
         return False
     _set_account_state(account_id, account_type)
     if TRADING_ENABLED:
-        mutation_gate_valid = (
-            EXECUTION_MODE == "SIMULATION_CALIBRATION"
-            and LIVE_SUBMIT_ENABLED is True
+        common_mutation_gate = (
+            LIVE_SUBMIT_ENABLED is True
             and LIVE_CANCEL_ENABLED is True
-            and SIMULATION_ONLY is True
             and _spool_instance_id() is not None
             and isinstance(AUTHORIZED_ACCOUNT_FINGERPRINT, str)
             and _STATE.account_fingerprint == AUTHORIZED_ACCOUNT_FINGERPRINT
             and _account_type(_STATE.account_type) == "STOCK"
             and SIMULATION_MAX_ORDER_QUANTITY == 100
-            and SIMULATION_MAX_SUBMIT_CALLS == 2000
-            and SIMULATION_MAX_CANCEL_CALLS == 2000
+        )
+        mutation_gate_valid = common_mutation_gate and (
+            (
+                EXECUTION_MODE == "SIMULATION_CALIBRATION"
+                and SIMULATION_ONLY is True
+                and SIMULATION_MAX_SUBMIT_CALLS == 2000
+                and SIMULATION_MAX_CANCEL_CALLS == 2000
+            )
+            or (
+                EXECUTION_MODE == "LIVE_CANARY"
+                and SIMULATION_ONLY is False
+                and _spool_instance_id() == "guojin"
+                and SIMULATION_MAX_SUBMIT_CALLS == 1
+                and SIMULATION_MAX_CANCEL_CALLS == 1
+            )
         )
         if not mutation_gate_valid:
-            _runtime_error("SIMULATION_MUTATION_GATE_INVALID")
+            _runtime_error("MUTATION_GATE_INVALID")
             return False
     try:
         inbox = _ensure_spool()
@@ -958,7 +969,12 @@ def _recover_orphaned_claims():
             _atomic_move(source, target)
             _STATE.commands_unknown += 1
             if TRADING_ENABLED and command.get("command_type") != "REQUEST_SNAPSHOT":
-                _command_result(command, "SIMULATION_ORPHANED_UNKNOWN", True)
+                orphaned = (
+                    "LIVE_CANARY_ORPHANED_UNKNOWN"
+                    if EXECUTION_MODE == "LIVE_CANARY"
+                    else "SIMULATION_ORPHANED_UNKNOWN"
+                )
+                _command_result(command, orphaned, True)
             else:
                 _command_result(command, "UNKNOWN_ORPHANED", False)
         except Exception as exc:
@@ -1136,9 +1152,14 @@ def _process_claimed(claimed_path, name, ContextInfo):
             target = os.path.join(_command_dir("unknown"), name)
             _atomic_move(claimed_path, target)
             _STATE.commands_unknown += 1
-            _command_result(command, "SIMULATION_MUTATION_UNKNOWN", True)
+            unknown = (
+                "LIVE_CANARY_MUTATION_UNKNOWN"
+                if EXECUTION_MODE == "LIVE_CANARY"
+                else "SIMULATION_MUTATION_UNKNOWN"
+            )
+            _command_result(command, unknown, True)
             _runtime_error(
-                "COMMAND_SIMULATION_MUTATION_UNKNOWN",
+                "COMMAND_MUTATION_UNKNOWN",
                 exc,
                 {"command_id": command.get("command_id")},
             )

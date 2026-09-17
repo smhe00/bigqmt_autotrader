@@ -8,7 +8,7 @@
     "command_id": {"type": "string", "minLength": 1},
     "command_type": {"enum": ["SUBMIT_LIMIT", "CANCEL_ORDER", "REQUEST_SNAPSHOT"]},
     "result_status": {"type": "string", "minLength": 1},
-    "execution_mode": {"enum": ["SHADOW", "SIMULATION_CALIBRATION"]},
+    "execution_mode": {"enum": ["SHADOW", "SIMULATION_CALIBRATION", "LIVE_CANARY"]},
     "live_side_effect": {"type": "boolean"},
     "client_order_id": {"type": ["string", "null"], "minLength": 1},
     "broker_token": {"type": ["string", "null"], "pattern": "^BQ[0-9a-f]{20}$"}
@@ -27,7 +27,10 @@
         {"properties": {"execution_mode": {"const": "SHADOW"}, "command_type": {"const": "REQUEST_SNAPSHOT"}, "result_status": {"enum": ["SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
         {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}, "command_type": {"const": "SUBMIT_LIMIT"}, "result_status": {"enum": ["SIMULATION_SUBMIT_CALL_RETURNED", "SIMULATION_MUTATION_UNKNOWN", "SIMULATION_ORPHANED_UNKNOWN", "REJECTED_SAFETY_GATE", "REJECTED_EXPIRED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
         {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}, "command_type": {"const": "CANCEL_ORDER"}, "result_status": {"enum": ["SIMULATION_CANCEL_SIGNAL_SENT", "SIMULATION_CANCEL_NOT_CANCELLABLE", "SIMULATION_CANCEL_NOT_SENT", "SIMULATION_MUTATION_UNKNOWN", "SIMULATION_ORPHANED_UNKNOWN", "REJECTED_SAFETY_GATE", "REJECTED_EXPIRED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
-        {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}, "command_type": {"const": "REQUEST_SNAPSHOT"}, "result_status": {"enum": ["SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"]}}, "required": ["execution_mode", "command_type", "result_status"]}
+        {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}, "command_type": {"const": "REQUEST_SNAPSHOT"}, "result_status": {"enum": ["SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
+        {"properties": {"execution_mode": {"const": "LIVE_CANARY"}, "command_type": {"const": "SUBMIT_LIMIT"}, "result_status": {"enum": ["LIVE_CANARY_SUBMIT_CALL_RETURNED", "LIVE_CANARY_MUTATION_UNKNOWN", "LIVE_CANARY_ORPHANED_UNKNOWN", "REJECTED_SAFETY_GATE", "REJECTED_EXPIRED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
+        {"properties": {"execution_mode": {"const": "LIVE_CANARY"}, "command_type": {"const": "CANCEL_ORDER"}, "result_status": {"enum": ["LIVE_CANARY_CANCEL_SIGNAL_SENT", "LIVE_CANARY_CANCEL_NOT_CANCELLABLE", "LIVE_CANARY_CANCEL_NOT_SENT", "LIVE_CANARY_MUTATION_UNKNOWN", "LIVE_CANARY_ORPHANED_UNKNOWN", "REJECTED_SAFETY_GATE", "REJECTED_EXPIRED"]}}, "required": ["execution_mode", "command_type", "result_status"]},
+        {"properties": {"execution_mode": {"const": "LIVE_CANARY"}, "command_type": {"const": "REQUEST_SNAPSHOT"}, "result_status": {"enum": ["SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"]}}, "required": ["execution_mode", "command_type", "result_status"]}
       ]
     },
     {
@@ -39,6 +42,14 @@
       "then": {"properties": {"live_side_effect": {"const": true}}},
       "else": {
         "if": {"properties": {"execution_mode": {"const": "SIMULATION_CALIBRATION"}}, "required": ["execution_mode"]},
+        "then": {"properties": {"live_side_effect": {"const": false}}}
+      }
+    },
+    {
+      "if": {"properties": {"execution_mode": {"const": "LIVE_CANARY"}, "result_status": {"enum": ["LIVE_CANARY_SUBMIT_CALL_RETURNED", "LIVE_CANARY_CANCEL_SIGNAL_SENT", "LIVE_CANARY_CANCEL_NOT_SENT", "LIVE_CANARY_MUTATION_UNKNOWN", "LIVE_CANARY_ORPHANED_UNKNOWN"]}}, "required": ["execution_mode", "result_status"]},
+      "then": {"properties": {"live_side_effect": {"const": true}}},
+      "else": {
+        "if": {"properties": {"execution_mode": {"const": "LIVE_CANARY"}}, "required": ["execution_mode"]},
         "then": {"properties": {"live_side_effect": {"const": false}}}
       }
     }

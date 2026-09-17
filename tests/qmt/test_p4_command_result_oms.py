@@ -189,3 +189,48 @@ def test_shadow_command_result_racing_submit_reservation_can_only_move_to_unknow
     assert result.status is OrderStatus.UNKNOWN
     assert repo.get_status(FP, CID) is OrderStatus.UNKNOWN
     assert repo.get_order_row(FP, CID)["broker_order_id"] is None
+
+
+def test_live_canary_api_return_moves_submitting_only_to_unknown(tmp_path):
+    repo, oms = make_oms(tmp_path)
+    intent = order_intent()
+    repo.create_intent(intent)
+    repo.record_risk_decision(FP, CID, accepted_risk())
+    repo.prepare_submit(FP, CID)
+
+    payload = command_result_payload()
+    payload.update(
+        {
+            "command_id": "live-" + TOKEN,
+            "result_status": "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+            "execution_mode": "LIVE_CANARY",
+            "live_side_effect": True,
+        }
+    )
+    sink = OmsQmtCommandResultSink(oms)
+    result = sink.ingest_execution_command_result(
+        source_event_id="session-live:2",
+        account_fingerprint=FP,
+        command_id=payload["command_id"],
+        command_type="SUBMIT_LIMIT",
+        client_order_id=CID,
+        broker_token=TOKEN,
+        result_status=payload["result_status"],
+        execution_mode="LIVE_CANARY",
+        live_side_effect=True,
+        payload=payload,
+        observed_at=datetime.now(timezone.utc),
+    )
+
+    assert result.status is OrderStatus.UNKNOWN
+    assert repo.get_status(FP, CID) is OrderStatus.UNKNOWN
+    assert repo.get_order_row(FP, CID)["broker_order_id"] is None
+    audit = [
+        row
+        for row in repo.list_events(FP, CID)
+        if row["event_type"] == "QMT_COMMAND_RESULT_LIVE_CANARY_SUBMIT_CALL_RETURNED"
+    ]
+    assert len(audit) == 1
+    evidence = json.loads(audit[0]["evidence_json"])
+    assert evidence["broker_evidence"] is False
+    assert evidence["live_side_effect"] is True

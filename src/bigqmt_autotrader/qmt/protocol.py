@@ -183,6 +183,13 @@ def _validate_account_capabilities_payload(payload: Mapping[str, Any]) -> None:
             or payload.get("simulation_only") is not True
         ):
             raise QmtProtocolError("invalid simulation account_capabilities authority")
+    elif execution_mode == "LIVE_CANARY":
+        if (
+            live_submit is not True
+            or live_cancel is not True
+            or payload.get("simulation_only") is not False
+        ):
+            raise QmtProtocolError("invalid live canary account_capabilities authority")
     else:
         raise QmtProtocolError("account_capabilities execution_mode is unsupported")
 
@@ -221,10 +228,31 @@ def _validate_command_result_payload(payload: Mapping[str, Any]) -> None:
         },
         "REQUEST_SNAPSHOT": {"SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"},
     }
+    live_canary_allowed = {
+        "SUBMIT_LIMIT": {
+            "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+            "LIVE_CANARY_MUTATION_UNKNOWN",
+            "LIVE_CANARY_ORPHANED_UNKNOWN",
+            "REJECTED_SAFETY_GATE",
+            "REJECTED_EXPIRED",
+        },
+        "CANCEL_ORDER": {
+            "LIVE_CANARY_CANCEL_SIGNAL_SENT",
+            "LIVE_CANARY_CANCEL_NOT_CANCELLABLE",
+            "LIVE_CANARY_CANCEL_NOT_SENT",
+            "LIVE_CANARY_MUTATION_UNKNOWN",
+            "LIVE_CANARY_ORPHANED_UNKNOWN",
+            "REJECTED_SAFETY_GATE",
+            "REJECTED_EXPIRED",
+        },
+        "REQUEST_SNAPSHOT": {"SNAPSHOT_EMITTED", "REJECTED_EXPIRED", "UNKNOWN_ORPHANED"},
+    }
     if execution_mode == "SHADOW":
         allowed_by_command = shadow_allowed
     elif execution_mode == "SIMULATION_CALIBRATION":
         allowed_by_command = simulation_allowed
+    elif execution_mode == "LIVE_CANARY":
+        allowed_by_command = live_canary_allowed
     else:
         raise QmtProtocolError("command_result execution_mode is unsupported")
     if result_status not in allowed_by_command.get(command_type, set()):
@@ -244,6 +272,17 @@ def _validate_command_result_payload(payload: Mapping[str, Any]) -> None:
         live_side_effect != (result_status in simulation_side_effect_statuses)
     ):
         raise QmtProtocolError("simulation command_result side-effect flag is inconsistent")
+    live_canary_side_effect_statuses = {
+        "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+        "LIVE_CANARY_CANCEL_SIGNAL_SENT",
+        "LIVE_CANARY_CANCEL_NOT_SENT",
+        "LIVE_CANARY_MUTATION_UNKNOWN",
+        "LIVE_CANARY_ORPHANED_UNKNOWN",
+    }
+    if execution_mode == "LIVE_CANARY" and (
+        live_side_effect != (result_status in live_canary_side_effect_statuses)
+    ):
+        raise QmtProtocolError("live canary command_result side-effect flag is inconsistent")
 
     client_order_id = payload.get("client_order_id")
     broker_token = payload.get("broker_token")

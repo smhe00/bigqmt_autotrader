@@ -30,6 +30,21 @@ _RESULT_STATUSES = {
     "SNAPSHOT_EMITTED",
     "REJECTED_EXPIRED",
     "UNKNOWN_ORPHANED",
+    "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+    "LIVE_CANARY_CANCEL_SIGNAL_SENT",
+    "LIVE_CANARY_CANCEL_NOT_CANCELLABLE",
+    "LIVE_CANARY_CANCEL_NOT_SENT",
+    "LIVE_CANARY_MUTATION_UNKNOWN",
+    "LIVE_CANARY_ORPHANED_UNKNOWN",
+    "REJECTED_SAFETY_GATE",
+}
+
+_LIVE_SIDE_EFFECT_STATUSES = {
+    "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+    "LIVE_CANARY_CANCEL_SIGNAL_SENT",
+    "LIVE_CANARY_CANCEL_NOT_SENT",
+    "LIVE_CANARY_MUTATION_UNKNOWN",
+    "LIVE_CANARY_ORPHANED_UNKNOWN",
 }
 
 
@@ -70,8 +85,14 @@ class QmtCommandResultJournal:
 
         if command_type not in _COMMAND_TYPES or result_status not in _RESULT_STATUSES:
             raise ValueError("unsupported QMT command result")
-        if execution_mode != "SHADOW" or live_side_effect is not False:
-            raise ValueError("P4 command result must be side-effect-free SHADOW evidence")
+        if execution_mode == "SHADOW":
+            if live_side_effect is not False:
+                raise ValueError("SHADOW command result cannot claim a live side effect")
+        elif execution_mode == "LIVE_CANARY":
+            if live_side_effect is not (result_status in _LIVE_SIDE_EFFECT_STATUSES):
+                raise ValueError("LIVE_CANARY side-effect flag is inconsistent")
+        else:
+            raise ValueError("unsupported command result execution mode")
         if not isinstance(command_id, str) or not command_id:
             raise ValueError("command_id must be non-empty")
         if not isinstance(qmt_session_id, str) or not qmt_session_id:
@@ -132,7 +153,7 @@ class QmtCommandResultJournal:
                     account_fingerprint, client_order_id, command_type,
                     broker_token, result_status, execution_mode, live_side_effect,
                     payload_json, observed_at, ingested_at
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     command_id,
@@ -145,6 +166,7 @@ class QmtCommandResultJournal:
                     broker_token,
                     result_status,
                     execution_mode,
+                    int(live_side_effect),
                     payload_json,
                     observed_iso,
                     datetime.now(timezone.utc).isoformat(),
@@ -154,7 +176,10 @@ class QmtCommandResultJournal:
             if client_order_id is None:
                 return CommandResultIngestResult(False, None, None)
 
-            begin_reconciling = result_status == "SHADOW_ACCEPTED"
+            begin_reconciling = result_status == "SHADOW_ACCEPTED" or (
+                execution_mode == "LIVE_CANARY"
+                and result_status not in {"REJECTED_SAFETY_GATE", "REJECTED_EXPIRED"}
+            )
             outcome = self.repository.record_command_reconciliation_in_tx(
                 account_fingerprint,
                 client_order_id,
@@ -166,7 +191,7 @@ class QmtCommandResultJournal:
                     "qmt_sequence": qmt_sequence,
                     "broker_token": broker_token,
                     "execution_mode": execution_mode,
-                    "live_side_effect": False,
+                    "live_side_effect": live_side_effect,
                     "broker_evidence": False,
                     "evidence_class": "EXECUTION_PLANE_NOT_BROKER_ACK",
                 },

@@ -118,6 +118,7 @@ class QmtCommandSpool:
         command_id: str | None = None,
         created_ms: int | None = None,
         simulation_calibration: bool = False,
+        live_canary: bool = False,
         expected_qmt_session_id: str | None = None,
     ) -> QmtCommand:
         payload: dict[str, Any] = {
@@ -126,10 +127,16 @@ class QmtCommandSpool:
             "quantity": quantity,
             "limit_price": limit_price,
         }
-        if simulation_calibration:
+        if simulation_calibration and live_canary:
+            raise QmtCommandError("command cannot be both simulation and live canary")
+        if simulation_calibration or live_canary:
             payload.update(
                 {
-                    "simulation_calibration": True,
+                    (
+                        "simulation_calibration"
+                        if simulation_calibration
+                        else "live_canary"
+                    ): True,
                     "expected_qmt_session_id": expected_qmt_session_id,
                 }
             )
@@ -156,13 +163,20 @@ class QmtCommandSpool:
         command_id: str | None = None,
         created_ms: int | None = None,
         simulation_calibration: bool = False,
+        live_canary: bool = False,
         expected_qmt_session_id: str | None = None,
     ) -> QmtCommand:
         payload: dict[str, Any] = {"broker_order_id": broker_order_id}
-        if simulation_calibration:
+        if simulation_calibration and live_canary:
+            raise QmtCommandError("command cannot be both simulation and live canary")
+        if simulation_calibration or live_canary:
             payload.update(
                 {
-                    "simulation_calibration": True,
+                    (
+                        "simulation_calibration"
+                        if simulation_calibration
+                        else "live_canary"
+                    ): True,
                     "expected_qmt_session_id": expected_qmt_session_id,
                 }
             )

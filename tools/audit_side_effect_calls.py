@@ -177,23 +177,24 @@ def main() -> None:
         QmtVisitor().visit(tree)
         qmt_observed[deployment] = calls
 
-    for deployment in ("template", "galaxy", "guojin"):
+    for deployment in ("template", "galaxy"):
         for name, function, line in qmt_observed[deployment]:
             violations.append(
                 f"broker mutation {name} escaped into {deployment} QMT artifact at "
                 f"{function}():{line}"
             )
-    sim_calls = qmt_observed["guojin_sim"]
-    expected_sim_calls = {
+    expected_mutation_calls = {
         ("passorder", "_execute_order_command"),
         ("cancel", "_execute_order_command"),
     }
-    observed_sim_calls = {(name, function) for name, function, _line in sim_calls}
-    if observed_sim_calls != expected_sim_calls or len(sim_calls) != 2:
-        violations.append(
-            "guojin_sim QMT mutation surface must contain exactly one passorder and one "
-            "cancel call inside _execute_order_command()"
-        )
+    for deployment in ("guojin", "guojin_sim"):
+        calls = qmt_observed[deployment]
+        observed_calls = {(name, function) for name, function, _line in calls}
+        if observed_calls != expected_mutation_calls or len(calls) != 2:
+            violations.append(
+                deployment + " QMT mutation surface must contain exactly one passorder "
+                "and one cancel call inside _execute_order_command()"
+            )
 
     if violations:
         raise SystemExit("SIDE-EFFECT SURFACE AUDIT FAILED\n" + "\n".join(violations))
@@ -208,7 +209,8 @@ def main() -> None:
             rendered = ", ".join(f"{path}:{fn}()" for path, fn in sorted(locations))
             print(f"  {group} {name}: {rendered}")
     print("  qmt simulation mutation calls: guojin_sim:_execute_order_command(passorder,cancel)")
-    print("  qmt production mutation calls: template=0, galaxy=0, guojin=0")
+    print("  qmt live canary mutation calls: guojin:_execute_order_command(passorder,cancel)")
+    print("  qmt disabled mutation calls: template=0, galaxy=0")
 
 
 if __name__ == "__main__":

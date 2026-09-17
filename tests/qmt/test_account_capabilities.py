@@ -97,6 +97,20 @@ def test_capability_event_allows_explicit_simulation_only_authority():
     assert encode_transport_frame(capability_event(value))
 
 
+def test_capability_event_allows_explicit_live_canary_authority():
+    value = payload()
+    value.update(
+        {
+            "execution_mode": "LIVE_CANARY",
+            "simulation_only": False,
+            "live_submit": True,
+            "live_cancel": True,
+        }
+    )
+
+    assert encode_transport_frame(capability_event(value))
+
+
 def test_capability_event_rejects_detected_list_that_disagrees_with_records():
     value = payload()
     value["detected_account_types"] = ["STOCK"]

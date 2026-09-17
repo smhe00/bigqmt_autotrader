@@ -93,6 +93,7 @@ def load_instance(
     instance_id: str,
     *,
     allow_simulation_mutation: bool = False,
+    allow_live_canary: bool = False,
 ) -> QmtInstance:
     if not valid_instance_id(instance_id):
         raise QmtInstanceError("invalid instance_id")
@@ -129,6 +130,16 @@ def load_instance(
             "max_submit_calls_per_session": 2000,
             "max_cancel_calls_per_session": 2000,
         }
+    elif execution_mode == "LIVE_CANARY" and allow_live_canary:
+        safety_required = {
+            "trading_enabled": True,
+            "live_submit": True,
+            "live_cancel": True,
+            "simulation_only": False,
+            "max_order_quantity": 100,
+            "max_submit_calls_per_session": 1,
+            "max_cancel_calls_per_session": 1,
+        }
     else:
         raise QmtInstanceError("instance execution mode is not authorized")
     for key, expected in safety_required.items():
@@ -150,9 +161,9 @@ def load_instance(
         raise QmtInstanceError("invalid instance bridge_build")
     if isinstance(created_ms, bool) or not isinstance(created_ms, int) or created_ms <= 0:
         raise QmtInstanceError("invalid instance created_ms")
-    if execution_mode == "SIMULATION_CALIBRATION":
+    if execution_mode in {"SIMULATION_CALIBRATION", "LIVE_CANARY"}:
         if manifest.get("authorized_account_fingerprint") != fingerprint:
-            raise QmtInstanceError("simulation instance account fingerprint is not pinned")
+            raise QmtInstanceError("mutation instance account fingerprint is not pinned")
 
     ready = _latest_bridge_ready(root)
     if ready.session_id != session_id:
@@ -170,7 +181,7 @@ def load_instance(
         **safety_required,
         "spool_instance_id": instance_id,
     }
-    if execution_mode == "SIMULATION_CALIBRATION":
+    if execution_mode in {"SIMULATION_CALIBRATION", "LIVE_CANARY"}:
         capability_required["authorized_account_fingerprint"] = fingerprint
     for key, expected in capability_required.items():
         if capabilities.get(key) != expected:
@@ -196,6 +207,7 @@ def discover_instances(
     spool_base: str | os.PathLike[str],
     *,
     allow_simulation_mutation: bool = False,
+    allow_live_canary: bool = False,
 ) -> tuple[QmtInstance, ...]:
     base = Path(spool_base).expanduser().resolve()
     if not base.is_dir() or _is_link_or_reparse(base):
@@ -210,6 +222,7 @@ def discover_instances(
                     base,
                     child.name,
                     allow_simulation_mutation=allow_simulation_mutation,
+                    allow_live_canary=allow_live_canary,
                 )
             )
         except QmtInstanceError:

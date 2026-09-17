@@ -80,13 +80,33 @@ def simulation_manifest() -> dict:
     return value
 
 
-def test_instance_schema_accepts_current_shadow_and_simulation_modes() -> None:
+def live_canary_manifest() -> dict:
+    value = shadow_manifest()
+    value.update(
+        {
+            "bridge_build": "p6-guojin-live-canary-1",
+            "execution_mode": "LIVE_CANARY",
+            "trading_enabled": True,
+            "live_submit": True,
+            "live_cancel": True,
+            "simulation_only": False,
+            "authorized_account_fingerprint": FP,
+            "max_order_quantity": 100,
+            "max_submit_calls_per_session": 1,
+            "max_cancel_calls_per_session": 1,
+        }
+    )
+    return value
+
+
+def test_instance_schema_accepts_current_execution_modes() -> None:
     validator = Draft202012Validator(schema("instance.schema.json"))
     validator.validate(shadow_manifest())
     validator.validate(simulation_manifest())
+    validator.validate(live_canary_manifest())
 
 
-def test_instance_schema_rejects_live_named_mode_and_shadow_authority() -> None:
+def test_instance_schema_rejects_unknown_live_named_mode_and_shadow_authority() -> None:
     validator = Draft202012Validator(schema("instance.schema.json"))
 
     live = shadow_manifest()
@@ -193,6 +213,19 @@ def test_command_result_schema_enforces_control_plane_semantics() -> None:
     invalid_status_pair["result_status"] = "SIMULATION_SUBMIT_CALL_RETURNED"
     with pytest.raises(ValidationError):
         validator.validate(invalid_status_pair)
+
+    live = deepcopy(payload)
+    live.update(
+        {
+            "result_status": "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+            "execution_mode": "LIVE_CANARY",
+            "live_side_effect": True,
+        }
+    )
+    validator.validate(live)
+    live["live_side_effect"] = False
+    with pytest.raises(ValidationError):
+        validator.validate(live)
 
 
 def test_event_schema_embeds_command_result_contract() -> None:

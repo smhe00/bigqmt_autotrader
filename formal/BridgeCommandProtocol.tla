@@ -3,11 +3,12 @@ EXTENDS Naturals, FiniteSets
 
 States == {"ABSENT", "INBOX", "CLAIMED", "PROCESSED", "REJECTED", "UNKNOWN"}
 TerminalStates == {"PROCESSED", "REJECTED", "UNKNOWN"}
-Modes == {"SHADOW", "SIMULATION"}
+Modes == {"SHADOW", "SIMULATION", "LIVE_CANARY"}
 Results == {
     "NONE",
     "SHADOW_ACCEPTED",
     "SIMULATION_CALL_RETURNED",
+    "LIVE_CANARY_CALL_RETURNED",
     "REJECTED",
     "UNKNOWN_ORPHANED"
 }
@@ -85,7 +86,7 @@ Claim ==
 
 RejectInvalid ==
     /\ state = "CLAIMED"
-    /\ (expired \/ ~accountOK \/ (mode = "SIMULATION" /\ ~sessionOK))
+    /\ (expired \/ ~accountOK \/ (mode # "SHADOW" /\ ~sessionOK))
     /\ state' = "REJECTED"
     /\ result' = "REJECTED"
     /\ UNCHANGED <<mode, expired, accountOK, sessionOK,
@@ -142,6 +143,43 @@ PersistSimulationResult ==
                    sameRepublishes, conflictSeen, claimedCrash,
                    restartSeen, blindReplay>>
 
+ProcessLiveCanary ==
+    /\ state = "CLAIMED"
+    /\ mode = "LIVE_CANARY"
+    /\ ~expired
+    /\ accountOK
+    /\ sessionOK
+    /\ sideEffectCalls = 0
+    /\ state' = "PROCESSED"
+    /\ sideEffectCalls' = 1
+    /\ result' = "LIVE_CANARY_CALL_RETURNED"
+    /\ UNCHANGED <<mode, expired, accountOK, sessionOK,
+                   brokerAck, canonicalWrites, sameRepublishes,
+                   conflictSeen, claimedCrash, restartSeen, blindReplay>>
+
+LiveCanaryCallBeforePersist ==
+    /\ state = "CLAIMED"
+    /\ mode = "LIVE_CANARY"
+    /\ ~expired
+    /\ accountOK
+    /\ sessionOK
+    /\ sideEffectCalls = 0
+    /\ sideEffectCalls' = 1
+    /\ UNCHANGED <<state, mode, expired, accountOK, sessionOK,
+                   brokerAck, result, canonicalWrites, sameRepublishes,
+                   conflictSeen, claimedCrash, restartSeen, blindReplay>>
+
+PersistLiveCanaryResult ==
+    /\ state = "CLAIMED"
+    /\ mode = "LIVE_CANARY"
+    /\ sideEffectCalls = 1
+    /\ state' = "PROCESSED"
+    /\ result' = "LIVE_CANARY_CALL_RETURNED"
+    /\ UNCHANGED <<mode, expired, accountOK, sessionOK,
+                   sideEffectCalls, brokerAck, canonicalWrites,
+                   sameRepublishes, conflictSeen, claimedCrash,
+                   restartSeen, blindReplay>>
+
 CrashClaimed ==
     /\ state = "CLAIMED"
     /\ state' = "UNKNOWN"
@@ -166,6 +204,7 @@ Next ==
     PublishNew \/ RepublishSame \/ RepublishConflict \/ Claim \/
     RejectInvalid \/ ProcessShadow \/ ProcessSimulation \/
     SimulationCallBeforePersist \/ PersistSimulationResult \/
+    ProcessLiveCanary \/ LiveCanaryCallBeforePersist \/ PersistLiveCanaryResult \/
     CrashClaimed \/ RestartOrphan \/ Stutter
 
 Spec == Init /\ [][Next]_vars
@@ -193,7 +232,7 @@ WrongAccountNeverMutatesBroker ==
     ~accountOK => sideEffectCalls = 0
 
 WrongSessionNeverMutatesBroker ==
-    (mode = "SIMULATION" /\ ~sessionOK) => sideEffectCalls = 0
+    (mode # "SHADOW" /\ ~sessionOK) => sideEffectCalls = 0
 
 ShadowNeverMutatesBroker ==
     mode = "SHADOW" => sideEffectCalls = 0

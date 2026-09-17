@@ -21,17 +21,17 @@ from __future__ import print_function
 SPOOL_BASE_DIR = r"D:\BigQMTData\spool"
 TERMINAL_INSTANCE_ID = "guojin"
 
-# The deployment generator may replace this block only for a pinned simulation
-# artifact. Production-account artifacts retain these fail-closed values.
-EXECUTION_MODE = "SHADOW"
-TRADING_ENABLED = False
-LIVE_SUBMIT_ENABLED = False
-LIVE_CANCEL_ENABLED = False
+# The deployment generator may replace this block only for an explicitly pinned
+# mutation artifact. The generic template and Galaxy artifact stay fail-closed.
+EXECUTION_MODE = "LIVE_CANARY"
+TRADING_ENABLED = True
+LIVE_SUBMIT_ENABLED = True
+LIVE_CANCEL_ENABLED = True
 SIMULATION_ONLY = False
-AUTHORIZED_ACCOUNT_FINGERPRINT = None
-SIMULATION_MAX_ORDER_QUANTITY = 0
-SIMULATION_MAX_SUBMIT_CALLS = 0
-SIMULATION_MAX_CANCEL_CALLS = 0
+AUTHORIZED_ACCOUNT_FINGERPRINT = "sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5"
+SIMULATION_MAX_ORDER_QUANTITY = 100
+SIMULATION_MAX_SUBMIT_CALLS = 1
+SIMULATION_MAX_CANCEL_CALLS = 1
 
 import hashlib
 import json
@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p4-shadow-command-spool-5"
+BRIDGE_BUILD = "p6-guojin-live-canary-1"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -808,21 +808,32 @@ def _bind_runtime(ContextInfo):
         return False
     _set_account_state(account_id, account_type)
     if TRADING_ENABLED:
-        mutation_gate_valid = (
-            EXECUTION_MODE == "SIMULATION_CALIBRATION"
-            and LIVE_SUBMIT_ENABLED is True
+        common_mutation_gate = (
+            LIVE_SUBMIT_ENABLED is True
             and LIVE_CANCEL_ENABLED is True
-            and SIMULATION_ONLY is True
             and _spool_instance_id() is not None
             and isinstance(AUTHORIZED_ACCOUNT_FINGERPRINT, str)
             and _STATE.account_fingerprint == AUTHORIZED_ACCOUNT_FINGERPRINT
             and _account_type(_STATE.account_type) == "STOCK"
             and SIMULATION_MAX_ORDER_QUANTITY == 100
-            and SIMULATION_MAX_SUBMIT_CALLS == 2
-            and SIMULATION_MAX_CANCEL_CALLS == 2
+        )
+        mutation_gate_valid = common_mutation_gate and (
+            (
+                EXECUTION_MODE == "SIMULATION_CALIBRATION"
+                and SIMULATION_ONLY is True
+                and SIMULATION_MAX_SUBMIT_CALLS == 2
+                and SIMULATION_MAX_CANCEL_CALLS == 2
+            )
+            or (
+                EXECUTION_MODE == "LIVE_CANARY"
+                and SIMULATION_ONLY is False
+                and _spool_instance_id() == "guojin"
+                and SIMULATION_MAX_SUBMIT_CALLS == 1
+                and SIMULATION_MAX_CANCEL_CALLS == 1
+            )
         )
         if not mutation_gate_valid:
-            _runtime_error("SIMULATION_MUTATION_GATE_INVALID")
+            _runtime_error("MUTATION_GATE_INVALID")
             return False
     try:
         inbox = _ensure_spool()
@@ -958,7 +969,12 @@ def _recover_orphaned_claims():
             _atomic_move(source, target)
             _STATE.commands_unknown += 1
             if TRADING_ENABLED and command.get("command_type") != "REQUEST_SNAPSHOT":
-                _command_result(command, "SIMULATION_ORPHANED_UNKNOWN", True)
+                orphaned = (
+                    "LIVE_CANARY_ORPHANED_UNKNOWN"
+                    if EXECUTION_MODE == "LIVE_CANARY"
+                    else "SIMULATION_ORPHANED_UNKNOWN"
+                )
+                _command_result(command, orphaned, True)
             else:
                 _command_result(command, "UNKNOWN_ORPHANED", False)
         except Exception as exc:
@@ -981,9 +997,98 @@ def _reject_claimed(claimed_path, name, code, exc=None):
     _runtime_error(code, exc, {"file": name})
 
 
+def _live_canary_symbol(value):
+    value = _text(value)
+    if value != "00700.HK":
+        return None
+    return value
+
+
+def _live_canary_cancel_target(command):
+    query = globals().get("get_trade_detail_data")
+    if not callable(query):
+        raise CommandError("order query unavailable")
+    rows = query(_STATE.account_id, _STATE.account_type, "order")
+    if rows is None:
+        raise CommandError("order query returned None")
+    broker_order_id = _text(command.get("payload", {}).get("broker_order_id"))
+    broker_token = command.get("broker_token")
+    matches = []
+    for row in rows:
+        if (
+            _text(_get(row, "m_strOrderSysID")) == broker_order_id
+            and _text(_get(row, "m_strRemark")) == broker_token
+        ):
+            matches.append(row)
+    if len(matches) != 1:
+        raise CommandError("live canary cancel target is not one exact token-matched order")
+    return broker_order_id
+
+
 def _execute_order_command(command, ContextInfo):
-    """SHADOW default replaced only in the generated simulation artifact."""
-    return "SHADOW_ACCEPTED", False
+    if (
+        TERMINAL_INSTANCE_ID != "guojin"
+        or EXECUTION_MODE != "LIVE_CANARY"
+        or TRADING_ENABLED is not True
+        or SIMULATION_ONLY is not False
+        or _STATE.account_fingerprint != AUTHORIZED_ACCOUNT_FINGERPRINT
+        or _account_type(_STATE.account_type) != "STOCK"
+    ):
+        raise CommandError("live canary deployment gate is closed")
+
+    payload = command.get("payload")
+    if (
+        not isinstance(payload, dict)
+        or payload.get("live_canary") is not True
+        or payload.get("simulation_calibration") is True
+        or payload.get("expected_qmt_session_id") != _STATE.session_id
+    ):
+        raise CommandError("missing current-session live canary authorization")
+
+    command_type = command.get("command_type")
+    if command_type == "SUBMIT_LIMIT":
+        if _STATE.simulation_submit_calls >= SIMULATION_MAX_SUBMIT_CALLS:
+            raise CommandError("live canary submit session limit reached")
+        symbol = _live_canary_symbol(payload.get("symbol"))
+        quantity = payload.get("quantity")
+        side = payload.get("side")
+        try:
+            price = float(payload.get("limit_price"))
+        except Exception:
+            raise CommandError("invalid live canary limit price")
+        if symbol is None or side != "BUY" or quantity != 100:
+            raise CommandError("live canary permits only 00700.HK BUY 100")
+        if price != 1.0:
+            raise CommandError("live canary limit price must equal 1.00 HKD")
+        passorder(
+            23,
+            1101,
+            _STATE.account_id,
+            symbol,
+            11,
+            price,
+            quantity,
+            "BIGQMT_LIVE_CANARY",
+            2,
+            command.get("broker_token"),
+            ContextInfo,
+        )
+        _STATE.simulation_submit_calls += 1
+        return "LIVE_CANARY_SUBMIT_CALL_RETURNED", True
+
+    if command_type == "CANCEL_ORDER":
+        if _STATE.simulation_cancel_calls >= SIMULATION_MAX_CANCEL_CALLS:
+            raise CommandError("live canary cancel session limit reached")
+        broker_order_id = _live_canary_cancel_target(command)
+        if not can_cancel_order(broker_order_id, _STATE.account_id, _STATE.account_type):
+            return "LIVE_CANARY_CANCEL_NOT_CANCELLABLE", False
+        result = cancel(broker_order_id, _STATE.account_id, _STATE.account_type, ContextInfo)
+        _STATE.simulation_cancel_calls += 1
+        if result is True:
+            return "LIVE_CANARY_CANCEL_SIGNAL_SENT", True
+        return "LIVE_CANARY_CANCEL_NOT_SENT", True
+
+    raise CommandError("unsupported live canary mutation command")
 
 
 def _process_claimed(claimed_path, name, ContextInfo):
@@ -1033,9 +1138,14 @@ def _process_claimed(claimed_path, name, ContextInfo):
             target = os.path.join(_command_dir("unknown"), name)
             _atomic_move(claimed_path, target)
             _STATE.commands_unknown += 1
-            _command_result(command, "SIMULATION_MUTATION_UNKNOWN", True)
+            unknown = (
+                "LIVE_CANARY_MUTATION_UNKNOWN"
+                if EXECUTION_MODE == "LIVE_CANARY"
+                else "SIMULATION_MUTATION_UNKNOWN"
+            )
+            _command_result(command, unknown, True)
             _runtime_error(
-                "COMMAND_SIMULATION_MUTATION_UNKNOWN",
+                "COMMAND_MUTATION_UNKNOWN",
                 exc,
                 {"command_id": command.get("command_id")},
             )

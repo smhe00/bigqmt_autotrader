@@ -216,7 +216,7 @@ A TLC counterexample is a design/model/implementation defect until resolved. The
 - **Guojin simulation raw status mapper: PASS (`guojin_sim` only)**
 - **Production Guojin / Galaxy mapper: NOT IMPLEMENTED / NOT AUTHORIZED**
 - **Production live trading: NO**
-- **LIVE_CANARY: NOT ENABLED**
+- **Guojin LIVE_CANARY: MODELLED AND IMPLEMENTED; NOT YET DEPLOYED/CALIBRATED**
 
 The Guojin simulation mapper is now implemented under the versioned
 `qmt-guojin-sim-20260917-v1` profile. The next execution-safety checkpoints are

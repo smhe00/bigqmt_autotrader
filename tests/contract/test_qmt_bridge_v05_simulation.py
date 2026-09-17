@@ -13,10 +13,7 @@ BRIDGE = (
     / "qmt_side"
     / "BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py"
 )
-REAL_DEPLOYMENTS = [
-    BRIDGE.with_name("BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py"),
-    BRIDGE.with_name("BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py"),
-]
+DISABLED_DEPLOYMENTS = [BRIDGE.with_name("BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py")]
 
 
 class Obj:
@@ -76,7 +73,7 @@ def called_names(path: Path) -> set[str]:
 
 def test_broker_mutation_surface_exists_only_in_pinned_simulation_artifact():
     assert {"passorder", "can_cancel_order", "cancel"} <= called_names(BRIDGE)
-    for path in REAL_DEPLOYMENTS:
+    for path in DISABLED_DEPLOYMENTS:
         assert not ({"passorder", "can_cancel_order", "cancel"} & called_names(path))
         source = path.read_text(encoding="utf-8")
         assert 'EXECUTION_MODE = "SHADOW"' in source

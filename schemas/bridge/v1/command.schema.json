@@ -40,10 +40,12 @@
                 "quantity": {"type": "integer", "minimum": 1},
                 "limit_price": {"type": "string", "minLength": 1},
                 "simulation_calibration": {"const": true},
+                "live_canary": {"const": true},
                 "expected_qmt_session_id": {"type": "string", "minLength": 1}
               },
               "additionalProperties": false,
-              "dependentRequired": {"simulation_calibration": ["expected_qmt_session_id"]}
+              "dependentRequired": {"simulation_calibration": ["expected_qmt_session_id"], "live_canary": ["expected_qmt_session_id"]},
+              "not": {"required": ["simulation_calibration", "live_canary"]}
             }
           }}
         },
@@ -58,10 +60,12 @@
               "properties": {
                 "broker_order_id": {"type": "string", "minLength": 1},
                 "simulation_calibration": {"const": true},
+                "live_canary": {"const": true},
                 "expected_qmt_session_id": {"type": "string", "minLength": 1}
               },
               "additionalProperties": false,
-              "dependentRequired": {"simulation_calibration": ["expected_qmt_session_id"]}
+              "dependentRequired": {"simulation_calibration": ["expected_qmt_session_id"], "live_canary": ["expected_qmt_session_id"]},
+              "not": {"required": ["simulation_calibration", "live_canary"]}
             }
           }}
         }

@@ -52,6 +52,7 @@ Schema **不会**授权任何新的交易权限。当前只允许：
 
 - `SHADOW`
 - `SIMULATION_CALIBRATION`
+- `LIVE_CANARY`
 
 不存在 `LIVE` / `LIVE_ARMED` Schema 入口。
 
@@ -417,7 +418,10 @@ BROKER_MUTATION_UNKNOWN
 5. standalone QMT deployment build check 通过；
 6. production `galaxy/guojin` mutation call surface 仍为零，除非未来经过独立、明确的生产授权 Gate。
 
-当前 API v1 **不授予 LIVE_CANARY 或生产实盘权限**。
+API v1 现在定义 `LIVE_CANARY` 的传输语义，但协议存在不等于自动授权。只有
+manifest 与 `bridge_ready` 同时固定账户指纹、每 session 一次 submit/cancel 上限，
+Host 显式使用 `--allow-live-canary`，并由独立 publisher 提供精确确认字符串时才允许
+国金 canary 命令。`command_result` 仍然不是 broker evidence，不能产生 ACK。
 
 ## 13. 与 Broker Evidence Contract v1 的分层关系
 

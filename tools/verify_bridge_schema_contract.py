@@ -78,7 +78,11 @@ def main() -> int:
     command_result_modes = set(
         command_result["properties"]["execution_mode"]["enum"]
     )
-    assert command_result_modes == {"SHADOW", "SIMULATION_CALIBRATION"}
+    assert command_result_modes == {
+        "SHADOW",
+        "SIMULATION_CALIBRATION",
+        "LIVE_CANARY",
+    }
 
     print("Bridge API v1 schema/implementation constants: PASS")
     return 0

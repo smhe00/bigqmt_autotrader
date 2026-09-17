@@ -30,6 +30,27 @@ _ALLOWED_SHADOW_RESULTS = frozenset(
         "UNKNOWN_ORPHANED",
     }
 )
+_ALLOWED_LIVE_CANARY_RESULTS = frozenset(
+    {
+        "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+        "LIVE_CANARY_CANCEL_SIGNAL_SENT",
+        "LIVE_CANARY_CANCEL_NOT_CANCELLABLE",
+        "LIVE_CANARY_CANCEL_NOT_SENT",
+        "LIVE_CANARY_MUTATION_UNKNOWN",
+        "LIVE_CANARY_ORPHANED_UNKNOWN",
+        "REJECTED_SAFETY_GATE",
+        "REJECTED_EXPIRED",
+    }
+)
+_LIVE_SIDE_EFFECT_RESULTS = frozenset(
+    {
+        "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+        "LIVE_CANARY_CANCEL_SIGNAL_SENT",
+        "LIVE_CANARY_CANCEL_NOT_SENT",
+        "LIVE_CANARY_MUTATION_UNKNOWN",
+        "LIVE_CANARY_ORPHANED_UNKNOWN",
+    }
+)
 
 
 class OmsQmtCommandResultSink:
@@ -65,21 +86,25 @@ class OmsQmtCommandResultSink:
     ) -> QmtCommandResultIngestResult:
         self.oms.assert_leader()
 
-        if execution_mode != "SHADOW":
+        if execution_mode == "SHADOW":
+            allowed_results = _ALLOWED_SHADOW_RESULTS
+            expected_side_effect = False
+        elif execution_mode == "LIVE_CANARY":
+            allowed_results = _ALLOWED_LIVE_CANARY_RESULTS
+            expected_side_effect = result_status in _LIVE_SIDE_EFFECT_RESULTS
+        else:
+            raise QmtCommandResultInvariantViolation("unsupported execution mode")
+        if live_side_effect is not expected_side_effect:
             raise QmtCommandResultInvariantViolation(
-                "P4 command-result sink accepts SHADOW execution only"
-            )
-        if live_side_effect is not False:
-            raise QmtCommandResultInvariantViolation(
-                "P4 shadow command_result cannot claim a live broker side effect"
+                "command_result live side-effect flag is inconsistent"
             )
         if command_type not in _ALLOWED_COMMAND_TYPES:
             raise QmtCommandResultInvariantViolation(
                 "order command-result sink received unsupported command type"
             )
-        if result_status not in _ALLOWED_SHADOW_RESULTS:
+        if result_status not in allowed_results:
             raise QmtCommandResultInvariantViolation(
-                "unsupported P4 shadow command result status"
+                "unsupported command result status"
             )
         if not command_id or not source_event_id or not client_order_id:
             raise QmtCommandResultInvariantViolation("command identity is incomplete")
@@ -107,7 +132,7 @@ class OmsQmtCommandResultSink:
                 "broker_token": broker_token,
                 "result_status": result_status,
                 "execution_mode": execution_mode,
-                "live_side_effect": False,
+                "live_side_effect": live_side_effect,
             }
         )
         try:

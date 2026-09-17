@@ -22,9 +22,9 @@ Updated: 2026-09-17
 | Guojin simulation raw status mapper | **PASS — `qmt-guojin-sim-20260917-v1`** |
 | Production Guojin / Galaxy mapper | **NOT IMPLEMENTED / NOT AUTHORIZED** |
 | Production-account live trading allowed | **NO** |
-| LIVE_CANARY | **NOT ENABLED** |
+| Guojin LIVE_CANARY implementation | **IMPLEMENTED — NOT YET DEPLOYED/ARMED** |
 | Production Guojin/Galaxy broker mutation call surface | **ZERO** |
-| QMT submit/cancel implementation | **GUOJIN_SIM ONLY** |
+| QMT submit/cancel implementation | **GUOJIN_SIM + PINNED GUOJIN LIVE_CANARY** |
 | P2 execution-authority policy | **SIMULATION only** |
 
 中文总览：
@@ -358,7 +358,7 @@ This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. BigQMT Bridge API v1 and Broker Evidence Contract v1 are permanent formal contracts. Production live trading remains disabled and unimplemented.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 Guojin LIVE_CANARY code is implemented but not yet deployed or broker-calibrated. Galaxy and generic deployments remain mutation-free.**
 
 Next safety checkpoint:
 
