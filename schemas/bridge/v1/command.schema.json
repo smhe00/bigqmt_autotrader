@@ -39,6 +39,9 @@
                 "side": {"enum": ["BUY", "SELL"]},
                 "quantity": {"type": "integer", "minimum": 1},
                 "limit_price": {"type": "string", "minLength": 1},
+                "order_style": {"const": "LIMIT"},
+                "market": {"enum": ["AUTO", "CN", "HK_CONNECT"]},
+                "route_hint": {"enum": ["AUTO", "HGT", "SGT"]},
                 "simulation_calibration": {"const": true},
                 "live_canary": {"const": true},
                 "expected_qmt_session_id": {"type": "string", "minLength": 1}
