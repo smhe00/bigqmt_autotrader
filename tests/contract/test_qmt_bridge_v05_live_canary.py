@@ -88,7 +88,7 @@ def called_names(path: Path) -> list[tuple[str, str]]:
 
 def test_live_canary_artifact_has_exact_mutation_surface_and_identity():
     bridge = load_bridge()
-    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-2"
+    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-3"
     assert bridge.EXECUTION_MODE == "LIVE_CANARY"
     assert bridge.TERMINAL_INSTANCE_ID == "guojin"
     assert bridge.SIMULATION_ONLY is False
@@ -157,6 +157,39 @@ def test_live_canary_fails_closed_on_instrument_identity_mismatch(monkeypatch):
     with pytest.raises(bridge.CommandError, match="exchange mismatch"):
         bridge._execute_order_command(command(bridge), WrongContext())
     assert calls == []
+
+
+def test_live_canary_runtime_probe_reports_all_market_routes():
+    bridge = load_bridge()
+
+    class ProbeContext:
+        def get_instrument_detail(self, symbol):
+            if symbol == "00700.SGT":
+                return {
+                    "ExchangeID": "SGT",
+                    "ExchangeCode": "SGT",
+                    "InstrumentID": "00700",
+                    "InstrumentName": "Tencent",
+                    "IsTrading": True,
+                    "HSGTFlag": 1,
+                }
+            return {
+                "ExchangeID": None,
+                "ExchangeCode": None,
+                "InstrumentID": None,
+                "InstrumentName": None,
+                "IsTrading": None,
+                "HSGTFlag": None,
+            }
+
+    payload = bridge._runtime_instrument_probe(ProbeContext())
+    assert [row["symbol"] for row in payload["candidates"]] == [
+        "00700.HK",
+        "00700.HGT",
+        "00700.SGT",
+    ]
+    assert [row["observed"] for row in payload["candidates"]] == [False, False, True]
+    assert payload["candidates"][2]["exchange_id"] == "SGT"
 
 
 def test_live_canary_cancel_requires_exact_broker_id_and_token(monkeypatch):

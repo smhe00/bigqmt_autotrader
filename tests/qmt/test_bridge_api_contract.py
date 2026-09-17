@@ -84,7 +84,7 @@ def live_canary_manifest() -> dict:
     value = shadow_manifest()
     value.update(
         {
-            "bridge_build": "p6-guojin-live-canary-2",
+            "bridge_build": "p6-guojin-live-canary-3",
             "execution_mode": "LIVE_CANARY",
             "trading_enabled": True,
             "live_submit": True,

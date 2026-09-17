@@ -16,7 +16,7 @@ INSTANCE_ID = "guojin"
 ACCOUNT_FINGERPRINT = (
     "sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5"
 )
-BRIDGE_BUILD = "p6-guojin-live-canary-2"
+BRIDGE_BUILD = "p6-guojin-live-canary-3"
 ALLOWED_SYMBOL = "00700.SGT"
 
 

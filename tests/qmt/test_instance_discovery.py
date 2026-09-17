@@ -130,7 +130,7 @@ def _write_live_canary_instance(base: Path, instance_id: str = "guojin") -> Path
         "terminal_instance_id": instance_id,
         "protocol_version": "0.2",
         "transport_version": "1",
-        "bridge_build": "p6-guojin-live-canary-2",
+        "bridge_build": "p6-guojin-live-canary-3",
         "session_id": "live-session-01",
         "account_fingerprint": FINGERPRINT,
         "account_type": "STOCK",
@@ -148,7 +148,7 @@ def _write_live_canary_instance(base: Path, instance_id: str = "guojin") -> Path
         "source": "init",
         "account_fingerprint": FINGERPRINT,
         "account_type": "STOCK",
-        "payload": {"capabilities": {"bridge_build": "p6-guojin-live-canary-2",
+        "payload": {"capabilities": {"bridge_build": "p6-guojin-live-canary-3",
                                       "spool_instance_id": instance_id, **safety}},
     }
     (inbox / "ready.json").write_bytes(encode_transport_frame(event))

@@ -869,6 +869,9 @@ def _bind_runtime(ContextInfo):
         "spool_ready": _STATE.spool_ready,
         "capabilities": capabilities(),
     }
+    instrument_probe = globals().get("_runtime_instrument_probe")
+    if callable(instrument_probe):
+        ready_event_payload["instrument_probe"] = instrument_probe(ContextInfo)
     ready_log_payload = dict(ready_event_payload)
     ready_log_payload.update(
         {
@@ -1040,7 +1043,10 @@ def _process_claimed(claimed_path, name, ContextInfo):
             _runtime_error(
                 "COMMAND_SAFETY_GATE_REJECTED",
                 exc,
-                {"command_id": command.get("command_id")},
+                {
+                    "command_id": command.get("command_id"),
+                    "reason": _text(exc),
+                },
             )
             return
         except Exception as exc:

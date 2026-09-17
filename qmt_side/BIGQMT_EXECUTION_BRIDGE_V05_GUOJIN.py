@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p6-guojin-live-canary-2"
+BRIDGE_BUILD = "p6-guojin-live-canary-3"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -869,6 +869,9 @@ def _bind_runtime(ContextInfo):
         "spool_ready": _STATE.spool_ready,
         "capabilities": capabilities(),
     }
+    instrument_probe = globals().get("_runtime_instrument_probe")
+    if callable(instrument_probe):
+        ready_event_payload["instrument_probe"] = instrument_probe(ContextInfo)
     ready_log_payload = dict(ready_event_payload)
     ready_log_payload.update(
         {
@@ -995,6 +998,47 @@ def _reject_claimed(claimed_path, name, code, exc=None):
     finally:
         _STATE.commands_rejected += 1
     _runtime_error(code, exc, {"file": name})
+
+
+def _runtime_instrument_probe(ContextInfo):
+    candidates = ("00700.HK", "00700.HGT", "00700.SGT")
+    query = None
+    method = None
+    for name in ("get_instrument_detail", "get_instrumentdetail"):
+        candidate = getattr(ContextInfo, name, None)
+        if callable(candidate):
+            query = candidate
+            method = name
+            break
+    records = []
+    for symbol in candidates:
+        record = {"symbol": symbol, "method": method, "observed": False}
+        if query is None:
+            record["error"] = "INSTRUMENT_QUERY_UNAVAILABLE"
+        else:
+            try:
+                details = query(symbol)
+                if isinstance(details, dict):
+                    record.update(
+                        {
+                            "exchange_id": _text(details.get("ExchangeID")),
+                            "exchange_code": _text(details.get("ExchangeCode")),
+                            "instrument_id": _text(details.get("InstrumentID")),
+                            "instrument_name": _text(details.get("InstrumentName")),
+                            "is_trading": details.get("IsTrading"),
+                            "hsgt_flag": details.get("HSGTFlag"),
+                        }
+                    )
+                    record["observed"] = bool(
+                        record["exchange_id"] and record["instrument_id"]
+                    )
+                else:
+                    record["error"] = "INSTRUMENT_QUERY_INVALID_RESULT"
+            except Exception as exc:
+                record["error"] = "INSTRUMENT_QUERY_EXCEPTION"
+                record["error_type"] = type(exc).__name__
+        records.append(record)
+    return {"candidates": records}
 
 
 def _live_canary_symbol(value):
@@ -1148,7 +1192,10 @@ def _process_claimed(claimed_path, name, ContextInfo):
             _runtime_error(
                 "COMMAND_SAFETY_GATE_REJECTED",
                 exc,
-                {"command_id": command.get("command_id")},
+                {
+                    "command_id": command.get("command_id"),
+                    "reason": _text(exc),
+                },
             )
             return
         except Exception as exc:

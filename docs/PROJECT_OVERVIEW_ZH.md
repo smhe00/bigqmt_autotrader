@@ -29,7 +29,7 @@ Big QMT 被定位为 **券商执行终端 / Broker Gateway**。复杂策略、OM
 | P4 SHADOW execution bridge | **DEPLOYMENT GATE PASS** |
 | P5 国金模拟账户 submit/cancel/fill 校准 | **BOUNDED CALIBRATION PASS** |
 | Production live trading | **NO** |
-| 国金 LIVE_CANARY | **build-1 已实机验证本地拒绝；build-2 改用 `.SGT` 并增加合约预检，待重启校准** |
+| 国金 LIVE_CANARY | **build-1 本地拒绝、build-2 预检失败关闭均已验证；build-3 增加启动期三路只读合约探测** |
 
 `galaxy` 和 `guojin` production artifacts 仍然在源代码级禁用 broker mutation。
 

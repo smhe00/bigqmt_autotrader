@@ -128,7 +128,48 @@ def _execute_order_command(command, ContextInfo):
     raise CommandError("unsupported simulation mutation command")
 '''
 
-LIVE_CANARY_EXECUTOR = '''def _live_canary_symbol(value):
+LIVE_CANARY_EXECUTOR = '''def _runtime_instrument_probe(ContextInfo):
+    candidates = ("00700.HK", "00700.HGT", "00700.SGT")
+    query = None
+    method = None
+    for name in ("get_instrument_detail", "get_instrumentdetail"):
+        candidate = getattr(ContextInfo, name, None)
+        if callable(candidate):
+            query = candidate
+            method = name
+            break
+    records = []
+    for symbol in candidates:
+        record = {"symbol": symbol, "method": method, "observed": False}
+        if query is None:
+            record["error"] = "INSTRUMENT_QUERY_UNAVAILABLE"
+        else:
+            try:
+                details = query(symbol)
+                if isinstance(details, dict):
+                    record.update(
+                        {
+                            "exchange_id": _text(details.get("ExchangeID")),
+                            "exchange_code": _text(details.get("ExchangeCode")),
+                            "instrument_id": _text(details.get("InstrumentID")),
+                            "instrument_name": _text(details.get("InstrumentName")),
+                            "is_trading": details.get("IsTrading"),
+                            "hsgt_flag": details.get("HSGTFlag"),
+                        }
+                    )
+                    record["observed"] = bool(
+                        record["exchange_id"] and record["instrument_id"]
+                    )
+                else:
+                    record["error"] = "INSTRUMENT_QUERY_INVALID_RESULT"
+            except Exception as exc:
+                record["error"] = "INSTRUMENT_QUERY_EXCEPTION"
+                record["error_type"] = type(exc).__name__
+        records.append(record)
+    return {"candidates": records}
+
+
+def _live_canary_symbol(value):
     value = _text(value)
     if value != "00700.SGT":
         return None
@@ -271,7 +312,7 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
             source = source.replace(before, after)
     elif profile == "live_canary":
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p6-guojin-live-canary-2"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p6-guojin-live-canary-3"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "LIVE_CANARY"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',
