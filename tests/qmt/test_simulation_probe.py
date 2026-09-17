@@ -18,7 +18,7 @@ def instance(tmp_path) -> QmtInstance:
         session_id="session-01",
         account_fingerprint=FINGERPRINT,
         account_type="STOCK",
-        bridge_build="p5-simulation-calibration-3",
+        bridge_build="p5-simulation-calibration-4",
         created_ms=1_700_000_000_000,
         execution_mode="SIMULATION_CALIBRATION",
         trading_enabled=True,
@@ -124,6 +124,40 @@ def test_simulation_probe_publishes_bounded_sell(tmp_path, monkeypatch, capsys):
     assert payload["symbol"] == "204001.SH"
     assert payload["side"] == "SELL"
     assert payload["quantity"] == 10
+
+
+def test_simulation_probe_publishes_hk_symbol_on_same_stock_account(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        "bigqmt_autotrader.qmt.simulation_probe._load_authorized_instance",
+        lambda _path: instance(tmp_path),
+    )
+    result = main(
+        [
+            "--spool-dir",
+            str(tmp_path),
+            "--confirm",
+            CONFIRMATION,
+            "submit",
+            "--client-order-id",
+            "cid-hk",
+            "--symbol",
+            "00700.HK",
+            "--side",
+            "BUY",
+            "--quantity",
+            "100",
+            "--limit-price",
+            "1.00",
+        ]
+    )
+
+    assert result == 0
+    capsys.readouterr()
+    path = next((tmp_path / "commands" / "inbox").glob("*.json"))
+    payload = json.loads(path.read_text(encoding="utf-8"))["command"]["payload"]
+    assert payload["symbol"] == "00700.HK"
 
 
 def test_simulation_probe_rejects_more_than_100_units(tmp_path, monkeypatch):

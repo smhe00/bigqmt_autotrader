@@ -117,6 +117,21 @@ def test_simulation_sell_and_sub_hundred_quantity_are_supported(monkeypatch):
     assert observed[0][:7] == (24, 1101, "SIM_ACCOUNT", "204001.SH", 11, 10.0, 10)
 
 
+def test_simulation_hong_kong_symbol_uses_same_bound_stock_account(monkeypatch):
+    bridge = load_bridge()
+    observed = []
+    monkeypatch.setattr(
+        bridge, "passorder", lambda *args: observed.append(args), raising=False
+    )
+
+    result = bridge._execute_order_command(
+        command(bridge, side="BUY", quantity=100, symbol="00700.HK"), object()
+    )
+
+    assert result == ("SIMULATION_SUBMIT_CALL_RETURNED", True)
+    assert observed[0][:7] == (23, 1101, "SIM_ACCOUNT", "00700.HK", 11, 10.0, 100)
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -124,7 +139,7 @@ def test_simulation_sell_and_sub_hundred_quantity_are_supported(monkeypatch):
         ("expected_qmt_session_id", "stale-session"),
         ("quantity", 101),
         ("side", "SHORT"),
-        ("symbol", "00700.HK"),
+        ("symbol", "700.HK"),
     ],
 )
 def test_simulation_submit_safety_gate_rejects_out_of_scope_command(

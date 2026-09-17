@@ -132,14 +132,13 @@ sequence 1033  FULL_FILL / ACTIVE_DEAL_QUERY
 - 官方 passorder 契约确认股票/ETF/可转债及港股通买卖使用 opType `23/24`，
   但 GC001 的回购方向、数量单位、最小金额、价格 tick 仍必须在独立 profile
   中固定并经模拟实测，不能复用普通股票 BUY gate 猜测；
-- 港股通必须建立绑定对应账户类型的独立 simulation instance、独立 spool 与
-  account fingerprint，不能从 STOCK instance 跨账户下单。
+- 国金港股通与 A 股共用同一个 `STOCK` 资金账号；市场由证券代码后缀区分，
+  不得臆造第二个资金账号或指纹。
 
-随后已生成 build `p5-simulation-calibration-3`：在同一受限 STOCK 模拟实例内支持
-显式 BUY/SELL、数量 `1..100`、六位 `.SH/.SZ` 证券，BUY/SELL 分别使用官方
+随后已生成 build `p5-simulation-calibration-4`：在同一受限 STOCK 模拟实例内支持
+显式 BUY/SELL、数量 `1..100`、六位 `.SH/.SZ` 或五位 `.HK` 证券，BUY/SELL 分别使用
 passorder opType `23/24`。这解除原有 BUY-only / exactly-100 限制，可用于下一次
 GC001 SELL 校准；其余身份、session、token、价格、次数及撤单 Gate 均保留。
 
-新 artifact 仍需操作员在 Big QMT 中替换并重启后才会生效。港股通仍必须先出现
-独立、已确认的 `HUGANGTONG` / `SHENGANGTONG` simulation account，不能通过
-STOCK instance 越权模拟。`guojin` / `galaxy` 权限没有变化。
+新 artifact 仍需操作员在 Big QMT 中替换并重启后才会生效。港股通复用当前
+manifest 固定的 `STOCK` simulation account；`guojin` / `galaxy` 权限没有变化。

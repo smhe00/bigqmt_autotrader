@@ -14,6 +14,16 @@ from .instances import QmtInstanceError, load_instance
 CONFIRMATION = "AUTHORIZE_SIMULATION_CALIBRATION"
 
 
+def _is_supported_simulation_symbol(symbol: str) -> bool:
+    parts = symbol.split(".")
+    if len(parts) != 2 or not parts[0].isdigit():
+        return False
+    market = parts[1]
+    return (market in {"SH", "SZ"} and len(parts[0]) == 6) or (
+        market == "HK" and len(parts[0]) == 5
+    )
+
+
 def _cancel_command_id(
     account_fingerprint: str, client_order_id: str, broker_order_id: str
 ) -> str:
@@ -122,14 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "submit":
         if args.quantity <= 0 or args.quantity > 100:
             raise SystemExit("simulation calibration quantity must be in 1..100")
-        symbol_parts = args.symbol.split(".")
-        if (
-            len(symbol_parts) != 2
-            or len(symbol_parts[0]) != 6
-            or not symbol_parts[0].isdigit()
-            or symbol_parts[1] not in {"SH", "SZ"}
-        ):
-            raise SystemExit("--symbol must be a six-digit .SH or .SZ A-share symbol")
+        if not _is_supported_simulation_symbol(args.symbol):
+            raise SystemExit(
+                "--symbol must be six-digit .SH/.SZ or five-digit .HK"
+            )
         try:
             limit_price = Decimal(args.limit_price)
         except InvalidOperation as exc:

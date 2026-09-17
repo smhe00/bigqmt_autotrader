@@ -24,11 +24,14 @@ SIMULATION_EXECUTOR = '''def _simulation_order_symbol(value):
     if not value:
         return None
     parts = value.split(".")
-    if len(parts) != 2 or len(parts[0]) != 6 or not parts[0].isdigit():
+    if len(parts) != 2 or not parts[0].isdigit():
         return None
-    if parts[1] not in ("SH", "SZ"):
-        return None
-    return value
+    market = parts[1]
+    if market in ("SH", "SZ") and len(parts[0]) == 6:
+        return value
+    if market == "HK" and len(parts[0]) == 5:
+        return value
+    return None
 
 
 def _simulation_cancel_target(command):
@@ -132,7 +135,7 @@ def rendered(instance_id: str, *, simulation_mutation: bool) -> bytes:
     source = source.replace(TOKEN, instance_id)
     if simulation_mutation:
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-3"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-4"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "SIMULATION_CALIBRATION"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',

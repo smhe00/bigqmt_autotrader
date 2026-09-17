@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p5-simulation-calibration-3"
+BRIDGE_BUILD = "p5-simulation-calibration-4"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -986,11 +986,14 @@ def _simulation_order_symbol(value):
     if not value:
         return None
     parts = value.split(".")
-    if len(parts) != 2 or len(parts[0]) != 6 or not parts[0].isdigit():
+    if len(parts) != 2 or not parts[0].isdigit():
         return None
-    if parts[1] not in ("SH", "SZ"):
-        return None
-    return value
+    market = parts[1]
+    if market in ("SH", "SZ") and len(parts[0]) == 6:
+        return value
+    if market == "HK" and len(parts[0]) == 5:
+        return value
+    return None
 
 
 def _simulation_cancel_target(command):
