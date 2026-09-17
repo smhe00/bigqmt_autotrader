@@ -31,7 +31,7 @@ def _intent(**changes):
         client_order_id="cid-risk",
         strategy_id="strategyA",
         strategy_version="git:v1",
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -55,7 +55,7 @@ def _policy(**changes):
     )
     base = RiskPolicy(
         rule_version="p2-test-v1",
-        expected_account_fingerprint="account-A",
+        expected_account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         permitted_execution_modes=frozenset({RuntimeMode.SIMULATION}),
         require_qmt_healthy=False,
         account_max_age_seconds=30,
@@ -78,7 +78,7 @@ def _policy(**changes):
 
 def _snapshot(**changes):
     account = AccountRiskSnapshot(
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         available_cash=Decimal("500000"),
         gross_exposure=Decimal("300000"),
         daily_pnl=Decimal("1000"),
@@ -211,7 +211,7 @@ def test_global_activity_limits(account, expected_rule):
 
 
 def test_account_fingerprint_mismatch_rejects():
-    account = replace(_snapshot().account, account_fingerprint="account-B")
+    account = replace(_snapshot().account, account_fingerprint="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     evaluation = evaluate_risk(_intent(), _snapshot(account=account), _policy(), now=NOW)
     assert "ACCOUNT_FINGERPRINT_MATCH" in _rules(evaluation)
     finding = next(x for x in evaluation.findings if x.rule_id == "ACCOUNT_FINGERPRINT_MATCH")
@@ -399,4 +399,4 @@ def test_rejected_risk_decision_never_reaches_simulated_broker(tmp_path):
 
     result = oms.submit_intent(_intent(), evaluation.decision)
     assert result.status.value == "RISK_REJECTED"
-    assert driver.submit_call_count("account-A", "cid-risk") == 0
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-risk") == 0

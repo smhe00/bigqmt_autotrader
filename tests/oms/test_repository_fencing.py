@@ -38,7 +38,7 @@ def _intent(client_order_id):
         client_order_id=client_order_id,
         strategy_id="strategyA",
         strategy_version="git:test",
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -85,19 +85,19 @@ def test_repository_write_rechecks_fence_after_prior_service_assertion(tmp_path)
 
     with pytest.raises(OmsLeaderLost):
         repo1.transition_order(
-            "account-A",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "cid-existing",
             OrderStatus.CANCEL_PENDING,
             event_type="STALE_WRITER_ATTEMPT",
         )
-    assert repo2.get_status("account-A", "cid-existing") is OrderStatus.ACKNOWLEDGED
+    assert repo2.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-existing") is OrderStatus.ACKNOWLEDGED
 
     with pytest.raises(OmsLeaderLost):
         repo1.create_intent(_intent("cid-stale-create"))
     with pytest.raises(OrderNotFound):
-        repo2.get_status("account-A", "cid-stale-create")
+        repo2.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-stale-create")
 
     # The current owner can still perform its own fenced repository writes.
     successor.recover()
     repo2.create_intent(_intent("cid-current-create"))
-    assert repo2.get_status("account-A", "cid-current-create") is OrderStatus.CREATED
+    assert repo2.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-current-create") is OrderStatus.CREATED

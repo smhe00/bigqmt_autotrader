@@ -1,5 +1,9 @@
 # Broker Evidence Runtime Conformance Audit
 
+> 2026-09-17 后续实现结果：本文记录的缺口已由
+> [`BROKER_EVIDENCE_RUNTIME_CONFORMANCE_RESULT_20260917_ZH.md`](BROKER_EVIDENCE_RUNTIME_CONFORMANCE_RESULT_20260917_ZH.md)
+> 完成修复并通过回归。本文保留为修复前审计基线。
+
 状态：**Architecture / Runtime Conformance Audit**  
 日期：2026-09-17  
 范围：`Broker Evidence Contract v1` 与当前 `main` 代码实现的一致性审计

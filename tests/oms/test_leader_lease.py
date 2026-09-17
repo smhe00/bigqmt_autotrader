@@ -49,7 +49,7 @@ def _intent(client_order_id="cid-leader"):
         client_order_id=client_order_id,
         strategy_id="strategyA",
         strategy_version="git:test",
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -122,20 +122,20 @@ def test_lost_leader_after_submit_reservation_never_calls_broker(tmp_path):
     old.recover()
     order_intent = _intent()
     repo1.create_intent(order_intent)
-    repo1.record_risk_decision("account-A", "cid-leader", _decision())
-    repo1.prepare_submit("account-A", "cid-leader")
-    assert repo1.get_status("account-A", "cid-leader") is OrderStatus.SUBMITTING
+    repo1.record_risk_decision("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader", _decision())
+    repo1.prepare_submit("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader")
+    assert repo1.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader") is OrderStatus.SUBMITTING
 
     clock.advance(seconds=6)
     successor = OfflineOms(repo2, driver, leader_lease_seconds=5, clock=clock)
 
     with pytest.raises(OmsLeaderLost):
         old.assert_leader()
-    assert driver.submit_call_count("account-A", "cid-leader") == 0
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader") == 0
 
     successor.recover()
-    assert repo2.get_status("account-A", "cid-leader") is OrderStatus.MANUAL_REVIEW
-    assert driver.submit_call_count("account-A", "cid-leader") == 0
+    assert repo2.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader") is OrderStatus.MANUAL_REVIEW
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader") == 0
 
 
 def test_takeover_during_broker_call_fences_old_ack_persistence(tmp_path):
@@ -156,13 +156,13 @@ def test_takeover_during_broker_call_fences_old_ack_persistence(tmp_path):
     with pytest.raises(OmsLeaderLost):
         old.submit_intent(_intent(), _decision())
 
-    assert repo1.get_status("account-A", "cid-leader") is OrderStatus.SUBMITTING
-    assert driver.submit_call_count("account-A", "cid-leader") == 1
+    assert repo1.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader") is OrderStatus.SUBMITTING
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader") == 1
 
     successor = successor_holder["oms"]
     successor.recover()
-    assert repo2.get_status("account-A", "cid-leader") is OrderStatus.ACKNOWLEDGED
-    assert driver.submit_call_count("account-A", "cid-leader") == 1
+    assert repo2.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader") is OrderStatus.ACKNOWLEDGED
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-leader") == 1
 
 
 def test_heartbeat_extends_only_current_unexpired_lease(tmp_path):

@@ -26,7 +26,7 @@ def intent(client_order_id="cid-cancel"):
         client_order_id=client_order_id,
         strategy_id="strategyA",
         strategy_version="git:test",
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -67,12 +67,12 @@ def test_normal_cancel_is_reserved_resolved_and_called_once(tmp_path):
     _, repo, driver, oms = make_stack(tmp_path)
     submit_one(oms)
 
-    result = oms.cancel_order("account-A", "cid-cancel")
+    result = oms.cancel_order("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
 
     assert result.status is OrderStatus.CANCELLED
-    assert repo.get_status("account-A", "cid-cancel") is OrderStatus.CANCELLED
-    assert driver.cancel_call_count("account-A", "cid-cancel") == 1
-    row = repo.get_order_row("account-A", "cid-cancel")
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") is OrderStatus.CANCELLED
+    assert driver.cancel_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") == 1
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
     assert row["cancel_call_started"] == 1
     assert row["cancel_outcome_resolved"] == 1
 
@@ -82,17 +82,17 @@ def test_cancel_timeout_after_accept_reconciles_to_cancelled_without_retry(tmp_p
     submit_one(oms)
     driver.fail_next_cancel(CancelFailureMode.TIMEOUT_AFTER_ACCEPT)
 
-    result = oms.cancel_order("account-A", "cid-cancel")
+    result = oms.cancel_order("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
     assert result.status is OrderStatus.UNKNOWN
-    assert repo.get_order_row("account-A", "cid-cancel")["cancel_outcome_resolved"] == 0
-    assert driver.cancel_call_count("account-A", "cid-cancel") == 1
+    assert repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")["cancel_outcome_resolved"] == 0
+    assert driver.cancel_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") == 1
 
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
-    assert repo.get_status("account-A", "cid-cancel") is OrderStatus.CANCELLED
-    assert repo.get_order_row("account-A", "cid-cancel")["cancel_outcome_resolved"] == 1
-    assert driver.cancel_call_count("account-A", "cid-cancel") == 1
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") is OrderStatus.CANCELLED
+    assert repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")["cancel_outcome_resolved"] == 1
+    assert driver.cancel_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") == 1
 
 
 def test_cancel_timeout_before_accept_reconciles_active_without_retry(tmp_path):
@@ -100,58 +100,58 @@ def test_cancel_timeout_before_accept_reconciles_active_without_retry(tmp_path):
     submit_one(oms)
     driver.fail_next_cancel(CancelFailureMode.TIMEOUT_BEFORE_ACCEPT)
 
-    result = oms.cancel_order("account-A", "cid-cancel")
+    result = oms.cancel_order("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
     assert result.status is OrderStatus.UNKNOWN
 
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
-    assert repo.get_status("account-A", "cid-cancel") is OrderStatus.ACKNOWLEDGED
-    assert repo.get_order_row("account-A", "cid-cancel")["cancel_outcome_resolved"] == 1
-    assert driver.cancel_call_count("account-A", "cid-cancel") == 1
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") is OrderStatus.ACKNOWLEDGED
+    assert repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")["cancel_outcome_resolved"] == 1
+    assert driver.cancel_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") == 1
 
     with pytest.raises(CancelAlreadyStarted):
-        restarted.cancel_order("account-A", "cid-cancel")
-    assert driver.cancel_call_count("account-A", "cid-cancel") == 1
+        restarted.cancel_order("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
+    assert driver.cancel_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") == 1
 
 
 def test_crash_after_cancel_reservation_before_side_effect_never_recancels(tmp_path):
     _, repo, driver, oms = make_stack(tmp_path)
     submit_one(oms)
-    repo.prepare_cancel("account-A", "cid-cancel")
-    assert repo.get_status("account-A", "cid-cancel") is OrderStatus.CANCEL_PENDING
-    assert driver.cancel_call_count("account-A", "cid-cancel") == 0
+    repo.prepare_cancel("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") is OrderStatus.CANCEL_PENDING
+    assert driver.cancel_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") == 0
 
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
-    assert repo.get_status("account-A", "cid-cancel") is OrderStatus.ACKNOWLEDGED
-    row = repo.get_order_row("account-A", "cid-cancel")
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") is OrderStatus.ACKNOWLEDGED
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
     assert row["cancel_call_started"] == 1
     assert row["cancel_outcome_resolved"] == 1
-    assert driver.cancel_call_count("account-A", "cid-cancel") == 0
+    assert driver.cancel_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") == 0
 
     with pytest.raises(CancelAlreadyStarted):
-        restarted.cancel_order("account-A", "cid-cancel")
-    assert driver.cancel_call_count("account-A", "cid-cancel") == 0
+        restarted.cancel_order("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
+    assert driver.cancel_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") == 0
 
 
 def test_partial_fill_does_not_erase_unresolved_cancel_across_restart(tmp_path):
     _, repo, driver, oms = make_stack(tmp_path)
     submit_one(oms)
-    repo.prepare_cancel("account-A", "cid-cancel")
+    repo.prepare_cancel("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
 
     driver.set_order_status(
-        "account-A", "cid-cancel", OrderStatus.PARTIALLY_FILLED, filled_quantity=50
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel", OrderStatus.PARTIALLY_FILLED, filled_quantity=50
     )
     repo.transition_order(
-        "account-A",
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "cid-cancel",
         OrderStatus.PARTIALLY_FILLED,
         event_type="SIM_PARTIAL_FILL_CALLBACK",
         filled_quantity=50,
     )
-    row = repo.get_order_row("account-A", "cid-cancel")
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
     assert row["status"] == OrderStatus.PARTIALLY_FILLED.value
     assert row["cancel_call_started"] == 1
     assert row["cancel_outcome_resolved"] == 0
@@ -159,13 +159,13 @@ def test_partial_fill_does_not_erase_unresolved_cancel_across_restart(tmp_path):
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
-    row = repo.get_order_row("account-A", "cid-cancel")
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
     assert row["status"] == OrderStatus.PARTIALLY_FILLED.value
     assert row["filled_quantity"] == 50
     assert row["cancel_outcome_resolved"] == 1
-    assert driver.cancel_call_count("account-A", "cid-cancel") == 0
+    assert driver.cancel_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel") == 0
 
-    event_types = [row["event_type"] for row in repo.list_events("account-A", "cid-cancel")]
+    event_types = [row["event_type"] for row in repo.list_events("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")]
     assert "STARTUP_RESTORE_CANCEL_PENDING" in event_types
     assert "STARTUP_CANCEL_AMBIGUITY" in event_types
 
@@ -174,13 +174,13 @@ def test_cancel_event_log_records_ambiguity_and_reconciliation(tmp_path):
     _, repo, driver, oms = make_stack(tmp_path)
     submit_one(oms)
     driver.fail_next_cancel(CancelFailureMode.TIMEOUT_AFTER_ACCEPT)
-    oms.cancel_order("account-A", "cid-cancel")
+    oms.cancel_order("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
 
-    event_types = [row["event_type"] for row in repo.list_events("account-A", "cid-cancel")]
+    event_types = [row["event_type"] for row in repo.list_events("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-cancel")]
     assert "CANCEL_RESERVED" in event_types
     assert "CANCEL_OUTCOME_UNKNOWN" in event_types
     assert "STARTUP_RECONCILE_BEGIN" in event_types
-    assert "RECONCILE_BROKER_EVIDENCE" in event_types
+    assert "BROKER_EVIDENCE_ORDER_CANCELLED" in event_types

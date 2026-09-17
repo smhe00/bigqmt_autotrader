@@ -3,17 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable, Mapping
+from typing import Callable
 
-from bigqmt_autotrader.domain import (
-    InvalidTransition,
-    OrderStatus,
-    TransitionDisposition,
-)
+from bigqmt_autotrader.domain import InvalidTransition, OrderStatus, TransitionDisposition
 
+from .broker_evidence_v1 import BrokerEvidenceV1
 from .db import transaction
-from .repository import BrokerOrderIdMismatch, InvalidFilledQuantity, OmsRepository
+from .repository import (
+    BrokerLifecycleConflict,
+    BrokerOrderIdMismatch,
+    InvalidFilledQuantity,
+    OmsRepository,
+)
 
 
 class BrokerEvidenceConflict(RuntimeError):
@@ -28,163 +29,103 @@ class EvidenceIngestResult:
     disposition: TransitionDisposition
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _canonical_json(value: Mapping[str, Any]) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def evidence_fingerprint(
-    *,
-    source: str,
-    source_event_id: str | None,
-    account_fingerprint: str,
-    client_order_id: str,
-    evidence_type: str,
-    broker_order_id: str | None,
-    requested_status: OrderStatus,
-    filled_quantity: int,
-) -> str:
-    logical = {
-        "source": source,
-        "source_event_id": source_event_id,
-        "account_fingerprint": account_fingerprint,
-        "client_order_id": client_order_id,
-        "evidence_type": evidence_type,
-        "broker_order_id": broker_order_id,
-        "requested_status": requested_status.value,
-        "filled_quantity": filled_quantity,
+def evidence_fingerprint(evidence: BrokerEvidenceV1) -> str:
+    identity = {
+        "source": evidence.source,
+        "account_fingerprint": evidence.account_fingerprint,
+        "source_event_id": evidence.source_event_id,
+        "semantic_digest": evidence.semantic_digest,
     }
-    return hashlib.sha256(_canonical_json(logical).encode("utf-8")).hexdigest()
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class EvidenceJournal:
-    """Durable broker evidence ingestion under the active OMS leader fence.
+    """Durably apply only validated BrokerEvidence v1 facts."""
 
-    Every observation is retained. A logical fingerprint is evaluated against
-    the order state at most once. Exact replay therefore remains auditable but
-    cannot repeat a state transition. Conflicting reuse of a broker/source event
-    identity is recorded and then raised fail-closed.
-
-    The required ``write_guard`` is invoked *after* ``BEGIN IMMEDIATE``. Because
-    SQLite excludes another writer until this transaction commits or rolls back,
-    a successful leader-fence check is atomic with journal and aggregate writes.
-    Broker facts are merged through ``OmsRepository.merge_broker_fact_in_tx`` so
-    callbacks and active reconciliation cannot diverge on status/fill rules.
-    """
-
-    def __init__(
-        self,
-        repository: OmsRepository,
-        *,
-        write_guard: Callable[[], None],
-    ) -> None:
+    def __init__(self, repository: OmsRepository, *, write_guard: Callable[[], None]) -> None:
         if not callable(write_guard):
             raise TypeError("write_guard must be callable")
         self.repository = repository
         self.conn = repository.conn
         self._write_guard = write_guard
 
-    def ingest(
-        self,
-        *,
-        source: str,
-        source_event_id: str | None,
-        account_fingerprint: str,
-        client_order_id: str,
-        evidence_type: str,
-        requested_status: OrderStatus,
-        filled_quantity: int,
-        broker_order_id: str | None = None,
-        payload: Mapping[str, Any] | None = None,
-        observed_at: datetime | None = None,
-    ) -> EvidenceIngestResult:
-        if not source:
-            raise ValueError("source must be non-empty")
-        if not evidence_type:
-            raise ValueError("evidence_type must be non-empty")
-        if isinstance(filled_quantity, bool) or not isinstance(filled_quantity, int):
-            raise TypeError("filled_quantity must be an integer")
-        if filled_quantity < 0:
-            raise ValueError("filled_quantity cannot be negative")
+    def ingest(self, evidence: BrokerEvidenceV1) -> EvidenceIngestResult:
+        if not isinstance(evidence, BrokerEvidenceV1):
+            raise TypeError("EvidenceJournal accepts only BrokerEvidenceV1")
 
-        source_event_id = source_event_id or None
-        observed = observed_at or _utc_now()
-        if observed.tzinfo is None or observed.utcoffset() is None:
-            raise ValueError("observed_at must be timezone-aware")
-        observed_iso = observed.astimezone(timezone.utc).isoformat()
-        payload_json = _canonical_json(payload or {})
-        fingerprint = evidence_fingerprint(
-            source=source,
-            source_event_id=source_event_id,
-            account_fingerprint=account_fingerprint,
-            client_order_id=client_order_id,
-            evidence_type=evidence_type,
-            broker_order_id=broker_order_id,
-            requested_status=requested_status,
-            filled_quantity=filled_quantity,
+        fingerprint = evidence_fingerprint(evidence)
+        observed_at = str(evidence.observed_at_ms)
+        payload_json = json.dumps(
+            evidence.to_mapping(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
         )
-
         conflict: str | None = None
+        conflict_fill: int | None = None
         result: EvidenceIngestResult | None = None
 
         with transaction(self.conn):
-            # BEGIN IMMEDIATE has already acquired the single SQLite writer slot.
-            # Check the leader token inside that critical section so a successor
-            # cannot take over between fencing validation and evidence commit.
             self._write_guard()
+            identity_row = self.conn.execute(
+                """
+                SELECT * FROM broker_evidence_keys
+                WHERE source=? AND account_fingerprint=? AND source_event_id=?
+                """,
+                (evidence.source, evidence.account_fingerprint, evidence.source_event_id),
+            ).fetchone()
 
-            identity_row = None
-            if source_event_id is not None:
-                identity_row = self.conn.execute(
-                    """
-                    SELECT * FROM broker_evidence_keys
-                    WHERE source=? AND source_event_id=?
-                    """,
-                    (source, source_event_id),
-                ).fetchone()
-
-            if identity_row is not None and identity_row["fingerprint"] != fingerprint:
+            if identity_row is not None and identity_row["semantic_digest"] != evidence.semantic_digest:
                 conflict = "source_event_id_reused_with_different_evidence"
                 self._insert_observation(
-                    fingerprint=fingerprint,
-                    source=source,
-                    source_event_id=source_event_id,
-                    account_fingerprint=account_fingerprint,
-                    client_order_id=client_order_id,
-                    evidence_type=evidence_type,
-                    broker_order_id=broker_order_id,
-                    requested_status=requested_status,
-                    filled_quantity=filled_quantity,
-                    classification="CONFLICT",
-                    payload_json=payload_json,
-                    observed_at=observed_iso,
+                    fingerprint, evidence, "CONFLICT", payload_json, observed_at
                 )
+                original = self.conn.execute(
+                    """
+                    SELECT account_fingerprint, client_order_id
+                    FROM broker_evidence_observations
+                    WHERE fingerprint=? ORDER BY observation_id LIMIT 1
+                    """,
+                    (identity_row["fingerprint"],),
+                ).fetchone()
+                if original is not None:
+                    self.repository.mark_broker_conflict_manual_review_in_tx(
+                        original["account_fingerprint"],
+                        original["client_order_id"],
+                        reason=conflict,
+                        evidence={
+                            "source": evidence.source,
+                            "source_event_id": evidence.source_event_id,
+                            "conflicting_client_order_id": evidence.client_order_id,
+                        },
+                    )
+                new_identity = (evidence.account_fingerprint, evidence.client_order_id)
+                original_identity = None if original is None else (
+                    original["account_fingerprint"], original["client_order_id"]
+                )
+                if new_identity != original_identity:
+                    self.repository.mark_broker_conflict_manual_review_in_tx(
+                        evidence.account_fingerprint,
+                        evidence.client_order_id,
+                        reason=conflict,
+                        evidence={
+                            "source": evidence.source,
+                            "source_event_id": evidence.source_event_id,
+                            "original_client_order_id": None
+                            if original is None
+                            else original["client_order_id"],
+                        },
+                    )
             else:
                 key_row = self.conn.execute(
-                    "SELECT * FROM broker_evidence_keys WHERE fingerprint=?",
-                    (fingerprint,),
+                    "SELECT * FROM broker_evidence_keys WHERE fingerprint=?", (fingerprint,)
                 ).fetchone()
-
                 if key_row is not None:
                     classification = "DUPLICATE" if key_row["accepted"] else "CONFLICT_DUPLICATE"
                     self._insert_observation(
-                        fingerprint=fingerprint,
-                        source=source,
-                        source_event_id=source_event_id,
-                        account_fingerprint=account_fingerprint,
-                        client_order_id=client_order_id,
-                        evidence_type=evidence_type,
-                        broker_order_id=broker_order_id,
-                        requested_status=requested_status,
-                        filled_quantity=filled_quantity,
-                        classification=classification,
-                        payload_json=payload_json,
-                        observed_at=observed_iso,
+                        fingerprint, evidence, classification, payload_json, observed_at
                     )
-                    current = self._current_status(account_fingerprint, client_order_id)
+                    current = self._current_status(
+                        evidence.account_fingerprint, evidence.client_order_id
+                    )
                     if not key_row["accepted"]:
                         conflict = key_row["conflict_reason"] or "previous_evidence_conflict"
                     else:
@@ -197,55 +138,38 @@ class EvidenceJournal:
                 else:
                     try:
                         outcome = self.repository.merge_broker_fact_in_tx(
-                            account_fingerprint,
-                            client_order_id,
-                            requested_status,
-                            event_type="BROKER_EVIDENCE_" + evidence_type,
+                            evidence.account_fingerprint,
+                            evidence.client_order_id,
+                            evidence.requested_status,
+                            event_type="BROKER_EVIDENCE_" + evidence.evidence_type.value,
                             evidence={
                                 "fingerprint": fingerprint,
-                                "source": source,
-                                "source_event_id": source_event_id,
-                                "broker_order_id": broker_order_id,
-                                "filled_quantity": filled_quantity,
+                                "source": evidence.source,
+                                "source_kind": evidence.source_kind.value,
+                                "source_event_id": evidence.source_event_id,
+                                "mapper_profile": evidence.mapper_profile,
+                                "semantic_digest": evidence.semantic_digest,
+                                "broker_order_id": evidence.broker_order_id,
+                                "filled_quantity": evidence.filled_quantity,
                             },
-                            broker_order_id=broker_order_id,
-                            filled_quantity=filled_quantity,
+                            broker_order_id=evidence.broker_order_id,
+                            filled_quantity=evidence.filled_quantity,
                         )
                     except BrokerOrderIdMismatch:
                         conflict = "broker_order_id_mismatch"
+                    except BrokerLifecycleConflict as exc:
+                        conflict = "terminal_broker_fact_conflict: " + str(exc)
+                        conflict_fill = evidence.filled_quantity
                     except InvalidFilledQuantity as exc:
-                        conflict = self._filled_conflict_reason(exc, filled_quantity)
+                        conflict = self._filled_conflict_reason(exc)
                     except InvalidTransition:
                         conflict = "illegal_state_evidence"
                     else:
-                        self.conn.execute(
-                            """
-                            INSERT INTO broker_evidence_keys(
-                                fingerprint, source, source_event_id, accepted,
-                                result_disposition, conflict_reason, first_observed_at
-                            ) VALUES(?, ?, ?, 1, ?, NULL, ?)
-                            """,
-                            (
-                                fingerprint,
-                                source,
-                                source_event_id,
-                                outcome.disposition.value,
-                                observed_iso,
-                            ),
+                        self._insert_key(
+                            fingerprint, evidence, True, outcome.disposition.value, None, observed_at
                         )
                         self._insert_observation(
-                            fingerprint=fingerprint,
-                            source=source,
-                            source_event_id=source_event_id,
-                            account_fingerprint=account_fingerprint,
-                            client_order_id=client_order_id,
-                            evidence_type=evidence_type,
-                            broker_order_id=broker_order_id,
-                            requested_status=requested_status,
-                            filled_quantity=filled_quantity,
-                            classification="NEW",
-                            payload_json=payload_json,
-                            observed_at=observed_iso,
+                            fingerprint, evidence, "NEW", payload_json, observed_at
                         )
                         result = EvidenceIngestResult(
                             fingerprint=fingerprint,
@@ -255,34 +179,20 @@ class EvidenceJournal:
                         )
 
                     if conflict is not None:
-                        self.conn.execute(
-                            """
-                            INSERT INTO broker_evidence_keys(
-                                fingerprint, source, source_event_id, accepted,
-                                result_disposition, conflict_reason, first_observed_at
-                            ) VALUES(?, ?, ?, 0, NULL, ?, ?)
-                            """,
-                            (
-                                fingerprint,
-                                source,
-                                source_event_id,
-                                conflict,
-                                observed_iso,
-                            ),
-                        )
+                        self._insert_key(fingerprint, evidence, False, None, conflict, observed_at)
                         self._insert_observation(
-                            fingerprint=fingerprint,
-                            source=source,
-                            source_event_id=source_event_id,
-                            account_fingerprint=account_fingerprint,
-                            client_order_id=client_order_id,
-                            evidence_type=evidence_type,
-                            broker_order_id=broker_order_id,
-                            requested_status=requested_status,
-                            filled_quantity=filled_quantity,
-                            classification="CONFLICT",
-                            payload_json=payload_json,
-                            observed_at=observed_iso,
+                            fingerprint, evidence, "CONFLICT", payload_json, observed_at
+                        )
+                        self.repository.mark_broker_conflict_manual_review_in_tx(
+                            evidence.account_fingerprint,
+                            evidence.client_order_id,
+                            reason=conflict,
+                            evidence={
+                                "source": evidence.source,
+                                "source_event_id": evidence.source_event_id,
+                                "semantic_digest": evidence.semantic_digest,
+                            },
+                            filled_quantity=conflict_fill,
                         )
 
         if conflict is not None:
@@ -300,8 +210,17 @@ class EvidenceJournal:
             (account_fingerprint, client_order_id),
         ).fetchall()
 
+    def _current_status(self, account_fingerprint: str, client_order_id: str) -> OrderStatus:
+        row = self.conn.execute(
+            "SELECT status FROM broker_orders WHERE account_fingerprint=? AND client_order_id=?",
+            (account_fingerprint, client_order_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(client_order_id)
+        return OrderStatus(row["status"])
+
     @staticmethod
-    def _filled_conflict_reason(exc: InvalidFilledQuantity, filled_quantity: int) -> str:
+    def _filled_conflict_reason(exc: InvalidFilledQuantity) -> str:
         message = str(exc)
         if "outside" in message:
             return "filled_quantity_exceeds_order_quantity"
@@ -313,27 +232,40 @@ class EvidenceJournal:
             return "partial_fill_requires_positive_quantity"
         return "invalid_filled_quantity"
 
-    def _current_status(self, account_fingerprint: str, client_order_id: str) -> OrderStatus:
-        row = self.conn.execute(
-            "SELECT status FROM broker_orders WHERE account_fingerprint=? AND client_order_id=?",
-            (account_fingerprint, client_order_id),
-        ).fetchone()
-        if row is None:
-            raise KeyError(client_order_id)
-        return OrderStatus(row["status"])
+    def _insert_key(
+        self,
+        fingerprint: str,
+        evidence: BrokerEvidenceV1,
+        accepted: bool,
+        disposition: str | None,
+        conflict_reason: str | None,
+        observed_at: str,
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO broker_evidence_keys(
+                fingerprint, source, source_event_id, accepted,
+                result_disposition, conflict_reason, first_observed_at,
+                account_fingerprint, semantic_digest
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                fingerprint,
+                evidence.source,
+                evidence.source_event_id,
+                int(accepted),
+                disposition,
+                conflict_reason,
+                observed_at,
+                evidence.account_fingerprint,
+                evidence.semantic_digest,
+            ),
+        )
 
     def _insert_observation(
         self,
-        *,
         fingerprint: str,
-        source: str,
-        source_event_id: str | None,
-        account_fingerprint: str,
-        client_order_id: str,
-        evidence_type: str,
-        broker_order_id: str | None,
-        requested_status: OrderStatus,
-        filled_quantity: int,
+        evidence: BrokerEvidenceV1,
         classification: str,
         payload_json: str,
         observed_at: str,
@@ -343,21 +275,33 @@ class EvidenceJournal:
             INSERT INTO broker_evidence_observations(
                 fingerprint, source, source_event_id, account_fingerprint,
                 client_order_id, evidence_type, broker_order_id, requested_status,
-                filled_quantity, classification, payload_json, observed_at
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                filled_quantity, classification, payload_json, observed_at,
+                source_kind, mapper_profile, semantic_digest, broker_token,
+                order_ref, trade_id, raw_payload_ref, raw_status_json
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fingerprint,
-                source,
-                source_event_id,
-                account_fingerprint,
-                client_order_id,
-                evidence_type,
-                broker_order_id,
-                requested_status.value,
-                filled_quantity,
+                evidence.source,
+                evidence.source_event_id,
+                evidence.account_fingerprint,
+                evidence.client_order_id,
+                evidence.evidence_type.value,
+                evidence.broker_order_id,
+                evidence.requested_status.value,
+                evidence.filled_quantity,
                 classification,
                 payload_json,
                 observed_at,
+                evidence.source_kind.value,
+                evidence.mapper_profile,
+                evidence.semantic_digest,
+                evidence.broker_token,
+                evidence.order_ref,
+                evidence.trade_id,
+                evidence.raw_payload_ref,
+                None
+                if evidence.raw_status is None
+                else json.dumps(evidence.raw_status, sort_keys=True, separators=(",", ":")),
             ),
         )

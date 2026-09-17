@@ -20,7 +20,7 @@ def test_order_state_survives_database_reopen(tmp_path):
         client_order_id="cid-reopen",
         strategy_id="strategyA",
         strategy_version="git:test",
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -43,4 +43,4 @@ def test_order_state_survives_database_reopen(tmp_path):
     reopened = connect_database(path)
     initialize_database(reopened)
     reopened_repo = OmsRepository(reopened)
-    assert reopened_repo.get_status("account-A", "cid-reopen") is OrderStatus.ACKNOWLEDGED
+    assert reopened_repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-reopen") is OrderStatus.ACKNOWLEDGED

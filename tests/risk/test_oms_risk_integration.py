@@ -25,7 +25,7 @@ def _intent(client_order_id="cid-p2-integration"):
         client_order_id=client_order_id,
         strategy_id="strategyA",
         strategy_version="git:v1",
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -40,7 +40,7 @@ def _intent(client_order_id="cid-p2-integration"):
 def _policy():
     return RiskPolicy(
         rule_version="p2-integration-v1",
-        expected_account_fingerprint="account-A",
+        expected_account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         permitted_execution_modes=frozenset({RuntimeMode.SIMULATION}),
         require_qmt_healthy=False,
         account_max_age_seconds=30,
@@ -79,7 +79,7 @@ def _snapshot(*, mode=RuntimeMode.SIMULATION):
         global_ambiguity_block=False,
         blocked_symbols=frozenset(),
         account=AccountRiskSnapshot(
-            account_fingerprint="account-A",
+            account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             available_cash=Decimal("500000"),
             gross_exposure=Decimal("300000"),
             daily_pnl=Decimal("1000"),
@@ -131,11 +131,11 @@ def test_public_oms_entry_evaluates_accepts_and_persists_risk_before_submit(tmp_
     assert result.risk_evaluation is not None
     assert result.risk_evaluation.decision.accepted is True
     assert result.risk_evaluation.decision.reason_code is RiskReasonCode.OK
-    assert driver.submit_call_count("account-A", "cid-p2-integration") == 1
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-p2-integration") == 1
     persisted = repo.conn.execute(
         "SELECT accepted, reason_code, rule_version, snapshot_hash FROM risk_decisions "
         "WHERE account_fingerprint=? AND client_order_id=?",
-        ("account-A", "cid-p2-integration"),
+        ("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-p2-integration"),
     ).fetchone()
     assert persisted["accepted"] == 1
     assert persisted["reason_code"] == RiskReasonCode.OK.value
@@ -153,11 +153,11 @@ def test_public_oms_entry_rejects_before_submit_and_persists_primary_reason(tmp_
     assert result.risk_evaluation is not None
     assert result.risk_evaluation.decision.accepted is False
     assert result.risk_evaluation.decision.reason_code is RiskReasonCode.MODE_NOT_ARMED
-    assert driver.submit_call_count("account-A", "cid-p2-integration") == 0
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-p2-integration") == 0
     persisted = repo.conn.execute(
         "SELECT accepted, reason_code FROM risk_decisions "
         "WHERE account_fingerprint=? AND client_order_id=?",
-        ("account-A", "cid-p2-integration"),
+        ("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-p2-integration"),
     ).fetchone()
     assert persisted["accepted"] == 0
     assert persisted["reason_code"] == RiskReasonCode.MODE_NOT_ARMED.value
@@ -171,4 +171,4 @@ def test_live_named_mode_is_still_rejected_by_p2_default_policy(tmp_path):
 
     assert result.status is OrderStatus.RISK_REJECTED
     assert result.risk_evaluation.decision.reason_code is RiskReasonCode.MODE_NOT_ARMED
-    assert driver.submit_call_count("account-A", "cid-live-name") == 0
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-live-name") == 0

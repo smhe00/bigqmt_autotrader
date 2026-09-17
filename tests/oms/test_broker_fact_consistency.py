@@ -12,7 +12,7 @@ from bigqmt_autotrader.domain import (
 )
 from bigqmt_autotrader.drivers import SimulatedDriver, SimulatedOrderEvidence
 from bigqmt_autotrader.oms import (
-    BrokerOrderIdMismatch,
+    BrokerEvidenceConflict,
     InvalidFilledQuantity,
     OfflineOms,
     OmsRepository,
@@ -38,7 +38,7 @@ def _intent(client_order_id="cid-facts"):
         client_order_id=client_order_id,
         strategy_id="strategyA",
         strategy_version="git:test",
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -74,11 +74,11 @@ def _stack(tmp_path):
 
 def test_stale_ack_query_cannot_erase_known_partial_fill(tmp_path):
     _, repo, driver, oms = _stack(tmp_path)
-    broker_id = repo.get_order_row("account-A", "cid-facts")["broker_order_id"]
+    broker_id = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")["broker_order_id"]
 
-    repo.prepare_cancel("account-A", "cid-facts")
+    repo.prepare_cancel("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")
     repo.transition_order(
-        "account-A",
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "cid-facts",
         OrderStatus.PARTIALLY_FILLED,
         event_type="TEST_PARTIAL_FILL",
@@ -95,7 +95,7 @@ def test_stale_ack_query_cannot_erase_known_partial_fill(tmp_path):
     restarted = OfflineOms(repo, driver)
     restarted.recover()
 
-    row = repo.get_order_row("account-A", "cid-facts")
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")
     assert row["status"] == OrderStatus.PARTIALLY_FILLED.value
     assert row["filled_quantity"] == 50
     assert row["cancel_outcome_resolved"] == 1
@@ -103,7 +103,7 @@ def test_stale_ack_query_cannot_erase_known_partial_fill(tmp_path):
 
 def test_reconciliation_rejects_changed_broker_order_identity(tmp_path):
     _, repo, driver, oms = _stack(tmp_path)
-    repo.prepare_cancel("account-A", "cid-facts")
+    repo.prepare_cancel("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")
     driver.query_override = SimulatedOrderEvidence(
         broker_order_id="SIM-WRONG-IDENTITY",
         status=OrderStatus.ACKNOWLEDGED,
@@ -112,18 +112,19 @@ def test_reconciliation_rejects_changed_broker_order_identity(tmp_path):
 
     oms.close()
     restarted = OfflineOms(repo, driver)
-    with pytest.raises(BrokerOrderIdMismatch):
+    with pytest.raises(BrokerEvidenceConflict, match="broker_order_id_mismatch"):
         restarted.recover()
 
-    row = repo.get_order_row("account-A", "cid-facts")
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")
     assert row["broker_order_id"] != "SIM-WRONG-IDENTITY"
-    assert driver.submit_call_count("account-A", "cid-facts") == 1
+    assert row["status"] == OrderStatus.MANUAL_REVIEW.value
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts") == 1
 
 
 def test_reconciliation_rejects_overfill_without_mutating_quantity(tmp_path):
     _, repo, driver, oms = _stack(tmp_path)
-    broker_id = repo.get_order_row("account-A", "cid-facts")["broker_order_id"]
-    repo.prepare_cancel("account-A", "cid-facts")
+    broker_id = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")["broker_order_id"]
+    repo.prepare_cancel("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")
     driver.query_override = SimulatedOrderEvidence(
         broker_order_id=broker_id,
         status=OrderStatus.FILLED,
@@ -132,20 +133,21 @@ def test_reconciliation_rejects_overfill_without_mutating_quantity(tmp_path):
 
     oms.close()
     restarted = OfflineOms(repo, driver)
-    with pytest.raises(InvalidFilledQuantity):
+    with pytest.raises(BrokerEvidenceConflict, match="filled_quantity_exceeds"):
         restarted.recover()
 
-    row = repo.get_order_row("account-A", "cid-facts")
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")
     assert row["filled_quantity"] == 0
+    assert row["status"] == OrderStatus.MANUAL_REVIEW.value
 
 
 def test_filled_status_requires_full_quantity(tmp_path):
     _, repo, _, _ = _stack(tmp_path)
-    broker_id = repo.get_order_row("account-A", "cid-facts")["broker_order_id"]
+    broker_id = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")["broker_order_id"]
 
     with pytest.raises(InvalidFilledQuantity, match="FILLED broker status"):
         repo.transition_order(
-            "account-A",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "cid-facts",
             OrderStatus.FILLED,
             event_type="TEST_CONTRADICTORY_FILL",
@@ -153,6 +155,6 @@ def test_filled_status_requires_full_quantity(tmp_path):
             filled_quantity=50,
         )
 
-    row = repo.get_order_row("account-A", "cid-facts")
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-facts")
     assert row["status"] == OrderStatus.ACKNOWLEDGED.value
     assert row["filled_quantity"] == 0

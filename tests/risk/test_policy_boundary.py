@@ -9,7 +9,7 @@ from bigqmt_autotrader.risk import RiskPolicy, RuntimeMode, StrategyPolicy
 def _policy(**changes):
     base = RiskPolicy(
         rule_version="p2-policy-boundary",
-        expected_account_fingerprint="account-A",
+        expected_account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         permitted_execution_modes=frozenset({RuntimeMode.SIMULATION}),
         require_qmt_healthy=False,
         account_max_age_seconds=30,

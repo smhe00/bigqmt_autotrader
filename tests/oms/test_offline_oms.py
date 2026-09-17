@@ -27,7 +27,7 @@ def intent(client_order_id="cid-1"):
         client_order_id=client_order_id,
         strategy_id="strategyA",
         strategy_version="git:test",
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -74,9 +74,9 @@ def test_normal_submit_is_durable_and_called_once(tmp_path):
     oms.recover()
     result = oms.submit_intent(intent(), accept_decision())
     assert result.status is OrderStatus.ACKNOWLEDGED
-    assert repo.get_status("account-A", "cid-1") is OrderStatus.ACKNOWLEDGED
-    assert driver.submit_call_count("account-A", "cid-1") == 1
-    row = repo.get_order_row("account-A", "cid-1")
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") is OrderStatus.ACKNOWLEDGED
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") == 1
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1")
     assert row["submit_call_started"] == 1
 
 
@@ -86,7 +86,7 @@ def test_duplicate_client_order_id_never_submits_twice(tmp_path):
     oms.submit_intent(intent(), accept_decision())
     with pytest.raises(DuplicateClientOrderId):
         oms.submit_intent(intent(), accept_decision())
-    assert driver.submit_call_count("account-A", "cid-1") == 1
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") == 1
 
 
 def test_timeout_after_accept_enters_unknown_then_reconciles_without_resubmit(tmp_path):
@@ -95,13 +95,13 @@ def test_timeout_after_accept_enters_unknown_then_reconciles_without_resubmit(tm
     driver.fail_next_submit(SubmitFailureMode.TIMEOUT_AFTER_ACCEPT)
     result = oms.submit_intent(intent(), accept_decision())
     assert result.status is OrderStatus.UNKNOWN
-    assert driver.submit_call_count("account-A", "cid-1") == 1
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") == 1
 
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
-    assert repo.get_status("account-A", "cid-1") is OrderStatus.ACKNOWLEDGED
-    assert driver.submit_call_count("account-A", "cid-1") == 1
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") is OrderStatus.ACKNOWLEDGED
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") == 1
 
 
 def test_timeout_before_accept_goes_to_manual_review_and_is_not_retried(tmp_path):
@@ -114,8 +114,8 @@ def test_timeout_before_accept_goes_to_manual_review_and_is_not_retried(tmp_path
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
-    assert repo.get_status("account-A", "cid-1") is OrderStatus.MANUAL_REVIEW
-    assert driver.submit_call_count("account-A", "cid-1") == 1
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") is OrderStatus.MANUAL_REVIEW
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") == 1
 
 
 def test_crash_after_submit_reservation_before_side_effect_never_resubmits(tmp_path):
@@ -123,16 +123,16 @@ def test_crash_after_submit_reservation_before_side_effect_never_resubmits(tmp_p
     oms.recover()
     order_intent = intent()
     repo.create_intent(order_intent)
-    repo.record_risk_decision("account-A", "cid-1", accept_decision())
-    repo.prepare_submit("account-A", "cid-1")
-    assert repo.get_status("account-A", "cid-1") is OrderStatus.SUBMITTING
-    assert driver.submit_call_count("account-A", "cid-1") == 0
+    repo.record_risk_decision("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1", accept_decision())
+    repo.prepare_submit("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1")
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") is OrderStatus.SUBMITTING
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") == 0
 
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
-    assert repo.get_status("account-A", "cid-1") is OrderStatus.MANUAL_REVIEW
-    assert driver.submit_call_count("account-A", "cid-1") == 0
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") is OrderStatus.MANUAL_REVIEW
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1") == 0
 
 
 def test_event_log_keeps_reconciliation_evidence(tmp_path):
@@ -143,7 +143,7 @@ def test_event_log_keeps_reconciliation_evidence(tmp_path):
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
-    event_types = [row["event_type"] for row in repo.list_events("account-A", "cid-1")]
+    event_types = [row["event_type"] for row in repo.list_events("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-1")]
     assert "SUBMIT_OUTCOME_UNKNOWN" in event_types
     assert "STARTUP_RECONCILE_BEGIN" in event_types
-    assert "RECONCILE_BROKER_EVIDENCE" in event_types
+    assert "BROKER_EVIDENCE_ORDER_ACCEPTED" in event_types

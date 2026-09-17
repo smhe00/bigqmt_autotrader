@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Mapping
+from typing import Callable, Mapping
 from uuid import uuid4
 
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus, RiskDecision
@@ -13,8 +13,13 @@ from bigqmt_autotrader.drivers.simulated import (
 )
 from bigqmt_autotrader.risk import RiskEvaluation, RiskPolicy, RiskSnapshot, evaluate_risk
 
-from .evidence import EvidenceIngestResult, EvidenceJournal
+from .broker_evidence_v1 import (
+    BrokerEvidenceSourceKind,
+    BrokerEvidenceType,
+    BrokerEvidenceV1,
+)
 from .command_results import CommandResultIngestResult, QmtCommandResultJournal
+from .evidence import EvidenceIngestResult, EvidenceJournal
 from .leader import LeaderCoordinator, LeaderLease
 from .repository import OmsRepository
 
@@ -127,34 +132,51 @@ class OfflineOms:
         self._reconciled = False
 
     def ingest_broker_evidence(
-        self,
-        *,
-        source: str,
-        source_event_id: str | None,
-        account_fingerprint: str,
-        client_order_id: str,
-        evidence_type: str,
-        requested_status: OrderStatus,
-        filled_quantity: int,
-        broker_order_id: str | None = None,
-        payload: Mapping[str, Any] | None = None,
-        observed_at: datetime | None = None,
+        self, evidence: BrokerEvidenceV1
     ) -> EvidenceIngestResult:
-        return self._evidence_journal.ingest(
-            source=source,
-            source_event_id=source_event_id,
-            account_fingerprint=account_fingerprint,
-            client_order_id=client_order_id,
-            evidence_type=evidence_type,
-            requested_status=requested_status,
-            filled_quantity=filled_quantity,
-            broker_order_id=broker_order_id,
-            payload=payload,
-            observed_at=observed_at,
-        )
+        return self._evidence_journal.ingest(evidence)
 
     def list_broker_evidence(self, account_fingerprint: str, client_order_id: str):
         return self._evidence_journal.list_observations(account_fingerprint, client_order_id)
+
+    def _ingest_active_query_evidence(
+        self,
+        account_fingerprint: str,
+        client_order_id: str,
+        query_evidence,
+        *,
+        reason: str,
+    ) -> EvidenceIngestResult:
+        evidence_type = {
+            OrderStatus.ACKNOWLEDGED: BrokerEvidenceType.ORDER_ACCEPTED,
+            OrderStatus.PARTIALLY_FILLED: BrokerEvidenceType.PARTIAL_FILL,
+            OrderStatus.FILLED: BrokerEvidenceType.FULL_FILL,
+            OrderStatus.CANCELLED: BrokerEvidenceType.ORDER_CANCELLED,
+            OrderStatus.REJECTED: BrokerEvidenceType.ORDER_REJECTED,
+        }.get(query_evidence.status)
+        if evidence_type is None:
+            raise RecoveryInvariantViolation(
+                f"active query returned non-broker lifecycle status {query_evidence.status.value}"
+            )
+        observed_at_ms = int(self._now().timestamp() * 1000)
+        return self._evidence_journal.ingest(BrokerEvidenceV1.build(
+            source="simulated-driver-active-query",
+            source_kind=BrokerEvidenceSourceKind.ACTIVE_ORDER_QUERY,
+            source_event_id=self.session_id + ":" + reason + ":" + client_order_id,
+            mapper_profile="simulated-driver-query-v1",
+            account_fingerprint=account_fingerprint,
+            client_order_id=client_order_id,
+            broker_token=None,
+            broker_order_id=query_evidence.broker_order_id,
+            order_ref=None,
+            trade_id=None,
+            evidence_type=evidence_type,
+            requested_status=query_evidence.status,
+            filled_quantity=query_evidence.filled_quantity,
+            observed_at_ms=observed_at_ms,
+            raw_payload_ref="simulated://active-order-query/" + client_order_id,
+            raw_status=None,
+        ))
 
     def ingest_qmt_command_result(
         self,
@@ -289,16 +311,17 @@ class OfflineOms:
                     cancel_outcome_resolved=True if cancel_unresolved else None,
                 )
             else:
-                self.repository.transition_order(
-                    account,
-                    client_order_id,
-                    evidence.status,
-                    event_type="RECONCILE_BROKER_EVIDENCE",
-                    evidence={"broker_order_id": evidence.broker_order_id},
-                    broker_order_id=evidence.broker_order_id,
-                    filled_quantity=evidence.filled_quantity,
-                    cancel_outcome_resolved=True if cancel_unresolved else None,
+                self._ingest_active_query_evidence(
+                    account, client_order_id, evidence, reason="startup-recovery"
                 )
+                if cancel_unresolved:
+                    self.repository.transition_order(
+                        account,
+                        client_order_id,
+                        self.repository.get_status(account, client_order_id),
+                        event_type="RECONCILE_CANCEL_AMBIGUITY_RESOLVED",
+                        cancel_outcome_resolved=True,
+                    )
 
         self.heartbeat()
         self.repository.mark_session_reconciled(self.session_id)
@@ -358,7 +381,7 @@ class OfflineOms:
         self.repository.prepare_submit(intent.account_fingerprint, intent.client_order_id)
         self.assert_leader()
         try:
-            ack = self.driver.submit_limit_order(intent)
+            self.driver.submit_limit_order(intent)
         except SubmitOutcomeUnknown as exc:
             self.assert_leader()
             self.repository.transition_order(
@@ -384,14 +407,32 @@ class OfflineOms:
         self.repository.transition_order(
             intent.account_fingerprint,
             intent.client_order_id,
-            OrderStatus.ACKNOWLEDGED,
-            event_type="SUBMIT_ACK",
-            evidence={"broker_order_id": ack.broker_order_id},
-            broker_order_id=ack.broker_order_id,
+            OrderStatus.UNKNOWN,
+            event_type="SUBMIT_API_RETURNED_LIFECYCLE_UNKNOWN",
+            evidence={"transport_returned": True},
+        )
+        self.repository.transition_order(
+            intent.account_fingerprint,
+            intent.client_order_id,
+            OrderStatus.RECONCILING,
+            event_type="SUBMIT_ACTIVE_QUERY_BEGIN",
+        )
+        self.assert_leader()
+        query_evidence = self.driver.query_by_client_order_id(
+            intent.account_fingerprint, intent.client_order_id
+        )
+        self.assert_leader()
+        if query_evidence is None:
+            return SubmitResult(status=OrderStatus.RECONCILING, risk_evaluation=risk_evaluation)
+        applied = self._ingest_active_query_evidence(
+            intent.account_fingerprint,
+            intent.client_order_id,
+            query_evidence,
+            reason="post-submit",
         )
         return SubmitResult(
-            status=OrderStatus.ACKNOWLEDGED,
-            broker_order_id=ack.broker_order_id,
+            status=applied.status,
+            broker_order_id=query_evidence.broker_order_id,
             risk_evaluation=risk_evaluation,
         )
 
@@ -403,7 +444,7 @@ class OfflineOms:
         self.repository.prepare_cancel(account_fingerprint, client_order_id)
         self.assert_leader()
         try:
-            ack = self.driver.cancel_order(account_fingerprint, client_order_id)
+            self.driver.cancel_order(account_fingerprint, client_order_id)
         except CancelOutcomeUnknown as exc:
             self.assert_leader()
             self.repository.transition_order(
@@ -429,11 +470,32 @@ class OfflineOms:
         self.repository.transition_order(
             account_fingerprint,
             client_order_id,
-            OrderStatus.CANCELLED,
-            event_type="CANCEL_ACK",
-            evidence={"broker_order_id": ack.broker_order_id},
-            broker_order_id=ack.broker_order_id,
-            filled_quantity=ack.filled_quantity,
+            OrderStatus.UNKNOWN,
+            event_type="CANCEL_API_RETURNED_LIFECYCLE_UNKNOWN",
+            evidence={"transport_returned": True},
+        )
+        self.repository.transition_order(
+            account_fingerprint,
+            client_order_id,
+            OrderStatus.RECONCILING,
+            event_type="CANCEL_ACTIVE_QUERY_BEGIN",
+        )
+        self.assert_leader()
+        query_evidence = self.driver.query_by_client_order_id(account_fingerprint, client_order_id)
+        self.assert_leader()
+        if query_evidence is None:
+            return CancelResult(status=OrderStatus.RECONCILING)
+        applied = self._ingest_active_query_evidence(
+            account_fingerprint,
+            client_order_id,
+            query_evidence,
+            reason="post-cancel",
+        )
+        self.repository.transition_order(
+            account_fingerprint,
+            client_order_id,
+            applied.status,
+            event_type="CANCEL_ACTIVE_QUERY_RESOLVED",
             cancel_outcome_resolved=True,
         )
-        return CancelResult(status=OrderStatus.CANCELLED, broker_order_id=ack.broker_order_id)
+        return CancelResult(status=applied.status, broker_order_id=query_evidence.broker_order_id)

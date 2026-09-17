@@ -1,6 +1,5 @@
-from datetime import datetime, timezone
-
 from bigqmt_autotrader.domain import OrderStatus
+from bigqmt_autotrader.oms import BrokerEvidenceSourceKind, BrokerEvidenceType
 from bigqmt_autotrader.qmt import (
     BrokerEvidenceCandidate,
     QmtHostIngestion,
@@ -46,8 +45,8 @@ class FakeSink:
     def __init__(self):
         self.calls = []
 
-    def ingest_broker_evidence(self, **kwargs):
-        self.calls.append(kwargs)
+    def ingest_broker_evidence(self, evidence):
+        self.calls.append(evidence)
         return object()
 
 
@@ -120,17 +119,23 @@ def test_explicit_mapper_is_required_before_oms_evidence_sink_is_called():
     def mapper(qmt_event):
         if qmt_event.event_type != "order":
             return None
-        return BrokerEvidenceCandidate(
+        return BrokerEvidenceCandidate.build(
             source="qmt_callback",
-            source_event_id=None,
+            source_kind=BrokerEvidenceSourceKind.ORDER_CALLBACK,
+            source_event_id=qmt_event.session_id + ":" + str(qmt_event.sequence),
+            mapper_profile="test-order-v1",
             account_fingerprint=qmt_event.account_fingerprint,
             client_order_id="client-001",
-            evidence_type="ORDER",
+            broker_token=qmt_event.payload.get("remark"),
+            order_ref=None,
+            trade_id=None,
+            evidence_type=BrokerEvidenceType.ORDER_ACCEPTED,
             requested_status=OrderStatus.ACKNOWLEDGED,
             filled_quantity=0,
             broker_order_id=qmt_event.payload.get("broker_order_id"),
-            payload=qmt_event.payload,
-            observed_at=datetime(2026, 9, 14, tzinfo=timezone.utc),
+            observed_at_ms=qmt_event.timestamp_ms,
+            raw_payload_ref="qmt://session-ingest/2",
+            raw_status={"order_status": qmt_event.payload.get("status_code")},
         )
 
     host = QmtHostIngestion(evidence_sink=sink, evidence_mapper=mapper)
@@ -156,9 +161,9 @@ def test_explicit_mapper_is_required_before_oms_evidence_sink_is_called():
     assert result.quarantined is False
     assert len(sink.calls) == 1
     call = sink.calls[0]
-    assert call["client_order_id"] == "client-001"
-    assert call["source_event_id"] == "session-ingest:2"
-    assert call["requested_status"] is OrderStatus.ACKNOWLEDGED
+    assert call.client_order_id == "client-001"
+    assert call.source_event_id == "session-ingest:2"
+    assert call.requested_status is OrderStatus.ACKNOWLEDGED
 
 
 def test_mapper_cannot_change_account_identity():
@@ -166,17 +171,23 @@ def test_mapper_cannot_change_account_identity():
     sink = FakeSink()
 
     def bad_mapper(qmt_event):
-        return BrokerEvidenceCandidate(
+        return BrokerEvidenceCandidate.build(
             source="qmt_callback",
-            source_event_id=None,
+            source_kind=BrokerEvidenceSourceKind.ORDER_CALLBACK,
+            source_event_id=qmt_event.session_id + ":" + str(qmt_event.sequence),
+            mapper_profile="test-order-v1",
             account_fingerprint="sha256:" + "e" * 64,
             client_order_id="client-001",
-            evidence_type="ORDER",
+            broker_token=None,
+            order_ref=None,
+            trade_id=None,
+            evidence_type=BrokerEvidenceType.ORDER_ACCEPTED,
             requested_status=OrderStatus.ACKNOWLEDGED,
             filled_quantity=0,
-            broker_order_id=None,
-            payload=qmt_event.payload,
-            observed_at=datetime(2026, 9, 14, tzinfo=timezone.utc),
+            broker_order_id="12345",
+            observed_at_ms=qmt_event.timestamp_ms,
+            raw_payload_ref="qmt://session-ingest/2",
+            raw_status={"order_status": qmt_event.payload.get("status_code")},
         )
 
     host = QmtHostIngestion(evidence_sink=sink, evidence_mapper=bad_mapper)

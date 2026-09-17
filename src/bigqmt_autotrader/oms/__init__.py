@@ -16,9 +16,16 @@ from .evidence import (
     EvidenceIngestResult,
     evidence_fingerprint,
 )
+from .broker_evidence_v1 import (
+    BrokerEvidenceSourceKind,
+    BrokerEvidenceType,
+    BrokerEvidenceV1,
+    broker_evidence_semantic_digest,
+)
 from .leader import LeaderCoordinator, LeaderLease, OmsLeaderLost, OmsLeaderUnavailable
 from .repository import (
     BrokerFactConflict,
+    BrokerLifecycleConflict,
     BrokerOrderIdMismatch,
     CancelAlreadyStarted,
     InvalidFilledQuantity,
@@ -45,6 +52,10 @@ __all__ = [
     "QmtCommandResultJournal",
     "BrokerEvidenceConflict",
     "BrokerFactConflict",
+    "BrokerLifecycleConflict",
+    "BrokerEvidenceSourceKind",
+    "BrokerEvidenceType",
+    "BrokerEvidenceV1",
     "BrokerOrderIdMismatch",
     "CancelAlreadyStarted",
     "CancelResult",
@@ -70,5 +81,6 @@ __all__ = [
     "connect_database",
     "current_schema_version",
     "evidence_fingerprint",
+    "broker_evidence_semantic_digest",
     "initialize_database",
 ]

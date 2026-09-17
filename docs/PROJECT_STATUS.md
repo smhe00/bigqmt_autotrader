@@ -264,6 +264,17 @@ Galaxy raw status -> BrokerEvidence v1
 
 Those broker-specific mapper implementations remain the next execution-safety checkpoint and must be calibrated against observed ORDER/DEAL/query facts.
 
+### Runtime conformance
+
+The broker-neutral runtime conformance Gate passed on 2026-09-17. The OMS now
+accepts only validated `BrokerEvidenceV1`, persists the full v1 identity and
+audit fields, fails terminal/identity conflicts closed to `MANUAL_REVIEW`, and
+does not treat submit/cancel API returns as broker lifecycle facts.
+
+Details:
+
+- [`BROKER_EVIDENCE_RUNTIME_CONFORMANCE_RESULT_20260917_ZH.md`](BROKER_EVIDENCE_RUNTIME_CONFORMANCE_RESULT_20260917_ZH.md)
+
 ## 10. Formal verification
 
 Permanent models:
@@ -308,7 +319,7 @@ This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. BigQMT Bridge API v1 and Broker Evidence Contract v1 are permanent formal contracts. Production live trading remains disabled and unimplemented.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. BigQMT Bridge API v1 and Broker Evidence Contract v1 are permanent formal contracts. Production live trading remains disabled and unimplemented.**
 
 Next safety checkpoint:
 
@@ -321,3 +332,4 @@ Gate evidence:
 - `docs/P3_GATE_RESULT_20260915.md`
 - `docs/P4_GATE_RESULT_20260915.md`
 - `docs/P5_GATE_RESULT_20260916.md`
+- `docs/BROKER_EVIDENCE_RUNTIME_CONFORMANCE_RESULT_20260917_ZH.md`

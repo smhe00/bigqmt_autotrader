@@ -4,42 +4,18 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Protocol
 
-from bigqmt_autotrader.domain import OrderStatus
+from bigqmt_autotrader.oms.broker_evidence_v1 import BrokerEvidenceV1
 
 from .protocol import IngressDisposition, QmtEvent
 from .read_model import QmtReadModel, QmtSnapshotView
 from .receiver import IngressResult
 
 
-@dataclass(frozen=True)
-class BrokerEvidenceCandidate:
-    source: str
-    source_event_id: str | None
-    account_fingerprint: str
-    client_order_id: str
-    evidence_type: str
-    requested_status: OrderStatus
-    filled_quantity: int
-    broker_order_id: str | None
-    payload: Mapping[str, Any]
-    observed_at: datetime
+BrokerEvidenceCandidate = BrokerEvidenceV1
 
 
 class EvidenceSink(Protocol):
-    def ingest_broker_evidence(
-        self,
-        *,
-        source: str,
-        source_event_id: str | None,
-        account_fingerprint: str,
-        client_order_id: str,
-        evidence_type: str,
-        requested_status: OrderStatus,
-        filled_quantity: int,
-        broker_order_id: str | None = None,
-        payload: Mapping[str, Any] | None = None,
-        observed_at: datetime | None = None,
-    ) -> Any: ...
+    def ingest_broker_evidence(self, evidence: BrokerEvidenceV1) -> Any: ...
 
 
 class CommandResultSink(Protocol):
@@ -60,7 +36,7 @@ class CommandResultSink(Protocol):
     ) -> Any: ...
 
 
-EvidenceMapper = Callable[[QmtEvent], BrokerEvidenceCandidate | None]
+EvidenceMapper = Callable[[QmtEvent], BrokerEvidenceV1 | None]
 
 
 @dataclass(frozen=True)
@@ -167,25 +143,7 @@ class QmtHostIngestion:
 
         if candidate.account_fingerprint != event.account_fingerprint:
             raise ValueError("evidence mapper changed account identity")
-        if candidate.source_event_id is None:
-            # QMT session + sequence is stable enough for dedup within one bridge
-            # session and does not expose a raw broker/account identifier.
-            source_event_id = event.session_id + ":" + str(event.sequence)
-        else:
-            source_event_id = candidate.source_event_id
-
-        self.evidence_sink.ingest_broker_evidence(
-            source=candidate.source,
-            source_event_id=source_event_id,
-            account_fingerprint=candidate.account_fingerprint,
-            client_order_id=candidate.client_order_id,
-            evidence_type=candidate.evidence_type,
-            requested_status=candidate.requested_status,
-            filled_quantity=candidate.filled_quantity,
-            broker_order_id=candidate.broker_order_id,
-            payload=candidate.payload,
-            observed_at=candidate.observed_at,
-        )
+        self.evidence_sink.ingest_broker_evidence(candidate)
         return HostIngestResult(
             view=view,
             evidence_ingested=True,

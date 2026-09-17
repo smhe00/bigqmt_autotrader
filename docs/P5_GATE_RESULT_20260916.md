@@ -177,3 +177,16 @@ three instances. `galaxy` and `guojin` manifests remained SHADOW with
 `guojin_sim` alone advertised the pinned simulation-calibration capability.
 The AST side-effect audit again found zero broker mutation calls in the
 template, Galaxy, and Guojin production artifacts.
+
+## 2026-09-17 continuous-session cancel confirmation
+
+In QMT session `5fb8e71cf33e4fd985f68d51185bce21`, a fresh `510300.SH` BUY 100
+at `4.000` was placed while the active snapshot showed `last_price=4.54`.
+Broker order `4083` preserved token `BQdfb735bcd645acaaa4bc`, progressed from
+raw ORDER status `50` to `54` after exactly one cancel publication, and emitted
+no DEAL. This confirms the normal trading-session resting-order cancel path and
+the same token continuity observed on 2026-09-16.
+
+The raw ORDER events remained quarantined because no broker-specific mapper was
+enabled. This evidence calibrates the future Guojin mapper; it does not itself
+promote OMS lifecycle or expand production authority.

@@ -14,12 +14,18 @@ from bigqmt_autotrader.domain import (
 from bigqmt_autotrader.drivers import SimulatedDriver
 from bigqmt_autotrader.oms import (
     BrokerEvidenceConflict,
+    BrokerEvidenceSourceKind,
+    BrokerEvidenceType,
+    BrokerEvidenceV1,
     OfflineOms,
     OmsLeaderLost,
     OmsRepository,
     connect_database,
     initialize_database,
 )
+
+
+FP = "sha256:" + "a" * 64
 
 
 class ManualClock:
@@ -39,7 +45,7 @@ def _intent():
         client_order_id="cid-evidence",
         strategy_id="strategyA",
         strategy_version="git:test",
-        account_fingerprint="account-A",
+        account_fingerprint=FP,
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -70,22 +76,36 @@ def _stack(tmp_path):
     oms.recover()
     result = oms.submit_intent(_intent(), _decision())
     assert result.status is OrderStatus.ACKNOWLEDGED
-    row = repo.get_order_row("account-A", "cid-evidence")
+    row = repo.get_order_row(FP, "cid-evidence")
     return conn, repo, driver, oms, row["broker_order_id"]
 
 
 def _ingest(oms, broker_order_id, *, event_id, status, filled):
-    return oms.ingest_broker_evidence(
+    evidence_type = {
+        OrderStatus.ACKNOWLEDGED: BrokerEvidenceType.ORDER_ACCEPTED,
+        OrderStatus.PARTIALLY_FILLED: BrokerEvidenceType.PARTIAL_FILL,
+        OrderStatus.FILLED: BrokerEvidenceType.FULL_FILL,
+        OrderStatus.CANCELLED: BrokerEvidenceType.ORDER_CANCELLED,
+        OrderStatus.REJECTED: BrokerEvidenceType.ORDER_REJECTED,
+    }[status]
+    return oms.ingest_broker_evidence(BrokerEvidenceV1.build(
         source="QMT_CALLBACK",
+        source_kind=BrokerEvidenceSourceKind.ORDER_CALLBACK,
         source_event_id=event_id,
-        account_fingerprint="account-A",
+        mapper_profile="test-order-v1",
+        account_fingerprint=FP,
         client_order_id="cid-evidence",
-        evidence_type="ORDER_STATUS",
+        broker_token=None,
         broker_order_id=broker_order_id,
+        order_ref=None,
+        trade_id=None,
+        evidence_type=evidence_type,
         requested_status=status,
         filled_quantity=filled,
-        payload={"event_id": event_id, "status": status.value, "filled": filled},
-    )
+        observed_at_ms=1_700_000_000_000,
+        raw_payload_ref="test://" + event_id,
+        raw_status=None,
+    ))
 
 
 def test_exact_replay_is_audited_but_applied_once(tmp_path):
@@ -109,18 +129,17 @@ def test_exact_replay_is_audited_but_applied_once(tmp_path):
     assert first.duplicate is False
     assert first.disposition is TransitionDisposition.APPLIED
     assert second.duplicate is True
-    assert repo.get_status("account-A", "cid-evidence") is OrderStatus.PARTIALLY_FILLED
-    assert repo.get_order_row("account-A", "cid-evidence")["filled_quantity"] == 50
+    assert repo.get_status(FP, "cid-evidence") is OrderStatus.PARTIALLY_FILLED
+    assert repo.get_order_row(FP, "cid-evidence")["filled_quantity"] == 50
 
-    observations = oms.list_broker_evidence("account-A", "cid-evidence")
-    assert [row["classification"] for row in observations] == ["NEW", "DUPLICATE"]
+    observations = oms.list_broker_evidence(FP, "cid-evidence")
+    assert [row["classification"] for row in observations] == ["NEW", "NEW", "DUPLICATE"]
     event_count = conn.execute(
         """
         SELECT COUNT(*) FROM order_events
-        WHERE account_fingerprint='account-A'
-          AND client_order_id='cid-evidence'
-          AND event_type='BROKER_EVIDENCE_ORDER_STATUS'
-        """
+        WHERE account_fingerprint=? AND client_order_id=?
+          AND event_type='BROKER_EVIDENCE_PARTIAL_FILL'
+        """, (FP, "cid-evidence")
     ).fetchone()[0]
     assert event_count == 1
 
@@ -147,7 +166,7 @@ def test_out_of_order_ack_cannot_downgrade_partial_fill_or_quantity(tmp_path):
     # known fill=50 and normalizes it to PARTIALLY_FILLED before FSM evaluation.
     assert normalized_duplicate.disposition is TransitionDisposition.DUPLICATE_IGNORED
     assert normalized_duplicate.status is OrderStatus.PARTIALLY_FILLED
-    row = repo.get_order_row("account-A", "cid-evidence")
+    row = repo.get_order_row(FP, "cid-evidence")
     assert row["status"] == OrderStatus.PARTIALLY_FILLED.value
     assert row["filled_quantity"] == 50
 
@@ -171,27 +190,25 @@ def test_late_partial_after_fill_cannot_downgrade_terminal_fact(tmp_path):
     )
 
     assert normalized_duplicate.disposition is TransitionDisposition.DUPLICATE_IGNORED
-    row = repo.get_order_row("account-A", "cid-evidence")
+    row = repo.get_order_row(FP, "cid-evidence")
     assert row["status"] == OrderStatus.FILLED.value
     assert row["filled_quantity"] == 100
 
 
-def test_ack_with_positive_fill_uses_same_normalizer_as_reconciliation(tmp_path):
+def test_ack_with_positive_fill_is_rejected_by_v1_model(tmp_path):
     _, repo, _, oms, broker_order_id = _stack(tmp_path)
 
-    result = _ingest(
-        oms,
-        broker_order_id,
-        event_id="evt-ack-with-fill",
-        status=OrderStatus.ACKNOWLEDGED,
-        filled=40,
-    )
-
-    assert result.status is OrderStatus.PARTIALLY_FILLED
-    assert result.disposition is TransitionDisposition.APPLIED
-    row = repo.get_order_row("account-A", "cid-evidence")
-    assert row["status"] == OrderStatus.PARTIALLY_FILLED.value
-    assert row["filled_quantity"] == 40
+    with pytest.raises(ValueError, match="ORDER_ACCEPTED"):
+        _ingest(
+            oms,
+            broker_order_id,
+            event_id="evt-ack-with-fill",
+            status=OrderStatus.ACKNOWLEDGED,
+            filled=40,
+        )
+    row = repo.get_order_row(FP, "cid-evidence")
+    assert row["status"] == OrderStatus.ACKNOWLEDGED.value
+    assert row["filled_quantity"] == 0
 
 
 def test_filled_status_with_short_quantity_fails_closed(tmp_path):
@@ -206,8 +223,8 @@ def test_filled_status_with_short_quantity_fails_closed(tmp_path):
             filled=50,
         )
 
-    row = repo.get_order_row("account-A", "cid-evidence")
-    assert row["status"] == OrderStatus.ACKNOWLEDGED.value
+    row = repo.get_order_row(FP, "cid-evidence")
+    assert row["status"] == OrderStatus.MANUAL_REVIEW.value
     assert row["filled_quantity"] == 0
 
 
@@ -230,8 +247,8 @@ def test_same_source_event_id_with_changed_fact_fails_closed_and_is_retained(tmp
             filled=100,
         )
 
-    observations = oms.list_broker_evidence("account-A", "cid-evidence")
-    assert [row["classification"] for row in observations] == ["NEW", "CONFLICT"]
+    observations = oms.list_broker_evidence(FP, "cid-evidence")
+    assert [row["classification"] for row in observations] == ["NEW", "NEW", "CONFLICT"]
 
 
 def test_broker_order_identity_mismatch_fails_closed(tmp_path):
@@ -246,7 +263,62 @@ def test_broker_order_identity_mismatch_fails_closed(tmp_path):
             filled=10,
         )
 
-    assert repo.get_status("account-A", "cid-evidence") is OrderStatus.ACKNOWLEDGED
+    assert repo.get_status(FP, "cid-evidence") is OrderStatus.MANUAL_REVIEW
+
+
+def test_distinct_terminal_broker_facts_force_manual_review(tmp_path):
+    _, repo, _, oms, broker_order_id = _stack(tmp_path)
+    _ingest(
+        oms,
+        broker_order_id,
+        event_id="evt-fill-terminal",
+        status=OrderStatus.FILLED,
+        filled=100,
+    )
+
+    with pytest.raises(BrokerEvidenceConflict, match="terminal_broker_fact_conflict"):
+        _ingest(
+            oms,
+            broker_order_id,
+            event_id="evt-cancel-conflict",
+            status=OrderStatus.CANCELLED,
+            filled=50,
+        )
+
+    row = repo.get_order_row(FP, "cid-evidence")
+    assert row["status"] == OrderStatus.MANUAL_REVIEW.value
+    assert row["filled_quantity"] == 100
+
+
+def test_cancelled_then_higher_fill_forces_manual_review_and_keeps_max_fill(tmp_path):
+    _, repo, _, oms, broker_order_id = _stack(tmp_path)
+    _ingest(
+        oms,
+        broker_order_id,
+        event_id="evt-partial-before-cancel",
+        status=OrderStatus.PARTIALLY_FILLED,
+        filled=50,
+    )
+    _ingest(
+        oms,
+        broker_order_id,
+        event_id="evt-cancel-terminal",
+        status=OrderStatus.CANCELLED,
+        filled=50,
+    )
+
+    with pytest.raises(BrokerEvidenceConflict, match="gained fill"):
+        _ingest(
+            oms,
+            broker_order_id,
+            event_id="evt-late-higher-fill",
+            status=OrderStatus.PARTIALLY_FILLED,
+            filled=75,
+        )
+
+    row = repo.get_order_row(FP, "cid-evidence")
+    assert row["status"] == OrderStatus.MANUAL_REVIEW.value
+    assert row["filled_quantity"] == 75
 
 
 def test_impossible_overfill_fails_closed_without_mutating_order(tmp_path):
@@ -261,8 +333,8 @@ def test_impossible_overfill_fails_closed_without_mutating_order(tmp_path):
             filled=101,
         )
 
-    row = repo.get_order_row("account-A", "cid-evidence")
-    assert row["status"] == OrderStatus.ACKNOWLEDGED.value
+    row = repo.get_order_row(FP, "cid-evidence")
+    assert row["status"] == OrderStatus.MANUAL_REVIEW.value
     assert row["filled_quantity"] == 0
 
 
@@ -296,10 +368,10 @@ def test_fenced_old_leader_cannot_write_callback_observation_or_aggregate(tmp_pa
             filled=25,
         )
 
-    row = repo2.get_order_row("account-A", "cid-evidence")
+    row = repo2.get_order_row(FP, "cid-evidence")
     assert row["status"] == OrderStatus.ACKNOWLEDGED.value
     assert row["filled_quantity"] == 0
-    assert successor.list_broker_evidence("account-A", "cid-evidence") == []
+    assert len(successor.list_broker_evidence(FP, "cid-evidence")) == 1
 
     accepted = _ingest(
         successor,
@@ -309,4 +381,4 @@ def test_fenced_old_leader_cannot_write_callback_observation_or_aggregate(tmp_pa
         filled=25,
     )
     assert accepted.status is OrderStatus.PARTIALLY_FILLED
-    assert len(successor.list_broker_evidence("account-A", "cid-evidence")) == 1
+    assert len(successor.list_broker_evidence(FP, "cid-evidence")) == 2

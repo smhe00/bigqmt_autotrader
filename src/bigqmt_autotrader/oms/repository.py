@@ -11,6 +11,7 @@ from bigqmt_autotrader.domain import (
     OrderStatus,
     RiskDecision,
     TransitionDisposition,
+    TransitionOutcome,
     transition,
 )
 
@@ -38,6 +39,10 @@ class BrokerOrderIdMismatch(BrokerFactConflict):
 
 
 class InvalidFilledQuantity(BrokerFactConflict):
+    pass
+
+
+class BrokerLifecycleConflict(BrokerFactConflict):
     pass
 
 
@@ -286,6 +291,58 @@ class OmsRepository:
             broker_order_id=broker_order_id,
             filled_quantity=filled_quantity,
             cancel_outcome_resolved=cancel_outcome_resolved,
+            broker_fact=True,
+        )
+
+    def mark_broker_conflict_manual_review_in_tx(
+        self,
+        account_fingerprint: str,
+        client_order_id: str,
+        *,
+        reason: str,
+        evidence: dict[str, Any],
+        filled_quantity: int | None = None,
+    ):
+        """Fail closed even when the current lifecycle state is terminal."""
+        if not self.conn.in_transaction:
+            raise RuntimeError("manual-review conflict write requires an active transaction")
+        self._guard_write_in_tx()
+        context = self._get_order_context_in_tx(account_fingerprint, client_order_id)
+        current = OrderStatus(context["status"])
+        current_filled = int(context["filled_quantity"])
+        order_quantity = int(context["quantity"])
+        effective_filled = current_filled
+        if filled_quantity is not None:
+            if filled_quantity < 0 or filled_quantity > order_quantity:
+                raise InvalidFilledQuantity(
+                    f"filled_quantity {filled_quantity} is outside [0, {order_quantity}]"
+                )
+            effective_filled = max(current_filled, filled_quantity)
+        self.conn.execute(
+            """
+            UPDATE broker_orders
+            SET status=?, filled_quantity=?, updated_at=?
+            WHERE account_fingerprint=? AND client_order_id=?
+            """,
+            (
+                OrderStatus.MANUAL_REVIEW.value,
+                effective_filled,
+                _utc_now(),
+                account_fingerprint,
+                client_order_id,
+            ),
+        )
+        details = dict(evidence)
+        details["reason"] = reason
+        details["effective_filled_quantity"] = effective_filled
+        self._insert_event(
+            account_fingerprint,
+            client_order_id,
+            event_type="BROKER_EVIDENCE_CONFLICT_MANUAL_REVIEW",
+            from_status=current,
+            to_status=OrderStatus.MANUAL_REVIEW,
+            disposition=TransitionDisposition.APPLIED,
+            evidence=details,
         )
 
     def record_command_reconciliation_in_tx(
@@ -332,6 +389,7 @@ class OmsRepository:
         broker_order_id: str | None = None,
         filled_quantity: int | None = None,
         cancel_outcome_resolved: bool | None = None,
+        broker_fact: bool = False,
     ):
         context = self._get_order_context_in_tx(account_fingerprint, client_order_id)
         current = OrderStatus(context["status"])
@@ -348,6 +406,20 @@ class OmsRepository:
 
         effective_filled = current_filled
         normalized_target = target
+        broker_terminals = {
+            OrderStatus.FILLED,
+            OrderStatus.CANCELLED,
+            OrderStatus.REJECTED,
+        }
+        if (
+            broker_fact
+            and current in broker_terminals
+            and target in broker_terminals
+            and current is not target
+        ):
+            raise BrokerLifecycleConflict(
+                f"terminal broker fact conflict: {current.value} -> {target.value}"
+            )
         if filled_quantity is not None:
             if isinstance(filled_quantity, bool) or not isinstance(filled_quantity, int):
                 raise TypeError("filled_quantity must be an integer")
@@ -362,7 +434,27 @@ class OmsRepository:
                 order_quantity=order_quantity,
             )
 
-        outcome = transition(current, normalized_target)
+        if broker_fact:
+            if (
+                current in broker_terminals
+                and normalized_target in broker_terminals
+                and current is not normalized_target
+            ):
+                raise BrokerLifecycleConflict(
+                    f"terminal broker fact conflict: {current.value} -> {normalized_target.value}"
+                )
+            if (
+                current in {OrderStatus.CANCELLED, OrderStatus.REJECTED}
+                and effective_filled > current_filled
+            ):
+                raise BrokerLifecycleConflict(
+                    f"terminal broker fact gained fill: {current_filled} -> {effective_filled}"
+                )
+
+        if broker_fact:
+            outcome = self._aggregate_broker_status(current, normalized_target)
+        else:
+            outcome = transition(current, normalized_target)
 
         fields: list[str] = []
         values: list[Any] = []
@@ -406,6 +498,44 @@ class OmsRepository:
         return outcome
 
     @staticmethod
+    def _aggregate_broker_status(
+        current: OrderStatus, target: OrderStatus
+    ) -> TransitionOutcome:
+        """BrokerEvidence v1 aggregation, independent of command-path FSM edges."""
+        broker_terminals = {
+            OrderStatus.FILLED,
+            OrderStatus.CANCELLED,
+            OrderStatus.REJECTED,
+        }
+        if current is OrderStatus.MANUAL_REVIEW:
+            next_status = current
+        elif current in broker_terminals:
+            next_status = current
+        elif target is OrderStatus.ACKNOWLEDGED and current in {
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.CANCEL_PENDING,
+        }:
+            next_status = current
+        else:
+            next_status = target
+
+        if next_status is current:
+            disposition = (
+                TransitionDisposition.DUPLICATE_IGNORED
+                if target is current
+                else TransitionDisposition.STALE_IGNORED
+            )
+        else:
+            disposition = TransitionDisposition.APPLIED
+        return TransitionOutcome(
+            previous=current,
+            current=next_status,
+            requested=target,
+            changed=next_status is not current,
+            disposition=disposition,
+        )
+
+    @staticmethod
     def _normalize_broker_status(
         target: OrderStatus,
         *,
@@ -419,6 +549,10 @@ class OmsRepository:
         if target is OrderStatus.REJECTED and effective_filled != 0:
             raise InvalidFilledQuantity(
                 "REJECTED broker status cannot coexist with a positive filled quantity"
+            )
+        if target is OrderStatus.CANCELLED and effective_filled == order_quantity:
+            raise InvalidFilledQuantity(
+                "CANCELLED broker status requires filled_quantity below order quantity"
             )
 
         if target in {OrderStatus.ACKNOWLEDGED, OrderStatus.PARTIALLY_FILLED}:

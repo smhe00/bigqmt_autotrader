@@ -27,7 +27,7 @@ def _intent(client_order_id="cid-pre-submit"):
         client_order_id=client_order_id,
         strategy_id="strategyA",
         strategy_version="git:test",
-        account_fingerprint="account-A",
+        account_fingerprint="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         symbol="000333.SZ",
         side=Side.BUY,
         quantity=100,
@@ -62,45 +62,45 @@ def _stack(tmp_path):
 def test_created_orphan_is_aborted_on_restart_without_broker_call(tmp_path):
     _, repo, driver, oms = _stack(tmp_path)
     repo.create_intent(_intent())
-    assert repo.get_status("account-A", "cid-pre-submit") is OrderStatus.CREATED
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit") is OrderStatus.CREATED
 
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
 
-    assert repo.get_status("account-A", "cid-pre-submit") is OrderStatus.ABORTED
-    assert driver.submit_call_count("account-A", "cid-pre-submit") == 0
-    events = [row["event_type"] for row in repo.list_events("account-A", "cid-pre-submit")]
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit") is OrderStatus.ABORTED
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit") == 0
+    events = [row["event_type"] for row in repo.list_events("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit")]
     assert events[-1] == "STARTUP_PRE_SUBMIT_ABORT"
 
 
 def test_risk_accepted_orphan_is_aborted_not_auto_submitted(tmp_path):
     _, repo, driver, oms = _stack(tmp_path)
     repo.create_intent(_intent())
-    repo.record_risk_decision("account-A", "cid-pre-submit", _decision())
-    assert repo.get_status("account-A", "cid-pre-submit") is OrderStatus.RISK_ACCEPTED
+    repo.record_risk_decision("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit", _decision())
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit") is OrderStatus.RISK_ACCEPTED
 
     oms.close()
     restarted = OfflineOms(repo, driver)
     restarted.recover()
 
-    row = repo.get_order_row("account-A", "cid-pre-submit")
+    row = repo.get_order_row("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit")
     assert row["status"] == OrderStatus.ABORTED.value
     assert row["submit_call_started"] == 0
     assert row["broker_order_id"] is None
-    assert driver.submit_call_count("account-A", "cid-pre-submit") == 0
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit") == 0
 
 
 def test_pre_submit_state_with_side_effect_marker_fails_closed(tmp_path):
     conn, repo, driver, oms = _stack(tmp_path)
     repo.create_intent(_intent())
-    repo.record_risk_decision("account-A", "cid-pre-submit", _decision())
+    repo.record_risk_decision("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit", _decision())
 
     conn.execute(
         """
         UPDATE broker_orders
         SET submit_call_started=1
-        WHERE account_fingerprint='account-A' AND client_order_id='cid-pre-submit'
+        WHERE account_fingerprint='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' AND client_order_id='cid-pre-submit'
         """
     )
 
@@ -109,8 +109,8 @@ def test_pre_submit_state_with_side_effect_marker_fails_closed(tmp_path):
     with pytest.raises(RecoveryInvariantViolation, match="impossible side-effect evidence"):
         restarted.recover()
 
-    assert repo.get_status("account-A", "cid-pre-submit") is OrderStatus.RISK_ACCEPTED
-    assert driver.submit_call_count("account-A", "cid-pre-submit") == 0
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit") is OrderStatus.RISK_ACCEPTED
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit") == 0
 
 
 def test_aborted_order_cannot_be_prepared_for_submit(tmp_path):
@@ -121,6 +121,6 @@ def test_aborted_order_cannot_be_prepared_for_submit(tmp_path):
     restarted.recover()
 
     with pytest.raises(SubmitAlreadyStarted):
-        repo.prepare_submit("account-A", "cid-pre-submit")
-    assert repo.get_status("account-A", "cid-pre-submit") is OrderStatus.ABORTED
-    assert driver.submit_call_count("account-A", "cid-pre-submit") == 0
+        repo.prepare_submit("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit")
+    assert repo.get_status("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit") is OrderStatus.ABORTED
+    assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-pre-submit") == 0
