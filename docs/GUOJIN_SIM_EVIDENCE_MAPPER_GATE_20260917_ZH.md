@@ -135,5 +135,11 @@ sequence 1033  FULL_FILL / ACTIVE_DEAL_QUERY
 - 港股通必须建立绑定对应账户类型的独立 simulation instance、独立 spool 与
   account fingerprint，不能从 STOCK instance 跨账户下单。
 
-因此下一步需要生成新的独立 artifact 并由操作员在 Big QMT 中重新启动。当前运行
-中的 `guojin_sim` 文件未热改，`guojin` / `galaxy` 权限也没有变化。
+随后已生成 build `p5-simulation-calibration-3`：在同一受限 STOCK 模拟实例内支持
+显式 BUY/SELL、数量 `1..100`、六位 `.SH/.SZ` 证券，BUY/SELL 分别使用官方
+passorder opType `23/24`。这解除原有 BUY-only / exactly-100 限制，可用于下一次
+GC001 SELL 校准；其余身份、session、token、价格、次数及撤单 Gate 均保留。
+
+新 artifact 仍需操作员在 Big QMT 中替换并重启后才会生效。港股通仍必须先出现
+独立、已确认的 `HUGANGTONG` / `SHENGANGTONG` simulation account，不能通过
+STOCK instance 越权模拟。`guojin` / `galaxy` 权限没有变化。

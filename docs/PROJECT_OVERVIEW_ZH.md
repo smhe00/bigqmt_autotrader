@@ -189,6 +189,11 @@ Galaxy Big QMT：
 该 mapper 不适用于 `guojin` 实盘，也不会通过自动发现启用。`galaxy` 仍无 broker
 status mapper。
 
+国金模拟 V5 build `p5-simulation-calibration-3` 已解除原先的 BUY-only / 必须 100
+份限制：现在要求显式 `BUY` 或 `SELL`，数量为 `1..100`，证券代码为六位
+`.SH/.SZ`。BUY/SELL 分别映射官方 passorder opType `23/24`。账户指纹、当前
+session、simulation-only、token、价格、次数和撤单身份 Gate 均保留；生产文件不变。
+
 ## 9. 为什么 simulation 已经能下单，但 production 仍不能下单
 
 这是刻意设计的权限隔离。

@@ -82,19 +82,19 @@ def _execute_order_command(command, ContextInfo):
             price = float(payload.get("limit_price"))
         except Exception:
             raise CommandError("invalid simulation limit price")
-        if symbol is None or side != "BUY":
-            raise CommandError("simulation calibration permits A-share BUY only")
+        if symbol is None or side not in ("BUY", "SELL"):
+            raise CommandError("simulation calibration requires a supported side and symbol")
         if (
             isinstance(quantity, bool)
             or not isinstance(quantity, int)
-            or quantity != SIMULATION_MAX_ORDER_QUANTITY
-            or quantity % 100 != 0
+            or quantity <= 0
+            or quantity > SIMULATION_MAX_ORDER_QUANTITY
         ):
-            raise CommandError("simulation calibration requires exactly 100 shares")
+            raise CommandError("simulation calibration quantity exceeds the bounded range")
         if not (price > 0.0 and price <= 100000.0):
             raise CommandError("simulation limit price is outside the safety range")
         passorder(
-            23,
+            23 if side == "BUY" else 24,
             1101,
             _STATE.account_id,
             symbol,
@@ -132,7 +132,7 @@ def rendered(instance_id: str, *, simulation_mutation: bool) -> bytes:
     source = source.replace(TOKEN, instance_id)
     if simulation_mutation:
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-2"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-3"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "SIMULATION_CALIBRATION"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',

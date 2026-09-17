@@ -37,7 +37,7 @@ def load_bridge():
     return module
 
 
-def command(bridge, command_type="SUBMIT_LIMIT"):
+def command(bridge, command_type="SUBMIT_LIMIT", *, side="BUY", quantity=100, symbol="000001.SZ"):
     client_order_id = "sim-cal-001"
     token = broker_token_for(bridge.AUTHORIZED_ACCOUNT_FINGERPRINT, client_order_id)
     payload = {
@@ -47,9 +47,9 @@ def command(bridge, command_type="SUBMIT_LIMIT"):
     if command_type == "SUBMIT_LIMIT":
         payload.update(
             {
-                "symbol": "000001.SZ",
-                "side": "BUY",
-                "quantity": 100,
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
                 "limit_price": "10.00",
             }
         )
@@ -102,13 +102,28 @@ def test_simulation_submit_is_pinned_bounded_and_preserves_broker_token(monkeypa
     assert bridge._STATE.simulation_submit_calls == 1
 
 
+def test_simulation_sell_and_sub_hundred_quantity_are_supported(monkeypatch):
+    bridge = load_bridge()
+    observed = []
+    monkeypatch.setattr(
+        bridge, "passorder", lambda *args: observed.append(args), raising=False
+    )
+
+    result = bridge._execute_order_command(
+        command(bridge, side="SELL", quantity=10, symbol="204001.SH"), object()
+    )
+
+    assert result == ("SIMULATION_SUBMIT_CALL_RETURNED", True)
+    assert observed[0][:7] == (24, 1101, "SIM_ACCOUNT", "204001.SH", 11, 10.0, 10)
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
         ("simulation_calibration", False),
         ("expected_qmt_session_id", "stale-session"),
-        ("quantity", 200),
-        ("side", "SELL"),
+        ("quantity", 101),
+        ("side", "SHORT"),
         ("symbol", "00700.HK"),
     ],
 )

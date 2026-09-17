@@ -18,7 +18,7 @@ def instance(tmp_path) -> QmtInstance:
         session_id="session-01",
         account_fingerprint=FINGERPRINT,
         account_type="STOCK",
-        bridge_build="p5-simulation-calibration-2",
+        bridge_build="p5-simulation-calibration-3",
         created_ms=1_700_000_000_000,
         execution_mode="SIMULATION_CALIBRATION",
         trading_enabled=True,
@@ -41,6 +41,8 @@ def test_simulation_probe_requires_exact_confirmation(tmp_path):
                 "cid-001",
                 "--symbol",
                 "000001.SZ",
+                "--side",
+                "BUY",
                 "--quantity",
                 "100",
                 "--limit-price",
@@ -68,6 +70,8 @@ def test_simulation_probe_publishes_current_session_bounded_submit(
             "cid-001",
             "--symbol",
             "000001.SZ",
+            "--side",
+            "BUY",
             "--quantity",
             "100",
             "--limit-price",
@@ -85,14 +89,49 @@ def test_simulation_probe_publishes_current_session_bounded_submit(
     assert command["payload"]["simulation_calibration"] is True
     assert command["payload"]["expected_qmt_session_id"] == "session-01"
     assert command["payload"]["quantity"] == 100
+    assert command["payload"]["side"] == "BUY"
 
 
-def test_simulation_probe_rejects_more_than_100_shares(tmp_path, monkeypatch):
+def test_simulation_probe_publishes_bounded_sell(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
         "bigqmt_autotrader.qmt.simulation_probe._load_authorized_instance",
         lambda _path: instance(tmp_path),
     )
-    with pytest.raises(SystemExit, match="exactly 100"):
+    result = main(
+        [
+            "--spool-dir",
+            str(tmp_path),
+            "--confirm",
+            CONFIRMATION,
+            "submit",
+            "--client-order-id",
+            "cid-repo",
+            "--symbol",
+            "204001.SH",
+            "--side",
+            "SELL",
+            "--quantity",
+            "10",
+            "--limit-price",
+            "1.500",
+        ]
+    )
+
+    assert result == 0
+    capsys.readouterr()
+    path = next((tmp_path / "commands" / "inbox").glob("*.json"))
+    payload = json.loads(path.read_text(encoding="utf-8"))["command"]["payload"]
+    assert payload["symbol"] == "204001.SH"
+    assert payload["side"] == "SELL"
+    assert payload["quantity"] == 10
+
+
+def test_simulation_probe_rejects_more_than_100_units(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "bigqmt_autotrader.qmt.simulation_probe._load_authorized_instance",
+        lambda _path: instance(tmp_path),
+    )
+    with pytest.raises(SystemExit, match="1..100"):
         main(
             [
                 "--spool-dir",
@@ -104,6 +143,8 @@ def test_simulation_probe_rejects_more_than_100_shares(tmp_path, monkeypatch):
                 "cid-001",
                 "--symbol",
                 "000001.SZ",
+                "--side",
+                "BUY",
                 "--quantity",
                 "200",
                 "--limit-price",

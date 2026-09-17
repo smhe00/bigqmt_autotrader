@@ -71,9 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--confirm", required=True)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    submit = sub.add_parser("submit", help="Submit exactly 100 A-share BUY shares")
+    submit = sub.add_parser("submit", help="Submit a bounded simulation BUY or SELL")
     submit.add_argument("--client-order-id", required=True)
     submit.add_argument("--symbol", required=True)
+    submit.add_argument("--side", choices=("BUY", "SELL"), required=True)
     submit.add_argument("--quantity", type=int, required=True)
     submit.add_argument("--limit-price", required=True)
     submit.add_argument("--ttl-seconds", type=int, default=15)
@@ -119,8 +120,8 @@ def main(argv: list[str] | None = None) -> int:
     spool = QmtCommandSpool(instance.root)
 
     if args.command == "submit":
-        if args.quantity != 100:
-            raise SystemExit("simulation calibration submit requires exactly 100 shares")
+        if args.quantity <= 0 or args.quantity > 100:
+            raise SystemExit("simulation calibration quantity must be in 1..100")
         symbol_parts = args.symbol.split(".")
         if (
             len(symbol_parts) != 2
@@ -139,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
             account_fingerprint=instance.account_fingerprint,
             client_order_id=args.client_order_id,
             symbol=args.symbol,
-            side="BUY",
+            side=args.side,
             quantity=args.quantity,
             limit_price=args.limit_price,
             created_ms=now_ms,

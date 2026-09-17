@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p5-simulation-calibration-2"
+BRIDGE_BUILD = "p5-simulation-calibration-3"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -1044,19 +1044,19 @@ def _execute_order_command(command, ContextInfo):
             price = float(payload.get("limit_price"))
         except Exception:
             raise CommandError("invalid simulation limit price")
-        if symbol is None or side != "BUY":
-            raise CommandError("simulation calibration permits A-share BUY only")
+        if symbol is None or side not in ("BUY", "SELL"):
+            raise CommandError("simulation calibration requires a supported side and symbol")
         if (
             isinstance(quantity, bool)
             or not isinstance(quantity, int)
-            or quantity != SIMULATION_MAX_ORDER_QUANTITY
-            or quantity % 100 != 0
+            or quantity <= 0
+            or quantity > SIMULATION_MAX_ORDER_QUANTITY
         ):
-            raise CommandError("simulation calibration requires exactly 100 shares")
+            raise CommandError("simulation calibration quantity exceeds the bounded range")
         if not (price > 0.0 and price <= 100000.0):
             raise CommandError("simulation limit price is outside the safety range")
         passorder(
-            23,
+            23 if side == "BUY" else 24,
             1101,
             _STATE.account_id,
             symbol,

@@ -281,6 +281,13 @@ in quarantine. A second trading-session run submitted at 14:57:29 and matched
 in the 15:00 closing auction: broker order `5652`, trade `50043738`, 100 shares
 at `4.532`. Callback and active-query replay independently produced FULL_FILL.
 
+The generated `guojin_sim` V5 artifact is now build
+`p5-simulation-calibration-3`. Its submit gate supports explicit BUY/SELL and
+integer quantity `1..100` for six-digit `.SH`/`.SZ` securities, while retaining
+all simulation identity/session/token/price/fuse gates. This permits a bounded
+GC001 sell-path calibration without enabling any production artifact. It does
+not create a Hong Kong Connect account where runtime discovery reports none.
+
 ### Still pending
 
 This Gate does **not** approve or implement a Guojin production mapper or any

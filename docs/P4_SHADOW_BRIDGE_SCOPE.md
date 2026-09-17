@@ -138,7 +138,8 @@ and Guojin production-account artifacts are:
 The generator injects the two broker mutation calls only into
 `BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN_SIM.py`. That artifact pins the observed
 simulation account fingerprint, accepts only current-session explicitly marked
-calibration commands, limits submit to exactly 100 A-share BUY shares, and
+calibration commands, limits submit to explicit BUY/SELL of 1..100 units on a
+six-digit `.SH`/`.SZ` security in the bound STOCK simulation account, and
 requires broker-order-ID plus broker-token equality before cancel.
 
 ## Runtime probe
