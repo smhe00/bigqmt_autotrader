@@ -89,7 +89,12 @@ class QmtReadModel:
         elif event.event_type == "deal":
             deals = self._append_event(self._view.deals, event.payload)
             self._view = self._replace(deals=deals, sequence=event.sequence, timestamp_ms=event.timestamp_ms)
-        elif event.event_type in {"command_result", "bridge_ready", "bridge_error"}:
+        elif event.event_type in {
+            "command_result",
+            "bridge_ready",
+            "bridge_error",
+            "instrument_capabilities",
+        }:
             self._view = self._replace(sequence=event.sequence, timestamp_ms=event.timestamp_ms)
         return self._view
 

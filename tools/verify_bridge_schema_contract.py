@@ -68,6 +68,7 @@ def main() -> int:
         "bridge_error",
         "command_result",
         "account_capabilities",
+        "instrument_capabilities",
     }
 
     for schema in (instance, command_result):

@@ -128,8 +128,10 @@ def _execute_order_command(command, ContextInfo):
     raise CommandError("unsupported simulation mutation command")
 '''
 
-LIVE_CANARY_EXECUTOR = '''def _runtime_instrument_probe(ContextInfo):
-    candidates = ("00700.HK", "00700.HGT", "00700.SGT")
+LIVE_CANARY_EXECUTOR = '''_LIVE_CANARY_INSTRUMENT_CANDIDATES = ("00700.HK", "00700.HGT", "00700.SGT")
+
+
+def _runtime_instrument_probe(ContextInfo):
     query = None
     method = None
     for name in ("get_instrument_detail", "get_instrumentdetail"):
@@ -139,7 +141,7 @@ LIVE_CANARY_EXECUTOR = '''def _runtime_instrument_probe(ContextInfo):
             method = name
             break
     records = []
-    for symbol in candidates:
+    for symbol in _LIVE_CANARY_INSTRUMENT_CANDIDATES:
         record = {"symbol": symbol, "method": method, "observed": False}
         if query is None:
             record["error"] = "INSTRUMENT_QUERY_UNAVAILABLE"
@@ -167,6 +169,58 @@ LIVE_CANARY_EXECUTOR = '''def _runtime_instrument_probe(ContextInfo):
                 record["error_type"] = type(exc).__name__
         records.append(record)
     return {"candidates": records}
+
+
+def _runtime_instrument_subscribe(ContextInfo):
+    subscribe = getattr(ContextInfo, "subscribe_quote", None)
+    records = []
+    for symbol in _LIVE_CANARY_INSTRUMENT_CANDIDATES:
+        record = {"symbol": symbol, "method": "subscribe_quote", "accepted": False}
+        if not callable(subscribe):
+            record["error"] = "SUBSCRIBE_QUOTE_UNAVAILABLE"
+        else:
+            try:
+                subscription_id = subscribe(symbol, "tick")
+                if isinstance(subscription_id, bool):
+                    normalized_id = None
+                else:
+                    try:
+                        normalized_id = int(subscription_id)
+                    except Exception:
+                        normalized_id = None
+                record["subscription_id"] = normalized_id
+                record["accepted"] = normalized_id is not None and normalized_id > 0
+            except Exception as exc:
+                record["error"] = "SUBSCRIBE_QUOTE_EXCEPTION"
+                record["error_type"] = type(exc).__name__
+        records.append(record)
+    _STATE.instrument_probe_attempts = 0
+    _STATE.instrument_probe_timer_registered = _register_timer(
+        ContextInfo, "instrument_probe_tick", "1nSecond"
+    )
+    return {
+        "candidates": records,
+        "probe_timer_registered": _STATE.instrument_probe_timer_registered,
+        "max_probe_attempts": 10,
+    }
+
+
+def instrument_probe_tick(ContextInfo):
+    attempts = getattr(_STATE, "instrument_probe_attempts", 0)
+    if attempts >= 10:
+        return
+    attempts += 1
+    _STATE.instrument_probe_attempts = attempts
+    payload = _runtime_instrument_probe(ContextInfo)
+    payload["attempt"] = attempts
+    payload["max_attempts"] = 10
+    observed = any(record.get("observed") for record in payload["candidates"])
+    if attempts == 1 or attempts == 10 or observed:
+        _enqueue("instrument_capabilities", "active_query", payload)
+        _safe_log("instrument_capabilities", payload)
+        flush_transport()
+    if observed:
+        _STATE.instrument_probe_attempts = 10
 
 
 def _live_canary_symbol(value):
@@ -312,7 +366,7 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
             source = source.replace(before, after)
     elif profile == "live_canary":
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p6-guojin-live-canary-3"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p6-guojin-live-canary-4"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "LIVE_CANARY"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',

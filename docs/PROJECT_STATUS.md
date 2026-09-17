@@ -305,10 +305,11 @@ quote logs independently contain live `00700.SGT` records. Build
 `p6-guojin-live-canary-2` therefore pinned `00700.SGT` and required a non-empty
 SGT/00700 instrument-detail preflight before `passorder`. Its first authorized
 command failed that preflight closed: `REJECTED_SAFETY_GATE`,
-`live_side_effect=false`, zero `passorder` calls and no ORDER/DEAL. Build-3 adds
-a read-only startup probe for `.HK/.HGT/.SGT` and exposes only normalized
-instrument identity fields in `bridge_ready`, plus a controlled safety-gate
-reason for diagnosis.
+`live_side_effect=false`, zero `passorder` calls and no ORDER/DEAL. Build-3's
+read-only startup probe found no instrument master for `.HK/.HGT/.SGT` in the
+model runtime. Build-4 adds read-only tick subscriptions and a bounded ten-second
+delayed probe, publishing normalized evidence as `instrument_capabilities` while
+leaving the submit preflight fail-closed.
 
 ### Still pending
 
@@ -373,7 +374,7 @@ This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 Guojin LIVE_CANARY build-1 local rejection and build-2 instrument-preflight fail-close are verified; build-3 adds read-only route discovery and awaits restart evidence. Galaxy and generic deployments remain mutation-free.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 Guojin LIVE_CANARY build-1 local rejection and build-2 instrument-preflight fail-close are verified; build-3 found no instrument master for any candidate route, and build-4 adds bounded read-only subscription plus delayed route discovery. Galaxy and generic deployments remain mutation-free.**
 
 Next safety checkpoint:
 

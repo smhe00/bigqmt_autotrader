@@ -252,6 +252,7 @@ payload
 bridge_ready
 bridge_error
 account_capabilities
+instrument_capabilities
 snapshot
 account
 position

@@ -869,6 +869,9 @@ def _bind_runtime(ContextInfo):
         "spool_ready": _STATE.spool_ready,
         "capabilities": capabilities(),
     }
+    instrument_subscribe = globals().get("_runtime_instrument_subscribe")
+    if callable(instrument_subscribe):
+        ready_event_payload["instrument_subscription"] = instrument_subscribe(ContextInfo)
     instrument_probe = globals().get("_runtime_instrument_probe")
     if callable(instrument_probe):
         ready_event_payload["instrument_probe"] = instrument_probe(ContextInfo)

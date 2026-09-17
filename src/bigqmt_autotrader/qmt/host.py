@@ -135,6 +135,7 @@ def _should_log_event(
         "bridge_error",
         "snapshot",
         "account_capabilities",
+        "instrument_capabilities",
         "order",
         "deal",
         "command_result",

@@ -24,6 +24,7 @@ _ALLOWED_EVENT_TYPES = frozenset(
         "bridge_error",
         "command_result",
         "account_capabilities",
+        "instrument_capabilities",
     }
 )
 
@@ -107,6 +108,8 @@ class QmtEvent:
             _validate_command_result_payload(payload)
         elif event_type == "account_capabilities":
             _validate_account_capabilities_payload(payload)
+        elif event_type == "instrument_capabilities":
+            _validate_instrument_capabilities_payload(payload)
 
         return cls(
             protocol_version=protocol_version,
@@ -131,6 +134,24 @@ def _validate_snapshot_payload(payload: Mapping[str, Any]) -> None:
     for key in ("account", "positions", "orders", "deals"):
         if any(not isinstance(row, Mapping) for row in payload[key]):
             raise QmtProtocolError(f"snapshot {key} rows must be objects")
+
+
+def _validate_instrument_capabilities_payload(payload: Mapping[str, Any]) -> None:
+    candidates = payload.get("candidates")
+    attempt = payload.get("attempt")
+    max_attempts = payload.get("max_attempts")
+    if not isinstance(candidates, list) or not candidates:
+        raise QmtProtocolError("instrument_capabilities candidates must be non-empty")
+    if any(not isinstance(record, Mapping) for record in candidates):
+        raise QmtProtocolError("instrument_capabilities candidates must be objects")
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt <= 0:
+        raise QmtProtocolError("instrument_capabilities attempt must be positive")
+    if (
+        isinstance(max_attempts, bool)
+        or not isinstance(max_attempts, int)
+        or max_attempts < attempt
+    ):
+        raise QmtProtocolError("instrument_capabilities max_attempts must cover attempt")
 
 
 def _validate_account_capabilities_payload(payload: Mapping[str, Any]) -> None:

@@ -88,7 +88,7 @@ def called_names(path: Path) -> list[tuple[str, str]]:
 
 def test_live_canary_artifact_has_exact_mutation_surface_and_identity():
     bridge = load_bridge()
-    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-3"
+    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-4"
     assert bridge.EXECUTION_MODE == "LIVE_CANARY"
     assert bridge.TERMINAL_INSTANCE_ID == "guojin"
     assert bridge.SIMULATION_ONLY is False
@@ -190,6 +190,47 @@ def test_live_canary_runtime_probe_reports_all_market_routes():
     ]
     assert [row["observed"] for row in payload["candidates"]] == [False, False, True]
     assert payload["candidates"][2]["exchange_id"] == "SGT"
+
+
+def test_live_canary_read_only_subscription_and_delayed_probe(monkeypatch):
+    bridge = load_bridge()
+    subscribed = []
+    timers = []
+    emitted = []
+
+    class ProbeContext:
+        def subscribe_quote(self, symbol, period):
+            subscribed.append((symbol, period))
+            return len(subscribed)
+
+        def run_time(self, callback, period, start):
+            timers.append((callback, period, start))
+
+        def get_instrument_detail(self, symbol):
+            if symbol == "00700.SGT":
+                return {"ExchangeID": "SGT", "InstrumentID": "00700"}
+            return {}
+
+    monkeypatch.setattr(bridge, "_enqueue", lambda *args: emitted.append(args))
+    monkeypatch.setattr(bridge, "_safe_log", lambda *_args: None)
+    monkeypatch.setattr(bridge, "flush_transport", lambda: None)
+    context = ProbeContext()
+
+    result = bridge._runtime_instrument_subscribe(context)
+    assert subscribed == [
+        ("00700.HK", "tick"),
+        ("00700.HGT", "tick"),
+        ("00700.SGT", "tick"),
+    ]
+    assert all(row["accepted"] for row in result["candidates"])
+    assert result["probe_timer_registered"] is True
+    assert timers == [("instrument_probe_tick", "1nSecond", bridge.TIMER_START)]
+
+    bridge.instrument_probe_tick(context)
+    assert bridge._STATE.instrument_probe_attempts == 10
+    assert emitted[0][0:2] == ("instrument_capabilities", "active_query")
+    assert emitted[0][2]["attempt"] == 1
+    assert emitted[0][2]["candidates"][2]["observed"] is True
 
 
 def test_live_canary_cancel_requires_exact_broker_id_and_token(monkeypatch):

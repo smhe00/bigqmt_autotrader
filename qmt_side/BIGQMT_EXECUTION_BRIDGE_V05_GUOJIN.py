@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p6-guojin-live-canary-3"
+BRIDGE_BUILD = "p6-guojin-live-canary-4"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -869,6 +869,9 @@ def _bind_runtime(ContextInfo):
         "spool_ready": _STATE.spool_ready,
         "capabilities": capabilities(),
     }
+    instrument_subscribe = globals().get("_runtime_instrument_subscribe")
+    if callable(instrument_subscribe):
+        ready_event_payload["instrument_subscription"] = instrument_subscribe(ContextInfo)
     instrument_probe = globals().get("_runtime_instrument_probe")
     if callable(instrument_probe):
         ready_event_payload["instrument_probe"] = instrument_probe(ContextInfo)
@@ -1000,8 +1003,10 @@ def _reject_claimed(claimed_path, name, code, exc=None):
     _runtime_error(code, exc, {"file": name})
 
 
+_LIVE_CANARY_INSTRUMENT_CANDIDATES = ("00700.HK", "00700.HGT", "00700.SGT")
+
+
 def _runtime_instrument_probe(ContextInfo):
-    candidates = ("00700.HK", "00700.HGT", "00700.SGT")
     query = None
     method = None
     for name in ("get_instrument_detail", "get_instrumentdetail"):
@@ -1011,7 +1016,7 @@ def _runtime_instrument_probe(ContextInfo):
             method = name
             break
     records = []
-    for symbol in candidates:
+    for symbol in _LIVE_CANARY_INSTRUMENT_CANDIDATES:
         record = {"symbol": symbol, "method": method, "observed": False}
         if query is None:
             record["error"] = "INSTRUMENT_QUERY_UNAVAILABLE"
@@ -1039,6 +1044,58 @@ def _runtime_instrument_probe(ContextInfo):
                 record["error_type"] = type(exc).__name__
         records.append(record)
     return {"candidates": records}
+
+
+def _runtime_instrument_subscribe(ContextInfo):
+    subscribe = getattr(ContextInfo, "subscribe_quote", None)
+    records = []
+    for symbol in _LIVE_CANARY_INSTRUMENT_CANDIDATES:
+        record = {"symbol": symbol, "method": "subscribe_quote", "accepted": False}
+        if not callable(subscribe):
+            record["error"] = "SUBSCRIBE_QUOTE_UNAVAILABLE"
+        else:
+            try:
+                subscription_id = subscribe(symbol, "tick")
+                if isinstance(subscription_id, bool):
+                    normalized_id = None
+                else:
+                    try:
+                        normalized_id = int(subscription_id)
+                    except Exception:
+                        normalized_id = None
+                record["subscription_id"] = normalized_id
+                record["accepted"] = normalized_id is not None and normalized_id > 0
+            except Exception as exc:
+                record["error"] = "SUBSCRIBE_QUOTE_EXCEPTION"
+                record["error_type"] = type(exc).__name__
+        records.append(record)
+    _STATE.instrument_probe_attempts = 0
+    _STATE.instrument_probe_timer_registered = _register_timer(
+        ContextInfo, "instrument_probe_tick", "1nSecond"
+    )
+    return {
+        "candidates": records,
+        "probe_timer_registered": _STATE.instrument_probe_timer_registered,
+        "max_probe_attempts": 10,
+    }
+
+
+def instrument_probe_tick(ContextInfo):
+    attempts = getattr(_STATE, "instrument_probe_attempts", 0)
+    if attempts >= 10:
+        return
+    attempts += 1
+    _STATE.instrument_probe_attempts = attempts
+    payload = _runtime_instrument_probe(ContextInfo)
+    payload["attempt"] = attempts
+    payload["max_attempts"] = 10
+    observed = any(record.get("observed") for record in payload["candidates"])
+    if attempts == 1 or attempts == 10 or observed:
+        _enqueue("instrument_capabilities", "active_query", payload)
+        _safe_log("instrument_capabilities", payload)
+        flush_transport()
+    if observed:
+        _STATE.instrument_probe_attempts = 10
 
 
 def _live_canary_symbol(value):
