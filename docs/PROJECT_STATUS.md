@@ -22,7 +22,7 @@ Updated: 2026-09-17
 | Guojin simulation raw status mapper | **PASS — `qmt-guojin-sim-20260917-v1`** |
 | Production Guojin / Galaxy mapper | **NOT IMPLEMENTED / NOT AUTHORIZED** |
 | Production-account live trading allowed | **NO** |
-| Guojin LIVE_CANARY implementation | **IMPLEMENTED — NOT YET DEPLOYED/ARMED** |
+| Guojin LIVE_CANARY implementation | **BUILD-1 LOCAL REJECT VERIFIED; BUILD-2 SGT PREFLIGHT READY** |
 | Production Guojin/Galaxy broker mutation call surface | **ZERO** |
 | QMT submit/cancel implementation | **GUOJIN_SIM + PINNED GUOJIN LIVE_CANARY** |
 | P2 execution-authority policy | **SIMULATION only** |
@@ -296,12 +296,22 @@ immediate clean active snapshot. It is therefore recorded as API-call-returned
 with broker state not observed, never as ACK. Trading-session calibration is
 still required and automatic retry remains forbidden.
 
+The first production Guojin LIVE_CANARY build was armed on 2026-09-18. A
+single authorized `00700.HK BUY 100 @ 1.00` call reached the QMT trade module,
+which synchronously logged `下单代码 [HK00700] 不合法!`; immediate active query
+remained `orders=[]`, `deals=[]`, with unchanged funds and positions. This is
+recorded as a local zero-side-effect rejection, never broker ACK. Guojin's local
+quote logs independently contain live `00700.SGT` records. Build
+`p6-guojin-live-canary-2` therefore pins `00700.SGT` and requires a non-empty
+SGT/00700 instrument-detail preflight before `passorder`.
+
 ### Still pending
 
-This Gate does **not** approve or implement a Guojin production mapper or any
-Galaxy mapper. `guojin` and `galaxy` remain SHADOW and mutation-free. Enabling
-the simulation mapper in an operating Host also requires explicit durable OMS
-identity registration; it is not auto-enabled by instance discovery.
+This Gate approves only the single bounded Guojin LIVE_CANARY surface described
+above; it does **not** approve a general Guojin production mapper or any Galaxy
+mapper. `galaxy` remains SHADOW and mutation-free. Enabling the simulation
+mapper in an operating Host also requires explicit durable OMS identity
+registration; it is not auto-enabled by instance discovery.
 
 ### Runtime conformance
 
@@ -358,7 +368,7 @@ This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 Guojin LIVE_CANARY code is implemented but not yet deployed or broker-calibrated. Galaxy and generic deployments remain mutation-free.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 Guojin LIVE_CANARY build-1 local rejection is verified; build-2 pins 00700.SGT with instrument preflight and awaits restart calibration. Galaxy and generic deployments remain mutation-free.**
 
 Next safety checkpoint:
 

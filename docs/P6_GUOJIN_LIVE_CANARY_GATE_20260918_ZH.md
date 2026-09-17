@@ -4,21 +4,24 @@
 
 ## 状态
 
-代码已实现并通过静态/回归 Gate；尚未在国金实盘 QMT 中加载，因此尚未武装，也
-没有发送任何实盘命令。
+已在国金实盘 QMT 中加载并完成首轮低风险校准。`00700.HK` 命令于本地交易模块
+被明确拒绝为“下单代码 [HK00700] 不合法”，未进入券商委托表。国金本机行情日志
+已确认南向港股通证券代码使用 `.SGT`，因此 build-2 改为精确允许 `00700.SGT`，
+并在调用 `passorder` 前强制执行合约信息只读预检。
 
 ## 固定授权面
 
 ```text
 instance_id                 = guojin
 execution_mode              = LIVE_CANARY
-bridge_build                = p6-guojin-live-canary-1
+bridge_build                = p6-guojin-live-canary-2
 account_type                = STOCK
 authorized fingerprint      = sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5
-allowed submit              = 00700.HK BUY 100 @ 1.00 HKD
+allowed submit              = 00700.SGT BUY 100 @ 1.00 HKD
 max submit calls/session    = 1
 max cancel calls/session    = 1
 cancel identity             = exact broker_order_id + broker_token
+instrument preflight        = get_instrument_detail/get_instrumentdetail must return non-empty SGT/00700 metadata
 ```
 
 `galaxy` 和通用模板仍无 `passorder`/`cancel` 调用面。`guojin_sim` 保持独立模拟
@@ -43,9 +46,32 @@ QMT 官方接口说明 `passorder` 为异步发送；函数返回不等待委托
 - 异常、进程崩溃或 claimed command 遗留一律进入 UNKNOWN，禁止自动重发；
 - 没有 broker order ID 时禁止猜测撤单。
 
-## 部署后的首个实机步骤
+## build-1 实机结果与 build-2 修正
 
-首次启动只执行只读快照，核对 fingerprint、session、当日订单/成交和 broker token
+2026-09-18 04:02:54，build-1 在明确授权后调用：
+
+```text
+accountID   = pinned production account (redacted)
+orderCode   = 00700.HK
+broker_token= exact token observed locally (redacted)
+```
+
+QMT 本地日志证明 `passorder` 已到达 trade module，但同毫秒返回：
+
+```text
+[函数交易] 函数: passorder, 下单代码 [HK00700] 不合法!
+```
+
+随后的主动快照为 `orders=[]`、`deals=[]`，资金与持仓无变化，所以该次结果是
+**LOCAL_REJECTED / zero broker side effect**，不是 broker ACK，也没有可撤订单。
+
+QMT 官方代码约定区分香港交易所 `.HK`、沪港通 `.HGT`、深港通 `.SGT`。本机国金
+行情日志已经存在 `00700.SGT` 的真实行情记录，故 build-2 禁止 `.HK` 并仅允许
+`.SGT`。若合约详情预检缺失、为空或市场/代码不一致，将在 `passorder` 前失败关闭。
+
+## build-2 下一实机步骤
+
+重新加载 build-2 后首次启动只执行只读快照，核对 fingerprint、session、当日订单/成交和 broker token
 冲突。首个 canary 的限价固定为 1.00 HKD，名义金额上限为 100 HKD，用于校准
 受理/拒绝路径而非追求成交。任何实盘提交仍需要另一次明确指令；本次
 代码更新与 Git 推送本身不构成下单授权。

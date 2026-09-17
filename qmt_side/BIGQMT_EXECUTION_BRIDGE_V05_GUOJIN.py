@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p6-guojin-live-canary-1"
+BRIDGE_BUILD = "p6-guojin-live-canary-2"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -999,9 +999,27 @@ def _reject_claimed(claimed_path, name, code, exc=None):
 
 def _live_canary_symbol(value):
     value = _text(value)
-    if value != "00700.HK":
+    if value != "00700.SGT":
         return None
     return value
+
+
+def _live_canary_instrument_preflight(ContextInfo, symbol):
+    details = None
+    for name in ("get_instrument_detail", "get_instrumentdetail"):
+        query = getattr(ContextInfo, name, None)
+        if callable(query):
+            details = query(symbol)
+            break
+    if not isinstance(details, dict) or not details:
+        raise CommandError("live canary instrument preflight failed")
+    exchange = _text(details.get("ExchangeID") or details.get("ExchangeCode"))
+    instrument = _text(details.get("InstrumentID") or details.get("InstrumentCode"))
+    if exchange != "SGT":
+        raise CommandError("live canary instrument exchange mismatch")
+    if instrument != "00700":
+        raise CommandError("live canary instrument code mismatch")
+    return details
 
 
 def _live_canary_cancel_target(command):
@@ -1057,9 +1075,10 @@ def _execute_order_command(command, ContextInfo):
         except Exception:
             raise CommandError("invalid live canary limit price")
         if symbol is None or side != "BUY" or quantity != 100:
-            raise CommandError("live canary permits only 00700.HK BUY 100")
+            raise CommandError("live canary permits only 00700.SGT BUY 100")
         if price != 1.0:
             raise CommandError("live canary limit price must equal 1.00 HKD")
+        _live_canary_instrument_preflight(ContextInfo, symbol)
         passorder(
             23,
             1101,

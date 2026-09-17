@@ -20,6 +20,12 @@ class Obj:
     pass
 
 
+class Context:
+    def get_instrument_detail(self, symbol):
+        assert symbol == "00700.SGT"
+        return {"ExchangeID": "SGT", "InstrumentID": "00700", "IsTrading": True}
+
+
 def load_bridge():
     spec = importlib.util.spec_from_file_location("bigqmt_bridge_v05_guojin", BRIDGE)
     module = importlib.util.module_from_spec(spec)
@@ -41,7 +47,7 @@ def command(bridge, command_type="SUBMIT_LIMIT", **overrides):
     if command_type == "SUBMIT_LIMIT":
         payload.update(
             {
-                "symbol": "00700.HK",
+                "symbol": "00700.SGT",
                 "side": "BUY",
                 "quantity": 100,
                 "limit_price": "1.00",
@@ -82,7 +88,7 @@ def called_names(path: Path) -> list[tuple[str, str]]:
 
 def test_live_canary_artifact_has_exact_mutation_surface_and_identity():
     bridge = load_bridge()
-    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-1"
+    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-2"
     assert bridge.EXECUTION_MODE == "LIVE_CANARY"
     assert bridge.TERMINAL_INSTANCE_ID == "guojin"
     assert bridge.SIMULATION_ONLY is False
@@ -99,13 +105,13 @@ def test_live_canary_submit_is_exactly_bounded(monkeypatch):
     calls = []
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
 
-    result = bridge._execute_order_command(command(bridge), object())
+    result = bridge._execute_order_command(command(bridge), Context())
 
     assert result == ("LIVE_CANARY_SUBMIT_CALL_RETURNED", True)
-    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "00700.HK", 11, 1.0, 100)
+    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "00700.SGT", 11, 1.0, 100)
     assert calls[0][7:10] == ("BIGQMT_LIVE_CANARY", 2, command(bridge)["broker_token"])
     with pytest.raises(bridge.CommandError, match="session limit"):
-        bridge._execute_order_command(command(bridge), object())
+        bridge._execute_order_command(command(bridge), Context())
     assert len(calls) == 1
 
 
@@ -126,7 +132,30 @@ def test_live_canary_rejects_any_scope_expansion(monkeypatch, field, value):
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
     candidate = command(bridge, **{field: value})
     with pytest.raises(bridge.CommandError):
-        bridge._execute_order_command(candidate, object())
+        bridge._execute_order_command(candidate, Context())
+    assert calls == []
+
+
+def test_live_canary_fails_closed_when_instrument_preflight_is_missing(monkeypatch):
+    bridge = load_bridge()
+    calls = []
+    monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
+    with pytest.raises(bridge.CommandError, match="instrument preflight"):
+        bridge._execute_order_command(command(bridge), object())
+    assert calls == []
+
+
+def test_live_canary_fails_closed_on_instrument_identity_mismatch(monkeypatch):
+    bridge = load_bridge()
+    calls = []
+    monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
+
+    class WrongContext:
+        def get_instrumentdetail(self, _symbol):
+            return {"ExchangeID": "HK", "InstrumentID": "00700"}
+
+    with pytest.raises(bridge.CommandError, match="exchange mismatch"):
+        bridge._execute_order_command(command(bridge), WrongContext())
     assert calls == []
 
 

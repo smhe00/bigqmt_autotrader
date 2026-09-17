@@ -16,8 +16,8 @@ INSTANCE_ID = "guojin"
 ACCOUNT_FINGERPRINT = (
     "sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5"
 )
-BRIDGE_BUILD = "p6-guojin-live-canary-1"
-ALLOWED_SYMBOL = "00700.HK"
+BRIDGE_BUILD = "p6-guojin-live-canary-2"
+ALLOWED_SYMBOL = "00700.SGT"
 
 
 def _cancel_command_id(client_order_id: str, broker_order_id: str) -> str:
@@ -120,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
             or args.side != "BUY"
             or args.quantity != 100
         ):
-            raise SystemExit("live canary permits only 00700.HK BUY 100")
+            raise SystemExit("live canary permits only 00700.SGT BUY 100")
         try:
             limit_price = Decimal(args.limit_price)
         except InvalidOperation as exc:
