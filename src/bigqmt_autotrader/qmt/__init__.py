@@ -30,7 +30,16 @@ from .ingestion import (
     EvidenceSink,
     HostIngestResult,
     QmtHostIngestion,
+    SnapshotEvidenceBatch,
+    SnapshotEvidenceMapper,
     observed_at_from_event,
+)
+from .guojin_evidence import (
+    GUOJIN_SIM_MAPPER_PROFILE,
+    GUOJIN_SIM_SOURCE,
+    GuojinMapperRejection,
+    GuojinSimEvidenceMapper,
+    GuojinSnapshotEvidenceBatch,
 )
 from .protocol import (
     BRIDGE_PROTOCOL_VERSION,
@@ -86,9 +95,16 @@ __all__ = [
     "EvidenceSink",
     "HostIngestResult",
     "QmtHostIngestion",
+    "SnapshotEvidenceBatch",
+    "SnapshotEvidenceMapper",
     "QmtBrokerTokenCalibration",
     "observed_at_from_event",
     "QmtOrderDealCalibrationRecord",
     "broker_token_from_remark",
     "order_deal_calibration_record",
+    "GUOJIN_SIM_MAPPER_PROFILE",
+    "GUOJIN_SIM_SOURCE",
+    "GuojinMapperRejection",
+    "GuojinSimEvidenceMapper",
+    "GuojinSnapshotEvidenceBatch",
 ]

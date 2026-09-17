@@ -18,7 +18,8 @@
 | P5 国金模拟账户 submit/cancel/fill 校准 | **BOUNDED CALIBRATION PASS** |
 | BigQMT Bridge API v1 | **正式契约 + 永久 CI Gate** |
 | Broker Evidence Contract v1 | **协议封版 + 永久形式验证 Gate** |
-| Broker-specific raw status mapper | **尚未实现/未封版** |
+| Guojin simulation raw status mapper | **PASS（仅 `guojin_sim`）** |
+| Production Guojin / Galaxy mapper | **尚未实现/未授权** |
 | Production live trading | **NO** |
 | LIVE_CANARY | **未启用** |
 

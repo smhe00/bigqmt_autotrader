@@ -39,6 +39,14 @@ class CommandResultSink(Protocol):
 EvidenceMapper = Callable[[QmtEvent], BrokerEvidenceV1 | None]
 
 
+class SnapshotEvidenceBatch(Protocol):
+    evidence: tuple[BrokerEvidenceV1, ...]
+    rejected_rows: int
+
+
+SnapshotEvidenceMapper = Callable[[QmtEvent], SnapshotEvidenceBatch]
+
+
 @dataclass(frozen=True)
 class HostIngestResult:
     view: QmtSnapshotView | None
@@ -73,6 +81,7 @@ class QmtHostIngestion:
         read_model: QmtReadModel | None = None,
         evidence_sink: EvidenceSink | None = None,
         evidence_mapper: EvidenceMapper | None = None,
+        snapshot_evidence_mapper: SnapshotEvidenceMapper | None = None,
         command_result_sink: CommandResultSink | None = None,
         calibration_observer: Callable[[QmtEvent], Any] | None = None,
         max_quarantine: int = 1024,
@@ -82,6 +91,7 @@ class QmtHostIngestion:
         self.read_model = read_model or QmtReadModel()
         self.evidence_sink = evidence_sink
         self.evidence_mapper = evidence_mapper
+        self.snapshot_evidence_mapper = snapshot_evidence_mapper
         self.command_result_sink = command_result_sink
         self.calibration_observer = calibration_observer
         self.max_quarantine = max_quarantine
@@ -106,6 +116,9 @@ class QmtHostIngestion:
 
         if event.event_type == "command_result":
             return self._handle_command_result(event, view)
+
+        if event.event_type == "snapshot" and self.snapshot_evidence_mapper is not None:
+            return self._handle_snapshot_evidence(event, view, semantic_duplicate)
 
         if event.event_type not in {"order", "deal"}:
             return HostIngestResult(
@@ -150,6 +163,35 @@ class QmtHostIngestion:
             quarantined=False,
             deduplicated=False,
             calibration_observed=calibration_observed,
+        )
+
+    def _handle_snapshot_evidence(
+        self,
+        event: QmtEvent,
+        view: QmtSnapshotView | None,
+        semantic_duplicate: bool,
+    ) -> HostIngestResult:
+        if self.evidence_sink is None:
+            self._quarantine(event)
+            return HostIngestResult(
+                view=view,
+                evidence_ingested=False,
+                quarantined=True,
+                deduplicated=semantic_duplicate,
+            )
+        batch = self.snapshot_evidence_mapper(event)
+        for candidate in batch.evidence:
+            if candidate.account_fingerprint != event.account_fingerprint:
+                raise ValueError("snapshot evidence mapper changed account identity")
+            self.evidence_sink.ingest_broker_evidence(candidate)
+        quarantined = batch.rejected_rows > 0
+        if quarantined:
+            self._quarantine(event)
+        return HostIngestResult(
+            view=view,
+            evidence_ingested=bool(batch.evidence),
+            quarantined=quarantined,
+            deduplicated=semantic_duplicate,
         )
 
     def _handle_command_result(

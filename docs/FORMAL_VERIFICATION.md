@@ -213,8 +213,13 @@ A TLC counterexample is a design/model/implementation defect until resolved. The
 - **P5 bounded Guojin simulation submit/cancel/fill calibration: PASS**
 - **BigQMT Bridge API v1: FORMAL CONTRACT PASS**
 - **Broker Evidence Contract v1: PROTOCOL/FORMAL CONTRACT PASS**
-- **Broker-specific raw status mapper: NOT YET IMPLEMENTED**
+- **Guojin simulation raw status mapper: PASS (`guojin_sim` only)**
+- **Production Guojin / Galaxy mapper: NOT IMPLEMENTED / NOT AUTHORIZED**
 - **Production live trading: NO**
 - **LIVE_CANARY: NOT ENABLED**
 
-The next execution-safety checkpoint is implementation and calibration of broker-specific raw ORDER/DEAL/query → `BrokerEvidence v1` mappers. That future Gate must not alter the already frozen evidence semantics without a contract/version change.
+The Guojin simulation mapper is now implemented under the versioned
+`qmt-guojin-sim-20260917-v1` profile. The next execution-safety checkpoints are
+durable mapper-registry recovery and separately calibrated production/other-
+broker profiles. Those future Gates must not alter the frozen evidence
+semantics without a contract/version change.

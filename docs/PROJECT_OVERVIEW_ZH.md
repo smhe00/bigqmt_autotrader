@@ -177,6 +177,18 @@ Galaxy Big QMT：
 - linked-account callback suppression；
 - instance isolation。
 
+国金模拟账户新增了版本化 broker evidence mapper：
+
+- profile：`qmt-guojin-sim-20260917-v1`；
+- 仅接受 `guojin_sim` 与固定账户指纹；
+- durable OMS 必须先登记 `client_order_id + symbol + quantity`；
+- exact `m_strRemark` 才能还原订单身份；
+- 已校准 status `50/54/56/57`，并支持 DEAL 累计成交与 active-query 证据；
+- 初始无 broker order ID 的 status `50`、未知状态、缺 token、身份/数量冲突全部检疫。
+
+该 mapper 不适用于 `guojin` 实盘，也不会通过自动发现启用。`galaxy` 仍无 broker
+status mapper。
+
 ## 9. 为什么 simulation 已经能下单，但 production 仍不能下单
 
 这是刻意设计的权限隔离。

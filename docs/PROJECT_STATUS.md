@@ -19,7 +19,8 @@ Updated: 2026-09-17
 | P5 Guojin simulation mutation calibration | **BOUNDED PASS** |
 | BigQMT Bridge API v1 | **CONTRACT + FORMAL CI GATE** |
 | Broker Evidence Contract v1 | **PROTOCOL + FORMAL CI GATE** |
-| Broker-specific raw status mapper | **NOT YET IMPLEMENTED** |
+| Guojin simulation raw status mapper | **PASS — `qmt-guojin-sim-20260917-v1`** |
+| Production Guojin / Galaxy mapper | **NOT IMPLEMENTED / NOT AUTHORIZED** |
 | Production-account live trading allowed | **NO** |
 | LIVE_CANARY | **NOT ENABLED** |
 | Production Guojin/Galaxy broker mutation call surface | **ZERO** |
@@ -253,16 +254,39 @@ Details:
 
 - [`BROKER_EVIDENCE_CONTRACT_V1_ZH.md`](BROKER_EVIDENCE_CONTRACT_V1_ZH.md)
 
-### Still pending
+## 10. Guojin simulation evidence mapper
 
-This Gate does **not** implement or approve:
+The first broker-specific profile is implemented as
+`qmt-guojin-sim-20260917-v1`. It is hard-pinned to the `guojin_sim` terminal
+and its configured account fingerprint. Durable OMS registration of
+`client_order_id + symbol + quantity` is required
+before an exact `m_strRemark` token may be resolved.
+
+Calibrated mappings are deliberately narrow:
 
 ```text
-Guojin raw status -> BrokerEvidence v1
-Galaxy raw status -> BrokerEvidence v1
+ORDER 50/51 + broker ID + zero fill -> ORDER_ACCEPTED
+ORDER 54/51 + broker ID + zero fill -> ORDER_CANCELLED
+ORDER 56/51 + exact full quantity   -> FULL_FILL
+ORDER 57/51 + zero fill             -> ORDER_REJECTED
+DEAL + exact token/trade/order IDs   -> cumulative PARTIAL_FILL/FULL_FILL
 ```
 
-Those broker-specific mapper implementations remain the next execution-safety checkpoint and must be calibrated against observed ORDER/DEAL/query facts.
+Callback and active-query sources remain distinct. Unknown status, incomplete
+initial status 50, missing/unregistered token, wrong account/terminal,
+broker-order-ID conflict, trade-ID conflict and quantity contradiction remain
+quarantined. A real 2026-09-17 spool replay produced accepted then cancelled
+evidence for broker order `4083`, with the initial no-broker-ID callback kept
+in quarantine. A second trading-session run submitted at 14:57:29 and matched
+in the 15:00 closing auction: broker order `5652`, trade `50043738`, 100 shares
+at `4.532`. Callback and active-query replay independently produced FULL_FILL.
+
+### Still pending
+
+This Gate does **not** approve or implement a Guojin production mapper or any
+Galaxy mapper. `guojin` and `galaxy` remain SHADOW and mutation-free. Enabling
+the simulation mapper in an operating Host also requires explicit durable OMS
+identity registration; it is not auto-enabled by instance discovery.
 
 ### Runtime conformance
 
