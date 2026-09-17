@@ -290,6 +290,12 @@ GC001 sell-path and Hong Kong Connect routing calibration without enabling any
 production artifact. It does not invent a second account: Guojin routes those
 markets through the same bound `STOCK` account.
 
+The first build-4 after-hours `00700.HK` probe reached `passorder` through that
+bound STOCK account, but produced no ORDER/DEAL callback and no row in the
+immediate clean active snapshot. It is therefore recorded as API-call-returned
+with broker state not observed, never as ACK. Trading-session calibration is
+still required and automatic retry remains forbidden.
+
 ### Still pending
 
 This Gate does **not** approve or implement a Guojin production mapper or any
