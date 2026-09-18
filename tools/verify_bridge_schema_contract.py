@@ -69,6 +69,7 @@ def main() -> int:
         "command_result",
         "account_capabilities",
         "instrument_capabilities",
+        "instrument_tick_capabilities",
     }
 
     for schema in (instance, command_result):
