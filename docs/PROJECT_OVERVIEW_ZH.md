@@ -1,6 +1,6 @@
 # bigqmt_autotrader 中文总览
 
-更新：2026-09-17
+更新：2026-09-18
 
 ## 1. 项目目标
 
@@ -29,9 +29,9 @@ Big QMT 被定位为 **券商执行终端 / Broker Gateway**。复杂策略、OM
 | P4 SHADOW execution bridge | **DEPLOYMENT GATE PASS** |
 | P5 国金模拟账户 submit/cancel/fill 校准 | **BOUNDED CALIBRATION PASS** |
 | Production live trading | **NO** |
-| 国金 LIVE_CANARY | **build-1 本地拒绝、build-2 预检失败关闭均已验证；build-3 增加启动期三路只读合约探测** |
+| 国金 LIVE_CANARY | **build-4 已证明订阅成功无法区分 route；build-5 增加精确 symbol 的真实 tick callback 证据，mutation authority 不变** |
 
-`galaxy` 和 `guojin` production artifacts 仍然在源代码级禁用 broker mutation。
+`galaxy` 与通用 production artifact 仍然在源代码级禁用 broker mutation；`guojin` 仅保留 P6 独立 Gate 下的 fingerprint-pinned LIVE_CANARY surface，不代表通用实盘授权。
 
 `guojin_sim` 是 fingerprint-pinned 的模拟账户校准 artifact，只用于 simulation calibration，不能被解释成生产实盘授权。
 
@@ -207,17 +207,17 @@ guojin_sim
   finite mutation fuse
 ```
 
-而：
+而通用 / Galaxy production 路径仍为：
 
 ```text
-guojin / galaxy
+galaxy / generic
   execution_mode = SHADOW
   trading_enabled = false
   live_submit = false
   live_cancel = false
 ```
 
-并且静态审计要求 production artifact 中 broker mutation call surface 为零。
+国金生产实例只有 P6 明确固定的 LIVE_CANARY 例外：账户指纹、session、symbol、side、quantity、price 和每 session submit/cancel 次数均被限制，且当前 instrument preflight 仍 fail closed。这不能解释为 general LIVE。
 
 所以“技术上已验证下单链路”和“生产账户获得实盘权限”是两件完全不同的事。
 
