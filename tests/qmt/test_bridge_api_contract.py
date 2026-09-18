@@ -85,7 +85,7 @@ def live_canary_manifest() -> dict:
     value = shadow_manifest()
     value.update(
         {
-            "bridge_build": "p6-guojin-live-canary-4",
+            "bridge_build": "p6-guojin-live-canary-5",
             "execution_mode": "LIVE_CANARY",
             "trading_enabled": True,
             "live_submit": True,
@@ -207,6 +207,34 @@ def test_submit_command_accepts_normalized_order_routing_metadata(tmp_path: Path
             command_id="command-routing-invalid",
         )
 
+
+def test_event_schema_accepts_tick_capability_evidence() -> None:
+    validator = Draft202012Validator(schema("event.schema.json"))
+    frame = {
+        "transport_version": TRANSPORT_VERSION,
+        "event": {
+            "protocol_version": BRIDGE_PROTOCOL_VERSION,
+            "session_id": "session-001",
+            "sequence": 1,
+            "timestamp_ms": 1_700_000_000_000,
+            "event_type": "instrument_tick_capabilities",
+            "source": "quote_callback",
+            "account_fingerprint": FP,
+            "account_type": "STOCK",
+            "terminal_instance_id": "guojin",
+            "payload": {
+                "candidates": [
+                    {"symbol": "00700.HK", "subscription_id": 6, "accepted": True, "callback_registered": True, "tick_observed": False, "callback_count": 0},
+                    {"symbol": "00700.HGT", "subscription_id": 7, "accepted": True, "callback_registered": True, "tick_observed": True, "callback_count": 1},
+                    {"symbol": "00700.SGT", "subscription_id": 8, "accepted": True, "callback_registered": True, "tick_observed": False, "callback_count": 0},
+                ],
+                "observed_count": 1,
+                "window_seconds": 10,
+                "final": False,
+            },
+        },
+    }
+    validator.validate(frame)
 
 def test_snapshot_command_must_not_carry_order_identity() -> None:
     validator = Draft202012Validator(schema("command.schema.json"))
