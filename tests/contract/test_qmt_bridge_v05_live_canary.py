@@ -24,7 +24,9 @@ class Context:
     def get_instrument_detail(self, symbol):
         if symbol == "204001.SH":
             return {"ExchangeID": "SH", "InstrumentID": "204001", "IsTrading": True}
-        assert symbol == "00700.SGT"
+        if symbol == "511880.SH":
+            return {"ExchangeID": "SH", "InstrumentID": "511880", "IsTrading": True}
+        assert symbol == "00700.HGT"
         return {
             "ExchangeID": "HK",
             "InstrumentID": "00700",
@@ -43,6 +45,7 @@ def load_bridge():
     module._STATE.account_fingerprint = module.AUTHORIZED_ACCOUNT_FINGERPRINT
     module._STATE.session_id = "live-session-01"
     module._STATE.detected_account_types.add("SHENGANGTONG")
+    module._STATE.detected_account_types.add("HUGANGTONG")
     return module
 
 
@@ -135,7 +138,7 @@ def test_live_canary_submit_is_exactly_bounded(monkeypatch):
     assert len(calls) == 1
 
 
-def test_live_canary_tencent_case_requires_exact_tick_and_insufficient_cash(monkeypatch):
+def test_live_canary_511880_case_requires_exact_tick_and_insufficient_cash(monkeypatch):
     bridge = load_bridge()
     calls = []
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
@@ -146,27 +149,27 @@ def test_live_canary_tencent_case_requires_exact_tick_and_insufficient_cash(monk
         bridge, "get_trade_detail_data", lambda *_args: [account], raising=False
     )
     bridge._STATE.instrument_tick_records = {
-        "00700.SGT": {
+        "511880.SH": {
             "tick_observed": True,
-            "evidence": {"exact_symbol": True, "last_price": "604.00"},
+            "evidence": {"exact_symbol": True, "last_price": "100.805"},
         }
     }
     candidate = command(
         bridge,
-        symbol="00700.SGT",
+        symbol="511880.SH",
         side="BUY",
         quantity=100,
-        limit_price="604.00",
+        limit_price="100.805",
     )
 
     assert bridge._execute_order_command(candidate, Context()) == (
         "LIVE_CANARY_SUBMIT_CALL_RETURNED",
         True,
     )
-    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "00700.SGT", 11, 604.0, 100)
+    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "511880.SH", 11, 100.805, 100)
 
 
-def test_live_canary_tencent_fails_closed_without_exact_tick(monkeypatch):
+def test_live_canary_511880_fails_closed_without_exact_tick(monkeypatch):
     bridge = load_bridge()
     calls = []
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
@@ -178,30 +181,38 @@ def test_live_canary_tencent_fails_closed_without_exact_tick(monkeypatch):
     )
     candidate = command(
         bridge,
-        symbol="00700.SGT",
+        symbol="511880.SH",
         side="BUY",
         quantity=100,
-        limit_price="604.00",
+        limit_price="100.805",
     )
     with pytest.raises(bridge.CommandError, match="tick evidence unavailable"):
         bridge._execute_order_command(candidate, Context())
     assert calls == []
 
 
-def test_live_canary_511880_is_probe_only(monkeypatch):
+def test_live_canary_tencent_hgt_uses_fixed_non_marketable_price(monkeypatch):
     bridge = load_bridge()
     calls = []
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
+    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
+    account = Obj()
+    account.m_dAvailable = 2168.79
+    monkeypatch.setattr(
+        bridge, "get_trade_detail_data", lambda *_args: [account], raising=False
+    )
     candidate = command(
         bridge,
-        symbol="511880.SH",
+        symbol="00700.HGT",
         side="BUY",
         quantity=100,
-        limit_price="100.00",
+        limit_price="1.00",
     )
-    with pytest.raises(bridge.CommandError, match="unsupported live canary symbol"):
-        bridge._execute_order_command(candidate, Context())
-    assert calls == []
+    assert bridge._execute_order_command(candidate, Context()) == (
+        "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+        True,
+    )
+    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "00700.HGT", 11, 1.0, 100)
 
 
 def test_live_canary_halted_session_rejects_every_later_mutation(monkeypatch):

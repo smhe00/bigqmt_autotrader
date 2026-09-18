@@ -94,18 +94,33 @@ def test_live_probe_rejects_non_fixed_gc001_rate(tmp_path, monkeypatch):
               "--quantity", "10", "--limit-price", "99.995"])
 
 
-def test_live_probe_publishes_guarded_tencent_funds_case(tmp_path, monkeypatch, capsys):
+def test_live_probe_publishes_guarded_511880_funds_case(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
         "bigqmt_autotrader.qmt.live_canary_probe._load_authorized_instance",
         lambda _path: instance(tmp_path),
     )
     assert main(["--spool-dir", str(tmp_path), "--confirm", CONFIRMATION, "submit",
-                 "--client-order-id", "cid-tencent-funds", "--symbol", "00700.SGT",
-                 "--side", "BUY", "--quantity", "100", "--limit-price", "600.00"]) == 0
+                 "--client-order-id", "cid-511880-funds", "--symbol", "511880.SH",
+                 "--side", "BUY", "--quantity", "100", "--limit-price", "100.805"]) == 0
     capsys.readouterr()
     path = next((tmp_path / "commands" / "inbox").glob("*.json"))
     payload = json.loads(path.read_text(encoding="utf-8"))["command"]["payload"]
-    assert payload["symbol"] == "00700.SGT"
+    assert payload["symbol"] == "511880.SH"
     assert payload["side"] == "BUY"
     assert payload["quantity"] == 100
-    assert payload["limit_price"] == "600.00"
+    assert payload["limit_price"] == "100.805"
+
+
+def test_live_probe_publishes_fixed_tencent_hgt_route_case(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        "bigqmt_autotrader.qmt.live_canary_probe._load_authorized_instance",
+        lambda _path: instance(tmp_path),
+    )
+    assert main(["--spool-dir", str(tmp_path), "--confirm", CONFIRMATION, "submit",
+                 "--client-order-id", "cid-tencent-hgt", "--symbol", "00700.HGT",
+                 "--side", "BUY", "--quantity", "100", "--limit-price", "1.00"]) == 0
+    capsys.readouterr()
+    path = next((tmp_path / "commands" / "inbox").glob("*.json"))
+    payload = json.loads(path.read_text(encoding="utf-8"))["command"]["payload"]
+    assert payload["symbol"] == "00700.HGT"
+    assert payload["limit_price"] == "1.00"

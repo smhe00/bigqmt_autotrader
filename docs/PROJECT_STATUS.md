@@ -141,9 +141,11 @@ live_cancel=False
 ```
 
 Guojin is the sole bounded exception: fingerprint-pinned and current-session-pinned,
-with two named submit cases (GC001 cancel calibration and Tencent insufficient-funds
-calibration), each usable once, plus two exact-token cancel reserves. `511880.SH` is
-probe-only in this build. Every mutation remains fail-closed behind exact-symbol tick,
+with two named submit cases (Tencent HGT fixed-low-price route calibration and 511880
+insufficient-funds calibration), each usable once, plus two exact-token cancel reserves.
+The preceding GC001 canary ended in a token-matched status-57 price-range rejection with
+funds fully restored. Every mutation remains fail-closed behind instrument/account/cash/
+price guards and exact-symbol tick where available,
 instrument, account, cash and trading-window preflights. This does not grant general
 production live-trading authority.
 
@@ -389,10 +391,9 @@ This remains architecture direction only.
 
 Next safety checkpoint:
 
-> restart the current Guojin build-5 once; review exact tick and instrument evidence,
-> then execute GC001 and fully reconcile it before the one-shot Tencent
-> insufficient-funds case. Keep 511880 probe-only until sufficient funds and a separate
-> T+0 round-trip authorization are available.
+> run the new-session `00700.HGT BUY 100 @ 1.00` route probe and fully reconcile it;
+> only then run `511880.SH BUY 100` at the exact guarded tick to validate the expected
+> insufficient-funds path. A 511880 T+0 round trip remains unavailable with 2168.79 CNY cash.
 
 Gate evidence:
 

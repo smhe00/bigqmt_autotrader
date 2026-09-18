@@ -13,8 +13,8 @@
 延迟探测，三者的 `get_instrument_detail` 仍全部为空，因此“订阅成功”本身不能用于
 判定真实可交易路由。build-5 改为采集真实 tick callback 证据。券商登录权限开放后，
 实机证券主数据又确认 `.SGT` 可归一为 `HK/00700` 且 `HSGTFlag=5`；因此在新的明确
-授权下，build-5 将下一轮校准扩展为两个各一次的独立 case，并将 `511880.SH` 保持
-为只读行情探测对象。
+授权下，build-5 先完成 GC001 实盘拒单校准，随后将新 session 的两个一次性 case
+固定为腾讯 HGT 低价路由和 511880 资金不足路径。
 
 ## 固定授权面
 
@@ -24,20 +24,26 @@ execution_mode              = LIVE_CANARY
 bridge_build                = p6-guojin-live-canary-5
 account_type                = STOCK
 authorized fingerprint      = sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5
-allowed submit case 1       = 204001.SH SELL 10 @ 100.000 (GC001 minimum repo, cancel calibration)
-allowed submit case 2       = 00700.SGT BUY 100 @ exact-tick guarded 100..1000 HKD (insufficient-funds path)
-probe-only instrument       = 511880.SH (no mutation authorization)
+allowed submit case 1       = 00700.HGT BUY 100 @ 1.00 HKD (fixed non-marketable route probe)
+allowed submit case 2       = 511880.SH BUY 100 @ exact-tick guarded 90..110 CNY (insufficient-funds path)
 max submit calls/session    = 2 (one per named case)
 max cancel calls/session    = 2 (one exact-token emergency cancel reserve per case)
 cancel identity             = exact broker_order_id + broker_token
-GC001 preflight             = exact 204001.SH master + exact-symbol tick + >=1000 CNY available
-Tencent preflight           = HK/00700, HSGTFlag 3|5, SHENGANGTONG observed, exact .SGT tick,
-                              price within +/-2% of tick, available cash < 50% of order notional
+Tencent HGT preflight       = HK/00700, HSGTFlag 3|5, HUGANGTONG observed, fixed price 1.00
+511880 preflight            = exact SH/511880 master + exact .SH tick, price within +/-2%,
+                              available cash < 50% of order notional
 ```
 
-两笔 submit 不会批量发布：必须先完成 GC001 的 ORDER/DEAL/query reconciliation，只有
-状态完全解析后才允许发布腾讯 case。任一 broker mutation 出现异常或 UNKNOWN，当前
+两笔 submit 不会批量发布：必须先完成前一笔 ORDER/DEAL/query reconciliation，只有
+状态完全解析后才允许发布后一笔。任一 broker mutation 出现异常或 UNKNOWN，当前
 session 永久熔断；禁止继续第二笔或自动重试。
+
+### 2026-09-18 GC001 实机结果
+
+`204001.SH SELL 10 @ 100.000` 产生精确 token 匹配回报：status 50、broker order ID
+`635003826`，随后 status 57，`cancel_info=订单价格超出范围`，零成交、10 全部撤销。
+可用资金 2168.79 → 1168.78 → 2168.79，最终无持仓或资金副作用。校准扫描得到三条
+`MATCHED_KNOWN_TOKEN`；该结果是 broker rejection，不是 UNKNOWN。
 
 `galaxy` 和通用模板仍无 `passorder`/`cancel` 调用面。`guojin_sim` 保持独立模拟
 profile，不与实盘 spool、session 或 fingerprint 混用。

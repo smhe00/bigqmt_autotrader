@@ -18,7 +18,8 @@ ACCOUNT_FINGERPRINT = (
 )
 BRIDGE_BUILD = "p6-guojin-live-canary-5"
 GC001_SYMBOL = "204001.SH"
-TENCENT_SYMBOL = "00700.SGT"
+TENCENT_HGT_SYMBOL = "00700.HGT"
+ETF_SYMBOL = "511880.SH"
 
 
 def _live_canary_submit_window_open(symbol: str) -> bool:
@@ -28,7 +29,9 @@ def _live_canary_submit_window_open(symbol: str) -> bool:
     minutes = now.tm_hour * 60 + now.tm_min
     if symbol == GC001_SYMBOL:
         return (570 <= minutes <= 680) or (780 <= minutes <= 920)
-    if symbol == TENCENT_SYMBOL:
+    if symbol == ETF_SYMBOL:
+        return (570 <= minutes <= 680) or (780 <= minutes <= 895)
+    if symbol == TENCENT_HGT_SYMBOL:
         return (570 <= minutes <= 710) or (780 <= minutes <= 950)
     return False
 
@@ -141,16 +144,23 @@ def main(argv: list[str] | None = None) -> int:
                 or limit_price != Decimal("100.000")
             ):
                 raise SystemExit("live canary permits GC001 SELL 10 at 100.000")
-        elif args.symbol == TENCENT_SYMBOL:
+        elif args.symbol == ETF_SYMBOL:
             if (
                 args.side != "BUY"
                 or args.quantity != 100
-                or limit_price < Decimal("100.00")
-                or limit_price > Decimal("1000.00")
+                or limit_price < Decimal("90.00")
+                or limit_price > Decimal("110.00")
             ):
                 raise SystemExit(
-                    "live canary permits Tencent BUY 100 at a guarded 100..1000 HKD price"
+                    "live canary permits 511880 BUY 100 at a guarded 90..110 CNY price"
                 )
+        elif args.symbol == TENCENT_HGT_SYMBOL:
+            if (
+                args.side != "BUY"
+                or args.quantity != 100
+                or limit_price != Decimal("1.00")
+            ):
+                raise SystemExit("live canary permits Tencent HGT BUY 100 at 1.00 HKD")
         else:
             raise SystemExit("unsupported live canary symbol")
         if not _live_canary_submit_window_open(args.symbol):

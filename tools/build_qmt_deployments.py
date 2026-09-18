@@ -135,7 +135,7 @@ LIVE_CANARY_EXECUTOR = '''_LIVE_CANARY_INSTRUMENT_CANDIDATES = (
     "00700.HGT",
     "00700.SGT",
 )
-_LIVE_CANARY_MUTATION_SYMBOLS = ("204001.SH", "00700.SGT")
+_LIVE_CANARY_MUTATION_SYMBOLS = ("204001.SH", "511880.SH", "00700.HGT")
 _LIVE_CANARY_TICK_WINDOW_SECONDS = 10
 
 
@@ -491,15 +491,18 @@ def _live_canary_instrument_preflight(ContextInfo, symbol):
     if symbol == "204001.SH":
         if exchange != "SH" or instrument != "204001":
             raise CommandError("live canary GC001 instrument identity mismatch")
-    elif symbol == "00700.SGT":
+    elif symbol == "511880.SH":
+        if exchange != "SH" or instrument != "511880":
+            raise CommandError("live canary 511880 instrument identity mismatch")
+    elif symbol == "00700.HGT":
         try:
             hsgt_flag = int(details.get("HSGTFlag"))
         except Exception:
             hsgt_flag = None
         if exchange != "HK" or instrument != "00700" or hsgt_flag not in (3, 5):
-            raise CommandError("live canary Tencent Stock Connect identity mismatch")
-        if "SHENGANGTONG" not in _STATE.detected_account_types:
-            raise CommandError("live canary Shenzhen Stock Connect account unavailable")
+            raise CommandError("live canary Tencent HGT identity mismatch")
+        if "HUGANGTONG" not in _STATE.detected_account_types:
+            raise CommandError("live canary Shanghai Stock Connect account unavailable")
     return details
 
 
@@ -510,6 +513,8 @@ def _live_canary_trade_window_open(symbol):
     minutes = now.tm_hour * 60 + now.tm_min
     if symbol == "204001.SH":
         return (570 <= minutes <= 680) or (780 <= minutes <= 920)
+    if symbol == "511880.SH":
+        return (570 <= minutes <= 680) or (780 <= minutes <= 895)
     return (570 <= minutes <= 710) or (780 <= minutes <= 950)
 
 
@@ -602,28 +607,38 @@ def _execute_order_command(command, ContextInfo):
             raise CommandError("invalid live canary limit price")
         if symbol is None:
             raise CommandError("unsupported live canary symbol")
-        case_id = "GC001_CANCEL" if symbol == "204001.SH" else "TENCENT_FUNDS"
+        if symbol == "204001.SH":
+            case_id = "GC001_REJECT"
+        elif symbol == "511880.SH":
+            case_id = "511880_FUNDS"
+        else:
+            case_id = "TENCENT_HGT_ROUTE"
         submitted_cases = getattr(_STATE, "live_canary_submitted_cases", set())
         if case_id in submitted_cases:
             raise CommandError("live canary case already submitted")
         if not _live_canary_trade_window_open(symbol):
             raise CommandError("live canary trading window is closed")
         _live_canary_instrument_preflight(ContextInfo, symbol)
-        last_price = _live_canary_tick_price(symbol)
         available_cash = _live_canary_cash_preflight()
         if symbol == "204001.SH":
+            _live_canary_tick_price(symbol)
             if side != "SELL" or quantity != 10 or price != 100.0:
                 raise CommandError("live canary permits GC001 SELL 10 at 100.000")
             if available_cash < 1000.0:
                 raise CommandError("live canary requires at least 1000 CNY available cash")
             op_type = 24
-        else:
-            if side != "BUY" or quantity != 100 or not (100.0 <= price <= 1000.0):
-                raise CommandError("live canary permits Tencent BUY 100 at guarded live price")
+        elif symbol == "511880.SH":
+            last_price = _live_canary_tick_price(symbol)
+            if side != "BUY" or quantity != 100 or not (90.0 <= price <= 110.0):
+                raise CommandError("live canary permits 511880 BUY 100 at guarded live price")
             if price < last_price * 0.98 or price > last_price * 1.02:
-                raise CommandError("live canary Tencent price is outside exact tick guard")
+                raise CommandError("live canary 511880 price is outside exact tick guard")
             if available_cash >= price * quantity * 0.5:
-                raise CommandError("live canary Tencent insufficient-funds condition absent")
+                raise CommandError("live canary 511880 insufficient-funds condition absent")
+            op_type = 23
+        else:
+            if side != "BUY" or quantity != 100 or price != 1.0:
+                raise CommandError("live canary permits Tencent HGT BUY 100 at 1.00")
             op_type = 23
         submitted_cases.add(case_id)
         _STATE.live_canary_submitted_cases = submitted_cases
