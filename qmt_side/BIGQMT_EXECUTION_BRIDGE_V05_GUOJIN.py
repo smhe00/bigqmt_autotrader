@@ -1186,7 +1186,7 @@ def _publish_tick_capabilities(source, final=False):
     return payload
 
 
-def _record_tick_evidence(symbol, data):
+def _record_tick_evidence(symbol, data, source="quote_callback"):
     state = _tick_state()
     record = state.setdefault(
         symbol,
@@ -1206,8 +1206,9 @@ def _record_tick_evidence(symbol, data):
     first_observed = not record.get("tick_observed") and evidence.get("exact_symbol") is True
     if evidence.get("exact_symbol") is True:
         record["tick_observed"] = True
+        record["evidence_source"] = source
     if first_observed or record["callback_count"] == 1:
-        _publish_tick_capabilities("quote_callback", final=False)
+        _publish_tick_capabilities(source, final=False)
 
 
 def _tick_callback(symbol):
@@ -1293,6 +1294,31 @@ def _runtime_instrument_subscribe(ContextInfo):
     }
 
 
+def _runtime_full_tick_probe(ContextInfo):
+    query = getattr(ContextInfo, "get_full_tick", None)
+    result = {"method": "get_full_tick", "attempted": 0, "observed": 0}
+    if not callable(query):
+        result["error"] = "GET_FULL_TICK_UNAVAILABLE"
+        return result
+    for symbol in _LIVE_CANARY_INSTRUMENT_CANDIDATES:
+        record = _tick_state().get(symbol, {})
+        if record.get("tick_observed") is True:
+            continue
+        result["attempted"] += 1
+        try:
+            data = query([symbol])
+            before = bool(record.get("tick_observed"))
+            _record_tick_evidence(symbol, data, source="full_tick_poll")
+            after = bool(_tick_state().get(symbol, {}).get("tick_observed"))
+            if after and not before:
+                result["observed"] += 1
+        except Exception as exc:
+            current = _tick_state().setdefault(symbol, {"symbol": symbol})
+            current["full_tick_error"] = "GET_FULL_TICK_EXCEPTION"
+            current["full_tick_error_type"] = type(exc).__name__
+    return result
+
+
 def instrument_probe_tick(ContextInfo):
     attempts = getattr(_STATE, "instrument_probe_attempts", 0)
     if attempts >= _LIVE_CANARY_TICK_WINDOW_SECONDS:
@@ -1307,6 +1333,7 @@ def instrument_probe_tick(ContextInfo):
         _enqueue("instrument_capabilities", "active_query", payload)
         _safe_log("instrument_capabilities", payload)
         flush_transport()
+    payload["full_tick_probe"] = _runtime_full_tick_probe(ContextInfo)
     tick_payload = _tick_capabilities_payload(final=False)
     all_ticks = tick_payload["observed_count"] == len(_LIVE_CANARY_INSTRUMENT_CANDIDATES)
     if attempts == _LIVE_CANARY_TICK_WINDOW_SECONDS or observed or all_ticks:

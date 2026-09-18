@@ -315,7 +315,9 @@ read-only startup probe found no instrument master for `.HK/.HGT/.SGT` in the
 model runtime. Build-4 proved that `.HK/.HGT/.SGT` all return accepted tick subscription IDs,
 while all three remain empty through instrument-master probe attempt 10. Subscription
 acceptance is therefore non-discriminative. Build-5 attaches bounded quote callbacks
-and publishes only normalized `instrument_tick_capabilities` evidence. After the
+and publishes only normalized `instrument_tick_capabilities` evidence. Build-5 also
+uses exact-key `get_full_tick([symbol])` as a read-only fallback when a broker QMT
+distribution cannot load subscription callbacks; aliases never satisfy this gate. After the
 broker login capability changed, exact instrument metadata observed `.SGT` as canonical
 `HK/00700` with `HSGTFlag=5`. The current build-5 gate therefore permits only the two
 explicit cases above and adds `204001.SH`/`511880.SH` to the read-only tick evidence set.

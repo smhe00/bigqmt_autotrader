@@ -402,6 +402,34 @@ def test_live_canary_subscription_preserves_synchronous_tick(monkeypatch):
         for row in bridge._tick_capabilities_payload()["candidates"]
     )
 
+
+def test_live_canary_full_tick_fallback_proves_exact_symbols(monkeypatch):
+    bridge = load_bridge()
+    bridge._STATE.instrument_tick_records = {}
+
+    class FullTickContext:
+        def get_full_tick(self, symbols):
+            symbol = symbols[0]
+            return {
+                symbol: {
+                    "stockCode": symbol,
+                    "lastPrice": 100.0,
+                    "time": 1_789_000_000_000,
+                }
+            }
+
+    monkeypatch.setattr(bridge, "_enqueue", lambda *_args: None)
+    monkeypatch.setattr(bridge, "_safe_log", lambda *_args: None)
+    monkeypatch.setattr(bridge, "flush_transport", lambda: None)
+    result = bridge._runtime_full_tick_probe(FullTickContext())
+    assert result == {"method": "get_full_tick", "attempted": 5, "observed": 5}
+    assert all(
+        row["tick_observed"] is True
+        and row["evidence_source"] == "full_tick_poll"
+        and row["evidence"]["reported_symbol"] == row["symbol"]
+        for row in bridge._tick_capabilities_payload()["candidates"]
+    )
+
 def test_live_canary_cancel_requires_exact_broker_id_and_token(monkeypatch):
     bridge = load_bridge()
     candidate = command(bridge, "CANCEL_ORDER")

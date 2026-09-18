@@ -132,7 +132,7 @@ build-4 在国金实盘 QMT 中完成只读路由探测：
 
 ## build-5 tick-evidence probe
 
-build-5 为每个候选代码注册独立 `subscribe_quote(..., callback=...)` 回调，并仅把白名单字段写入新的 `instrument_tick_capabilities` 事件。QMT callback 的标准输入按 `{code: DataFrame}` 处理；只有 callback payload 中精确存在预期 symbol，且能读取最后一条 tick，才置 `tick_observed=true`。核心判据从“subscription accepted”提升为“精确 route 的真实 tick callback 是否到达”。
+build-5 为每个候选代码注册独立 `subscribe_quote(..., callback=...)` 回调，并仅把白名单字段写入新的 `instrument_tick_capabilities` 事件。QMT callback 的标准输入按 `{code: DataFrame}` 处理；只有 callback payload 中精确存在预期 symbol，且能读取最后一条 tick，才置 `tick_observed=true`。若特定 QMT 发行版无法加载 callback，定时探测改用官方只读 `get_full_tick([exact_symbol])` 取得同一白名单证据；返回字典必须精确包含所请求 symbol，禁止别名回退。核心判据从“subscription accepted”提升为“精确 route 的真实 tick 证据是否到达”。
 
 每个候选 route 记录：
 
