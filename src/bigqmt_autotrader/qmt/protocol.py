@@ -25,6 +25,7 @@ _ALLOWED_EVENT_TYPES = frozenset(
         "command_result",
         "account_capabilities",
         "instrument_capabilities",
+        "instrument_tick_capabilities",
     }
 )
 
@@ -110,6 +111,8 @@ class QmtEvent:
             _validate_account_capabilities_payload(payload)
         elif event_type == "instrument_capabilities":
             _validate_instrument_capabilities_payload(payload)
+        elif event_type == "instrument_tick_capabilities":
+            _validate_instrument_tick_capabilities_payload(payload)
 
         return cls(
             protocol_version=protocol_version,
@@ -152,6 +155,36 @@ def _validate_instrument_capabilities_payload(payload: Mapping[str, Any]) -> Non
         or max_attempts < attempt
     ):
         raise QmtProtocolError("instrument_capabilities max_attempts must cover attempt")
+
+
+def _validate_instrument_tick_capabilities_payload(payload: Mapping[str, Any]) -> None:
+    candidates = payload.get("candidates")
+    observed_count = payload.get("observed_count")
+    window_seconds = payload.get("window_seconds")
+    final = payload.get("final")
+    if not isinstance(candidates, list) or not candidates:
+        raise QmtProtocolError("instrument_tick_capabilities candidates must be non-empty")
+    if any(not isinstance(record, Mapping) for record in candidates):
+        raise QmtProtocolError("instrument_tick_capabilities candidates must be objects")
+    counted = 0
+    for record in candidates:
+        symbol = record.get("symbol")
+        tick_observed = record.get("tick_observed")
+        callback_count = record.get("callback_count")
+        if not isinstance(symbol, str) or not symbol:
+            raise QmtProtocolError("instrument_tick_capabilities symbol must be non-empty")
+        if not isinstance(tick_observed, bool):
+            raise QmtProtocolError("instrument_tick_capabilities tick_observed must be boolean")
+        if isinstance(callback_count, bool) or not isinstance(callback_count, int) or callback_count < 0:
+            raise QmtProtocolError("instrument_tick_capabilities callback_count must be non-negative")
+        if tick_observed:
+            counted += 1
+    if isinstance(observed_count, bool) or not isinstance(observed_count, int) or observed_count != counted:
+        raise QmtProtocolError("instrument_tick_capabilities observed_count mismatch")
+    if isinstance(window_seconds, bool) or not isinstance(window_seconds, int) or window_seconds <= 0:
+        raise QmtProtocolError("instrument_tick_capabilities window_seconds must be positive")
+    if not isinstance(final, bool):
+        raise QmtProtocolError("instrument_tick_capabilities final must be boolean")
 
 
 def _validate_account_capabilities_payload(payload: Mapping[str, Any]) -> None:
