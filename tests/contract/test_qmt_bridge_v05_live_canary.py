@@ -228,9 +228,32 @@ def test_live_canary_read_only_subscription_and_delayed_probe(monkeypatch):
     assert result["probe_timer_registered"] is True
     assert timers == [("instrument_probe_tick", "1nSecond", bridge.TIMER_START)]
 
-    callbacks["00700.HGT"](
-        {"stockCode": "00700.HGT", "lastPrice": 400.0, "time": 1_789_000_000_000}
-    )
+    class FakeILoc:
+        def __getitem__(self, _index):
+            return {
+                "stockCode": "00700.HGT",
+                "lastPrice": 400.0,
+                "time": 1_789_000_000_000,
+                "volume": 12345,
+            }
+
+    class FakeFrame:
+        index = ["20260918093000"]
+        iloc = FakeILoc()
+
+    callbacks["00700.HGT"]({"00700.SGT": {"lastPrice": 400.0}})
+    mismatch_events = [
+        item for item in emitted if item[0] == "instrument_tick_capabilities"
+    ]
+    mismatch_hgt = [
+        row
+        for row in mismatch_events[-1][2]["candidates"]
+        if row["symbol"] == "00700.HGT"
+    ][0]
+    assert mismatch_hgt["tick_observed"] is False
+    assert mismatch_hgt["evidence"]["exact_symbol"] is False
+
+    callbacks["00700.HGT"]({"00700.HGT": FakeFrame()})
     tick_events = [item for item in emitted if item[0] == "instrument_tick_capabilities"]
     assert tick_events
     hgt = [
@@ -239,9 +262,13 @@ def test_live_canary_read_only_subscription_and_delayed_probe(monkeypatch):
         if row["symbol"] == "00700.HGT"
     ][0]
     assert hgt["tick_observed"] is True
-    assert hgt["callback_count"] == 1
+    assert hgt["callback_count"] == 2
     assert hgt["evidence"]["requested_symbol"] == "00700.HGT"
+    assert hgt["evidence"]["reported_symbol"] == "00700.HGT"
+    assert hgt["evidence"]["exact_symbol"] is True
     assert hgt["evidence"]["raw_symbol"] == "00700.HGT"
+    assert hgt["evidence"]["tick_index"] == "20260918093000"
+    assert hgt["evidence"]["last_price"] == "400.0"
 
     for _ in range(10):
         bridge.instrument_probe_tick(context)
