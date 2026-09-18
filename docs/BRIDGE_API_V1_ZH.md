@@ -253,6 +253,7 @@ bridge_ready
 bridge_error
 account_capabilities
 instrument_capabilities
+instrument_tick_capabilities
 snapshot
 account
 position
