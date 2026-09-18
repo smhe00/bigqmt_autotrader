@@ -128,7 +128,7 @@ matching bridge_ready.terminal_instance_id
 
 ### 4.1 Production SHADOW
 
-`galaxy` 和 `guojin` production artifacts 必须保持：
+`galaxy` 和通用 production artifact 必须保持：
 
 ```text
 execution_mode = SHADOW
@@ -137,7 +137,7 @@ live_submit = false
 live_cancel = false
 ```
 
-并且 source-level static audit 必须证明不存在 broker mutation call surface。
+并且 source-level static audit 必须证明这些 artifact 不存在 broker mutation call surface。
 
 ### 4.2 SIMULATION_CALIBRATION
 
@@ -154,6 +154,22 @@ live_cancel = true
 这表示“允许调用模拟账户 QMT mutation API”，**不是生产实盘授权**。
 
 Host 和 publisher 仍需分别显式授权 simulation calibration。
+
+### 4.3 Guojin LIVE_CANARY
+
+`guojin` 当前存在一个经过 P6 独立 Gate 的生产账户例外：
+
+```text
+execution_mode = LIVE_CANARY
+simulation_only = false
+trading_enabled = true
+live_submit = true
+live_cancel = true
+```
+
+该模式不是 general LIVE。它必须同时固定账户指纹、当前 QMT session、每 session submit/cancel fuse，并由独立 publisher 的精确确认字符串授权。当前 canary 仍被固定 symbol/side/quantity/price 与 instrument preflight 限制。
+
+P6 build-5 新增的 `instrument_tick_capabilities` 仅用于只读 route 诊断，不改变上述 mutation authority。
 
 ## 5. Host → Bridge：Command API
 
@@ -262,7 +278,17 @@ deal
 command_result
 ```
 
-### 6.1 session / sequence
+### 6.1 Route diagnostic events
+
+`instrument_capabilities` 表示证券主数据只读探测；`instrument_tick_capabilities` 表示订阅 route 的真实行情 callback 证据。两者都是 control-plane / diagnostic event：
+
+- 不属于 BrokerEvidence；
+- 不推进 OMS order lifecycle；
+- 不自动授予 submit/cancel 权限；
+- subscription ID 成功不能证明 route 可交易；
+- build-5 只有在 callback payload 精确包含预期 symbol 时才把该 route 标为 `tick_observed=true`。
+
+### 6.2 session / sequence
 
 Host 对每个已选择 instance 固定：
 
@@ -418,7 +444,7 @@ BROKER_MUTATION_UNKNOWN
 3. 所有 TLA+/TLC model 无 counterexample；
 4. broker side-effect static audit 通过；
 5. standalone QMT deployment build check 通过；
-6. production `galaxy/guojin` mutation call surface 仍为零，除非未来经过独立、明确的生产授权 Gate。
+6. Galaxy/generic production mutation call surface 必须保持为零；Guojin 仅允许已通过独立 Gate 的 fingerprint-pinned LIVE_CANARY surface，任何权限扩大都必须经过新的明确 Gate。
 
 API v1 现在定义 `LIVE_CANARY` 的传输语义，但协议存在不等于自动授权。只有
 manifest 与 `bridge_ready` 同时固定账户指纹、每 session 一次 submit/cancel 上限，
