@@ -88,7 +88,7 @@ def called_names(path: Path) -> list[tuple[str, str]]:
 
 def test_live_canary_artifact_has_exact_mutation_surface_and_identity():
     bridge = load_bridge()
-    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-4"
+    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-5"
     assert bridge.EXECUTION_MODE == "LIVE_CANARY"
     assert bridge.TERMINAL_INSTANCE_ID == "guojin"
     assert bridge.SIMULATION_ONLY is False
@@ -195,20 +195,20 @@ def test_live_canary_runtime_probe_reports_all_market_routes():
 def test_live_canary_read_only_subscription_and_delayed_probe(monkeypatch):
     bridge = load_bridge()
     subscribed = []
+    callbacks = {}
     timers = []
     emitted = []
 
     class ProbeContext:
-        def subscribe_quote(self, symbol, period):
-            subscribed.append((symbol, period))
+        def subscribe_quote(self, symbol, period, dividend_type="none", callback=None):
+            subscribed.append((symbol, period, dividend_type))
+            callbacks[symbol] = callback
             return len(subscribed)
 
         def run_time(self, callback, period, start):
             timers.append((callback, period, start))
 
-        def get_instrument_detail(self, symbol):
-            if symbol == "00700.SGT":
-                return {"ExchangeID": "SGT", "InstrumentID": "00700"}
+        def get_instrument_detail(self, _symbol):
             return {}
 
     monkeypatch.setattr(bridge, "_enqueue", lambda *args: emitted.append(args))
@@ -218,20 +218,42 @@ def test_live_canary_read_only_subscription_and_delayed_probe(monkeypatch):
 
     result = bridge._runtime_instrument_subscribe(context)
     assert subscribed == [
-        ("00700.HK", "tick"),
-        ("00700.HGT", "tick"),
-        ("00700.SGT", "tick"),
+        ("00700.HK", "tick", "none"),
+        ("00700.HGT", "tick", "none"),
+        ("00700.SGT", "tick", "none"),
     ]
     assert all(row["accepted"] for row in result["candidates"])
+    assert all(row["callback_registered"] for row in result["candidates"])
+    assert result["tick_evidence_required"] is True
     assert result["probe_timer_registered"] is True
     assert timers == [("instrument_probe_tick", "1nSecond", bridge.TIMER_START)]
 
-    bridge.instrument_probe_tick(context)
-    assert bridge._STATE.instrument_probe_attempts == 10
-    assert emitted[0][0:2] == ("instrument_capabilities", "active_query")
-    assert emitted[0][2]["attempt"] == 1
-    assert emitted[0][2]["candidates"][2]["observed"] is True
+    callbacks["00700.HGT"](
+        {"stockCode": "00700.HGT", "lastPrice": 400.0, "time": 1_789_000_000_000}
+    )
+    tick_events = [item for item in emitted if item[0] == "instrument_tick_capabilities"]
+    assert tick_events
+    hgt = [
+        row
+        for row in tick_events[-1][2]["candidates"]
+        if row["symbol"] == "00700.HGT"
+    ][0]
+    assert hgt["tick_observed"] is True
+    assert hgt["callback_count"] == 1
+    assert hgt["evidence"]["requested_symbol"] == "00700.HGT"
+    assert hgt["evidence"]["raw_symbol"] == "00700.HGT"
 
+    for _ in range(10):
+        bridge.instrument_probe_tick(context)
+    final_tick_events = [
+        item
+        for item in emitted
+        if item[0] == "instrument_tick_capabilities" and item[2]["final"] is True
+    ]
+    assert final_tick_events
+    assert final_tick_events[-1][2]["observed_count"] == 1
+    assert bridge._STATE.simulation_submit_calls == 0
+    assert bridge._STATE.simulation_cancel_calls == 0
 
 def test_live_canary_cancel_requires_exact_broker_id_and_token(monkeypatch):
     bridge = load_bridge()
