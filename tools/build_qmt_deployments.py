@@ -129,7 +129,19 @@ def _execute_order_command(command, ContextInfo):
 '''
 
 LIVE_CANARY_EXECUTOR = '''_LIVE_CANARY_INSTRUMENT_CANDIDATES = ("00700.HK", "00700.HGT", "00700.SGT")
-_LIVE_CANARY_TICK_WINDOW_SECONDS = 10
+_LIVE_CANARY_TICK_FIELDS = (
+    "time",
+    "timetag",
+    "lastPrice",
+    "lastClose",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
+    "stockStatus",
+)
 
 
 def _runtime_instrument_probe(ContextInfo):
@@ -172,175 +184,144 @@ def _runtime_instrument_probe(ContextInfo):
     return {"candidates": records}
 
 
-def _tick_state():
-    records = getattr(_STATE, "instrument_tick_records", None)
-    if not isinstance(records, dict):
-        records = {}
-        _STATE.instrument_tick_records = records
-    return records
-
-
-def _tick_scalar(value):
+def _simple_tick_value(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    return None
+    try:
+        scalar = value.item()
+        if scalar is None or isinstance(scalar, (str, int, float, bool)):
+            return scalar
+    except Exception:
+        pass
+    return _text(value)
 
 
-def _normalize_tick_evidence(symbol, data):
-    row = data
-    if isinstance(data, dict) and symbol in data:
-        row = data.get(symbol)
+def _normalize_live_canary_tick(expected_symbol, datas):
     payload = {
-        "requested_symbol": symbol,
-        "data_type": type(row).__name__,
+        "symbol": expected_symbol,
+        "reported_symbol": None,
+        "tick_observed": False,
+        "tick_index": None,
+        "fields": {},
     }
-    if not isinstance(row, dict):
+    if not isinstance(datas, dict):
+        payload["error"] = "TICK_CALLBACK_INVALID_RESULT"
         return payload
-    raw_symbol = (
-        row.get("stockCode")
-        or row.get("stock_code")
-        or row.get("code")
-        or row.get("InstrumentID")
-    )
-    exchange = row.get("ExchangeID") or row.get("exchangeID") or row.get("market")
-    tick_time = row.get("time") or row.get("timetag") or row.get("timestamp")
-    last_price = row.get("lastPrice")
-    if last_price is None:
-        last_price = row.get("last_price")
-    volume = row.get("volume")
-    amount = row.get("amount")
-    payload.update(
-        {
-            "raw_symbol": _text(_tick_scalar(raw_symbol)),
-            "exchange_id": _text(_tick_scalar(exchange)),
-            "tick_time": _tick_scalar(tick_time),
-            "last_price": _decimal_text(_tick_scalar(last_price)),
-            "volume": _decimal_text(_tick_scalar(volume)),
-            "amount": _decimal_text(_tick_scalar(amount)),
-        }
-    )
-    return payload
-
-
-def _tick_capabilities_payload(final=False):
-    state = _tick_state()
-    candidates = []
-    observed_count = 0
-    for symbol in _LIVE_CANARY_INSTRUMENT_CANDIDATES:
-        record = dict(
-            state.get(
-                symbol,
-                {
-                    "symbol": symbol,
-                    "subscription_id": None,
-                    "accepted": False,
-                    "callback_registered": False,
-                    "tick_observed": False,
-                    "callback_count": 0,
-                },
-            )
-        )
-        if record.get("tick_observed"):
-            observed_count += 1
-        candidates.append(record)
-    return {
-        "candidates": candidates,
-        "observed_count": observed_count,
-        "window_seconds": _LIVE_CANARY_TICK_WINDOW_SECONDS,
-        "final": bool(final),
-    }
-
-
-def _publish_tick_capabilities(source, final=False):
-    payload = _tick_capabilities_payload(final=final)
-    _enqueue("instrument_tick_capabilities", source, payload)
-    _safe_log("instrument_tick_capabilities", payload)
-    flush_transport()
-    return payload
-
-
-def _record_tick_evidence(symbol, data):
-    state = _tick_state()
-    record = state.setdefault(
-        symbol,
-        {
-            "symbol": symbol,
-            "subscription_id": None,
-            "accepted": False,
-            "callback_registered": True,
-            "tick_observed": False,
-            "callback_count": 0,
-        },
-    )
-    first = not record.get("tick_observed")
-    record["callback_count"] = int(record.get("callback_count") or 0) + 1
-    record["tick_observed"] = True
-    record["last_callback_ms"] = int(time.time() * 1000)
-    record["evidence"] = _normalize_tick_evidence(symbol, data)
-    if first:
-        _publish_tick_capabilities("quote_callback", final=False)
-
-
-def _tick_callback(symbol):
-    def callback(data):
+    if expected_symbol not in datas:
+        payload["error"] = "TICK_CALLBACK_SYMBOL_MISMATCH"
         try:
-            _record_tick_evidence(symbol, data)
-        except Exception as exc:
-            _runtime_error(
-                "INSTRUMENT_TICK_CALLBACK_FAILED",
-                exc,
-                {"symbol": symbol},
+            payload["reported_symbols"] = sorted(
+                [_text(key) for key in datas.keys() if _text(key)]
             )
-    return callback
+        except Exception:
+            payload["reported_symbols"] = []
+        return payload
+    frame = datas.get(expected_symbol)
+    row = None
+    tick_index = None
+    try:
+        if hasattr(frame, "iloc") and hasattr(frame, "index") and len(frame.index) > 0:
+            row = frame.iloc[-1]
+            tick_index = frame.index[-1]
+        elif isinstance(frame, dict):
+            row = frame
+    except Exception as exc:
+        payload["error"] = "TICK_CALLBACK_ROW_EXCEPTION"
+        payload["error_type"] = type(exc).__name__
+        return payload
+    if row is None:
+        payload["error"] = "TICK_CALLBACK_EMPTY"
+        return payload
+    fields = {}
+    for field in _LIVE_CANARY_TICK_FIELDS:
+        try:
+            value = row.get(field) if hasattr(row, "get") else None
+            if value is not None:
+                fields[field] = _simple_tick_value(value)
+        except Exception:
+            continue
+    payload["reported_symbol"] = expected_symbol
+    payload["tick_observed"] = True
+    payload["tick_index"] = _simple_tick_value(tick_index)
+    payload["fields"] = fields
+    return payload
+
+
+def _record_live_canary_tick(expected_symbol, datas):
+    observed = getattr(_STATE, "live_canary_tick_observed", None)
+    if not isinstance(observed, set):
+        observed = set()
+        _STATE.live_canary_tick_observed = observed
+    if expected_symbol in observed:
+        return
+    counts = getattr(_STATE, "live_canary_tick_callback_counts", None)
+    if not isinstance(counts, dict):
+        counts = {}
+        _STATE.live_canary_tick_callback_counts = counts
+    count = counts.get(expected_symbol, 0) + 1
+    counts[expected_symbol] = count
+    payload = _normalize_live_canary_tick(expected_symbol, datas)
+    payload["callback_count"] = count
+    if payload.get("tick_observed"):
+        observed.add(expected_symbol)
+    if payload.get("tick_observed") or count in (1, 10):
+        _enqueue("instrument_tick_capabilities", "quote_callback", payload)
+        _safe_log("instrument_tick_capabilities", payload)
+        flush_transport()
+
+
+def _on_live_canary_hk_quote(datas):
+    _record_live_canary_tick("00700.HK", datas)
+
+
+def _on_live_canary_hgt_quote(datas):
+    _record_live_canary_tick("00700.HGT", datas)
+
+
+def _on_live_canary_sgt_quote(datas):
+    _record_live_canary_tick("00700.SGT", datas)
+
+
+_LIVE_CANARY_QUOTE_CALLBACKS = {
+    "00700.HK": _on_live_canary_hk_quote,
+    "00700.HGT": _on_live_canary_hgt_quote,
+    "00700.SGT": _on_live_canary_sgt_quote,
+}
 
 
 def _runtime_instrument_subscribe(ContextInfo):
     subscribe = getattr(ContextInfo, "subscribe_quote", None)
-    state = _tick_state()
     records = []
     for symbol in _LIVE_CANARY_INSTRUMENT_CANDIDATES:
         record = {
             "symbol": symbol,
             "method": "subscribe_quote",
             "accepted": False,
-            "subscription_id": None,
-            "callback_registered": False,
-            "tick_observed": False,
-            "callback_count": 0,
+            "callback": _LIVE_CANARY_QUOTE_CALLBACKS[symbol].__name__,
         }
-        state[symbol] = dict(record)
         if not callable(subscribe):
             record["error"] = "SUBSCRIBE_QUOTE_UNAVAILABLE"
         else:
-            callback = _tick_callback(symbol)
             try:
-                subscription_id = subscribe(symbol, "tick", "none", callback)
-                record["callback_registered"] = True
-            except TypeError:
-                try:
-                    subscription_id = subscribe(symbol, "tick", callback=callback)
-                    record["callback_registered"] = True
-                except Exception as exc:
-                    subscription_id = None
-                    record["error"] = "SUBSCRIBE_QUOTE_CALLBACK_EXCEPTION"
-                    record["error_type"] = type(exc).__name__
-            except Exception as exc:
-                subscription_id = None
-                record["error"] = "SUBSCRIBE_QUOTE_CALLBACK_EXCEPTION"
-                record["error_type"] = type(exc).__name__
-            if isinstance(subscription_id, bool):
-                normalized_id = None
-            else:
-                try:
-                    normalized_id = int(subscription_id)
-                except Exception:
+                subscription_id = subscribe(
+                    symbol,
+                    "tick",
+                    "none",
+                    _LIVE_CANARY_QUOTE_CALLBACKS[symbol],
+                )
+                if isinstance(subscription_id, bool):
                     normalized_id = None
-            record["subscription_id"] = normalized_id
-            record["accepted"] = normalized_id is not None and normalized_id > 0
-        current = state.get(symbol, {})
-        current.update(record)
-        state[symbol] = current
-        records.append(dict(current))
+                else:
+                    try:
+                        normalized_id = int(subscription_id)
+                    except Exception:
+                        normalized_id = None
+                record["subscription_id"] = normalized_id
+                record["accepted"] = normalized_id is not None and normalized_id > 0
+            except Exception as exc:
+                record["error"] = "SUBSCRIBE_QUOTE_EXCEPTION"
+                record["error_type"] = type(exc).__name__
+        records.append(record)
     _STATE.instrument_probe_attempts = 0
     _STATE.instrument_probe_timer_registered = _register_timer(
         ContextInfo, "instrument_probe_tick", "1nSecond"
@@ -348,34 +329,27 @@ def _runtime_instrument_subscribe(ContextInfo):
     return {
         "candidates": records,
         "probe_timer_registered": _STATE.instrument_probe_timer_registered,
-        "max_probe_attempts": _LIVE_CANARY_TICK_WINDOW_SECONDS,
-        "tick_evidence_required": True,
+        "max_probe_attempts": 10,
+        "tick_evidence_mode": "callback_exact_symbol_once",
     }
 
 
 def instrument_probe_tick(ContextInfo):
     attempts = getattr(_STATE, "instrument_probe_attempts", 0)
-    if attempts >= _LIVE_CANARY_TICK_WINDOW_SECONDS:
+    if attempts >= 10:
         return
     attempts += 1
     _STATE.instrument_probe_attempts = attempts
     payload = _runtime_instrument_probe(ContextInfo)
     payload["attempt"] = attempts
-    payload["max_attempts"] = _LIVE_CANARY_TICK_WINDOW_SECONDS
+    payload["max_attempts"] = 10
     observed = any(record.get("observed") for record in payload["candidates"])
-    if attempts == 1 or attempts == _LIVE_CANARY_TICK_WINDOW_SECONDS or observed:
+    if attempts == 1 or attempts == 10 or observed:
         _enqueue("instrument_capabilities", "active_query", payload)
         _safe_log("instrument_capabilities", payload)
         flush_transport()
-    tick_payload = _tick_capabilities_payload(final=False)
-    all_ticks = tick_payload["observed_count"] == len(_LIVE_CANARY_INSTRUMENT_CANDIDATES)
-    if attempts == _LIVE_CANARY_TICK_WINDOW_SECONDS or observed or all_ticks:
-        _publish_tick_capabilities(
-            "probe_window",
-            final=(attempts == _LIVE_CANARY_TICK_WINDOW_SECONDS or all_ticks),
-        )
-    if observed or all_ticks:
-        _STATE.instrument_probe_attempts = _LIVE_CANARY_TICK_WINDOW_SECONDS
+    if observed:
+        _STATE.instrument_probe_attempts = 10
 
 
 def _live_canary_symbol(value):
