@@ -1236,7 +1236,7 @@ def _runtime_instrument_subscribe(ContextInfo):
         else:
             callback = _tick_callback(symbol)
             try:
-                subscription_id = subscribe(symbol, "tick", "none", callback)
+                subscription_id = subscribe(symbol, "tick", "none", callback=callback)
                 record["callback_registered"] = True
             except TypeError:
                 try:
