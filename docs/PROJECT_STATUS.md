@@ -1,6 +1,6 @@
 # Project Status
 
-Updated: 2026-09-17
+Updated: 2026-09-18
 
 ## 1. Summary
 
@@ -22,8 +22,8 @@ Updated: 2026-09-17
 | Guojin simulation raw status mapper | **PASS — `qmt-guojin-sim-20260917-v1`** |
 | Production Guojin / Galaxy mapper | **NOT IMPLEMENTED / NOT AUTHORIZED** |
 | Production-account live trading allowed | **NO** |
-| Guojin LIVE_CANARY implementation | **BUILD-1 LOCAL REJECT + BUILD-2 PREFLIGHT FAIL-CLOSE VERIFIED; BUILD-3 READ-ONLY ROUTE PROBE READY** |
-| Production Guojin/Galaxy broker mutation call surface | **ZERO** |
+| Guojin LIVE_CANARY implementation | **BUILD-4 READ-ONLY RESULT RECORDED; BUILD-5 REAL-TICK EVIDENCE PROBE READY** |
+| Production broker mutation call surface | **GUOJIN: ONE PINNED LIVE_CANARY SURFACE; GALAXY/GENERIC: ZERO** |
 | QMT submit/cancel implementation | **GUOJIN_SIM + PINNED GUOJIN LIVE_CANARY** |
 | P2 execution-authority policy | **SIMULATION only** |
 
@@ -307,9 +307,7 @@ SGT/00700 instrument-detail preflight before `passorder`. Its first authorized
 command failed that preflight closed: `REJECTED_SAFETY_GATE`,
 `live_side_effect=false`, zero `passorder` calls and no ORDER/DEAL. Build-3's
 read-only startup probe found no instrument master for `.HK/.HGT/.SGT` in the
-model runtime. Build-4 adds read-only tick subscriptions and a bounded ten-second
-delayed probe, publishing normalized evidence as `instrument_capabilities` while
-leaving the submit preflight fail-closed.
+model runtime. Build-4 proved that `.HK/.HGT/.SGT` all return accepted tick subscription IDs,\nwhile all three remain empty through instrument-master probe attempt 10. Subscription\nacceptance is therefore non-discriminative. Build-5 attaches bounded quote callbacks\nand publishes only normalized `instrument_tick_capabilities` evidence, leaving the\nsubmit preflight and mutation surface unchanged.
 
 ### Still pending
 
@@ -374,7 +372,7 @@ This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 Guojin LIVE_CANARY build-1 local rejection and build-2 instrument-preflight fail-close are verified; build-3 found no instrument master for any candidate route, and build-4 adds bounded read-only subscription plus delayed route discovery. Galaxy and generic deployments remain mutation-free.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 build-4 proved subscription acceptance is non-discriminative and instrument master is unavailable for all three Tencent route candidates; build-5 now collects bounded real-tick callback evidence. Guojin retains only the single pinned LIVE_CANARY mutation surface; Galaxy and generic deployments remain mutation-free.**
 
 Next safety checkpoint:
 
