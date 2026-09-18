@@ -1058,36 +1058,81 @@ def _tick_state():
 def _tick_scalar(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    return None
+    try:
+        scalar = value.item()
+        if scalar is None or isinstance(scalar, (str, int, float, bool)):
+            return scalar
+    except Exception:
+        pass
+    return _text(value)
+
+
+def _tick_row(data):
+    if isinstance(data, dict):
+        return data, None
+    try:
+        if hasattr(data, "iloc") and hasattr(data, "index") and len(data.index) > 0:
+            return data.iloc[-1], data.index[-1]
+    except Exception:
+        return None, None
+    return None, None
 
 
 def _normalize_tick_evidence(symbol, data):
-    row = data
-    if isinstance(data, dict) and symbol in data:
-        row = data.get(symbol)
     payload = {
         "requested_symbol": symbol,
-        "data_type": type(row).__name__,
+        "reported_symbol": None,
+        "exact_symbol": False,
+        "data_type": type(data).__name__,
     }
-    if not isinstance(row, dict):
+    if not isinstance(data, dict):
+        payload["error"] = "TICK_CALLBACK_INVALID_RESULT"
+        return payload
+    if symbol not in data:
+        payload["error"] = "TICK_CALLBACK_SYMBOL_MISMATCH"
+        try:
+            payload["reported_symbols"] = sorted(
+                [_text(key) for key in data.keys() if _text(key)]
+            )
+        except Exception:
+            payload["reported_symbols"] = []
+        return payload
+    frame = data.get(symbol)
+    payload["reported_symbol"] = symbol
+    payload["data_type"] = type(frame).__name__
+    row, tick_index = _tick_row(frame)
+    if row is None:
+        payload["error"] = "TICK_CALLBACK_EMPTY"
         return payload
     raw_symbol = (
         row.get("stockCode")
         or row.get("stock_code")
         or row.get("code")
         or row.get("InstrumentID")
+        if hasattr(row, "get")
+        else None
     )
-    exchange = row.get("ExchangeID") or row.get("exchangeID") or row.get("market")
-    tick_time = row.get("time") or row.get("timetag") or row.get("timestamp")
-    last_price = row.get("lastPrice")
-    if last_price is None:
+    exchange = (
+        row.get("ExchangeID") or row.get("exchangeID") or row.get("market")
+        if hasattr(row, "get")
+        else None
+    )
+    tick_time = (
+        row.get("time") or row.get("timetag") or row.get("timestamp")
+        if hasattr(row, "get")
+        else None
+    )
+    last_price = row.get("lastPrice") if hasattr(row, "get") else None
+    if last_price is None and hasattr(row, "get"):
         last_price = row.get("last_price")
-    volume = row.get("volume")
-    amount = row.get("amount")
+    volume = row.get("volume") if hasattr(row, "get") else None
+    amount = row.get("amount") if hasattr(row, "get") else None
     payload.update(
         {
+            "exact_symbol": True,
             "raw_symbol": _text(_tick_scalar(raw_symbol)),
             "exchange_id": _text(_tick_scalar(exchange)),
+            "tick_index": _tick_scalar(tick_index),
             "tick_time": _tick_scalar(tick_time),
             "last_price": _decimal_text(_tick_scalar(last_price)),
             "volume": _decimal_text(_tick_scalar(volume)),
@@ -1147,12 +1192,14 @@ def _record_tick_evidence(symbol, data):
             "callback_count": 0,
         },
     )
-    first = not record.get("tick_observed")
     record["callback_count"] = int(record.get("callback_count") or 0) + 1
-    record["tick_observed"] = True
     record["last_callback_ms"] = int(time.time() * 1000)
-    record["evidence"] = _normalize_tick_evidence(symbol, data)
-    if first:
+    evidence = _normalize_tick_evidence(symbol, data)
+    record["evidence"] = evidence
+    first_observed = not record.get("tick_observed") and evidence.get("exact_symbol") is True
+    if evidence.get("exact_symbol") is True:
+        record["tick_observed"] = True
+    if first_observed or record["callback_count"] == 1:
         _publish_tick_capabilities("quote_callback", final=False)
 
 
