@@ -30,8 +30,8 @@ LIVE_CANCEL_ENABLED = True
 SIMULATION_ONLY = False
 AUTHORIZED_ACCOUNT_FINGERPRINT = "sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5"
 SIMULATION_MAX_ORDER_QUANTITY = 100
-SIMULATION_MAX_SUBMIT_CALLS = 1
-SIMULATION_MAX_CANCEL_CALLS = 1
+SIMULATION_MAX_SUBMIT_CALLS = 2
+SIMULATION_MAX_CANCEL_CALLS = 2
 
 import hashlib
 import json
@@ -828,8 +828,8 @@ def _bind_runtime(ContextInfo):
                 EXECUTION_MODE == "LIVE_CANARY"
                 and SIMULATION_ONLY is False
                 and _spool_instance_id() == "guojin"
-                and SIMULATION_MAX_SUBMIT_CALLS == 1
-                and SIMULATION_MAX_CANCEL_CALLS == 1
+                and SIMULATION_MAX_SUBMIT_CALLS == 2
+                and SIMULATION_MAX_CANCEL_CALLS == 2
             )
         )
         if not mutation_gate_valid:
@@ -1003,7 +1003,14 @@ def _reject_claimed(claimed_path, name, code, exc=None):
     _runtime_error(code, exc, {"file": name})
 
 
-_LIVE_CANARY_INSTRUMENT_CANDIDATES = ("00700.HK", "00700.HGT", "00700.SGT")
+_LIVE_CANARY_INSTRUMENT_CANDIDATES = (
+    "204001.SH",
+    "511880.SH",
+    "00700.HK",
+    "00700.HGT",
+    "00700.SGT",
+)
+_LIVE_CANARY_MUTATION_SYMBOLS = ("204001.SH", "00700.SGT")
 _LIVE_CANARY_TICK_WINDOW_SECONDS = 10
 
 
@@ -1259,8 +1266,19 @@ def _runtime_instrument_subscribe(ContextInfo):
                     normalized_id = None
             record["subscription_id"] = normalized_id
             record["accepted"] = normalized_id is not None and normalized_id > 0
+        # A QMT subscription may invoke its callback synchronously. Preserve
+        # any tick evidence written during subscribe_quote instead of
+        # overwriting it with the pre-call zero values in ``record``.
         current = state.get(symbol, {})
-        current.update(record)
+        current["symbol"] = symbol
+        current["method"] = record["method"]
+        current["accepted"] = record["accepted"]
+        current["subscription_id"] = record["subscription_id"]
+        current["callback_registered"] = record["callback_registered"]
+        if "error" in record:
+            current["error"] = record["error"]
+        if "error_type" in record:
+            current["error_type"] = record["error_type"]
         state[symbol] = current
         records.append(dict(current))
     _STATE.instrument_probe_attempts = 0
@@ -1302,7 +1320,7 @@ def instrument_probe_tick(ContextInfo):
 
 def _live_canary_symbol(value):
     value = _text(value)
-    if value != "00700.SGT":
+    if value not in _LIVE_CANARY_MUTATION_SYMBOLS:
         return None
     return value
 
@@ -1318,11 +1336,62 @@ def _live_canary_instrument_preflight(ContextInfo, symbol):
         raise CommandError("live canary instrument preflight failed")
     exchange = _text(details.get("ExchangeID") or details.get("ExchangeCode"))
     instrument = _text(details.get("InstrumentID") or details.get("InstrumentCode"))
-    if exchange != "SGT":
-        raise CommandError("live canary instrument exchange mismatch")
-    if instrument != "00700":
-        raise CommandError("live canary instrument code mismatch")
+    if symbol == "204001.SH":
+        if exchange != "SH" or instrument != "204001":
+            raise CommandError("live canary GC001 instrument identity mismatch")
+    elif symbol == "00700.SGT":
+        try:
+            hsgt_flag = int(details.get("HSGTFlag"))
+        except Exception:
+            hsgt_flag = None
+        if exchange != "HK" or instrument != "00700" or hsgt_flag not in (3, 5):
+            raise CommandError("live canary Tencent Stock Connect identity mismatch")
+        if "SHENGANGTONG" not in _STATE.detected_account_types:
+            raise CommandError("live canary Shenzhen Stock Connect account unavailable")
     return details
+
+
+def _live_canary_trade_window_open(symbol):
+    now = time.localtime()
+    if now.tm_wday >= 5:
+        return False
+    minutes = now.tm_hour * 60 + now.tm_min
+    if symbol == "204001.SH":
+        return (570 <= minutes <= 680) or (780 <= minutes <= 920)
+    return (570 <= minutes <= 710) or (780 <= minutes <= 950)
+
+
+def _live_canary_cash_preflight():
+    query = globals().get("get_trade_detail_data")
+    if not callable(query):
+        raise CommandError("live canary account query unavailable")
+    rows = query(_STATE.account_id, _STATE.account_type, "account")
+    if rows is None:
+        raise CommandError("live canary account query returned None")
+    rows = list(rows)
+    if len(rows) != 1:
+        raise CommandError("live canary account query is not singular")
+    try:
+        available_cash = float(_get(rows[0], "m_dAvailable"))
+    except Exception:
+        raise CommandError("live canary available cash unavailable")
+    return available_cash
+
+
+def _live_canary_tick_price(symbol):
+    record = _tick_state().get(symbol)
+    if not isinstance(record, dict) or record.get("tick_observed") is not True:
+        raise CommandError("live canary exact-symbol tick evidence unavailable")
+    evidence = record.get("evidence")
+    if not isinstance(evidence, dict) or evidence.get("exact_symbol") is not True:
+        raise CommandError("live canary exact-symbol tick evidence invalid")
+    try:
+        last_price = float(evidence.get("last_price"))
+    except Exception:
+        raise CommandError("live canary last price unavailable")
+    if last_price <= 0.0:
+        raise CommandError("live canary last price invalid")
+    return last_price
 
 
 def _live_canary_cancel_target(command):
@@ -1365,6 +1434,8 @@ def _execute_order_command(command, ContextInfo):
         or payload.get("expected_qmt_session_id") != _STATE.session_id
     ):
         raise CommandError("missing current-session live canary authorization")
+    if getattr(_STATE, "live_canary_halted", False):
+        raise CommandError("live canary session halted after unknown mutation")
 
     command_type = command.get("command_type")
     if command_type == "SUBMIT_LIMIT":
@@ -1377,13 +1448,39 @@ def _execute_order_command(command, ContextInfo):
             price = float(payload.get("limit_price"))
         except Exception:
             raise CommandError("invalid live canary limit price")
-        if symbol is None or side != "BUY" or quantity != 100:
-            raise CommandError("live canary permits only 00700.SGT BUY 100")
-        if price != 1.0:
-            raise CommandError("live canary limit price must equal 1.00 HKD")
+        if symbol is None:
+            raise CommandError("unsupported live canary symbol")
+        case_id = "GC001_CANCEL" if symbol == "204001.SH" else "TENCENT_FUNDS"
+        submitted_cases = getattr(_STATE, "live_canary_submitted_cases", set())
+        if case_id in submitted_cases:
+            raise CommandError("live canary case already submitted")
+        if not _live_canary_trade_window_open(symbol):
+            raise CommandError("live canary trading window is closed")
         _live_canary_instrument_preflight(ContextInfo, symbol)
+        last_price = _live_canary_tick_price(symbol)
+        available_cash = _live_canary_cash_preflight()
+        if symbol == "204001.SH":
+            if side != "SELL" or quantity != 10 or price != 100.0:
+                raise CommandError("live canary permits GC001 SELL 10 at 100.000")
+            if available_cash < 1000.0:
+                raise CommandError("live canary requires at least 1000 CNY available cash")
+            op_type = 24
+        else:
+            if side != "BUY" or quantity != 100 or not (100.0 <= price <= 1000.0):
+                raise CommandError("live canary permits Tencent BUY 100 at guarded live price")
+            if price < last_price * 0.98 or price > last_price * 1.02:
+                raise CommandError("live canary Tencent price is outside exact tick guard")
+            if available_cash >= price * quantity * 0.5:
+                raise CommandError("live canary Tencent insufficient-funds condition absent")
+            op_type = 23
+        submitted_cases.add(case_id)
+        _STATE.live_canary_submitted_cases = submitted_cases
+        # Reserve the case and session quota before crossing the broker API
+        # boundary. If passorder raises, the outer command handler marks the
+        # result UNKNOWN and permanently halts this bridge session.
+        _STATE.simulation_submit_calls += 1
         passorder(
-            23,
+            op_type,
             1101,
             _STATE.account_id,
             symbol,
@@ -1395,7 +1492,6 @@ def _execute_order_command(command, ContextInfo):
             command.get("broker_token"),
             ContextInfo,
         )
-        _STATE.simulation_submit_calls += 1
         return "LIVE_CANARY_SUBMIT_CALL_RETURNED", True
 
     if command_type == "CANCEL_ORDER":
@@ -1460,6 +1556,8 @@ def _process_claimed(claimed_path, name, ContextInfo):
         except Exception as exc:
             # Broker APIs are asynchronous. An exception cannot prove that no
             # mutation escaped, so fail to UNKNOWN and never retry.
+            if EXECUTION_MODE == "LIVE_CANARY":
+                _STATE.live_canary_halted = True
             target = os.path.join(_command_dir("unknown"), name)
             _atomic_move(claimed_path, target)
             _STATE.commands_unknown += 1

@@ -1055,6 +1055,8 @@ def _process_claimed(claimed_path, name, ContextInfo):
         except Exception as exc:
             # Broker APIs are asynchronous. An exception cannot prove that no
             # mutation escaped, so fail to UNKNOWN and never retry.
+            if EXECUTION_MODE == "LIVE_CANARY":
+                _STATE.live_canary_halted = True
             target = os.path.join(_command_dir("unknown"), name)
             _atomic_move(claimed_path, target)
             _STATE.commands_unknown += 1

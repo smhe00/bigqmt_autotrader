@@ -140,7 +140,12 @@ live_submit=False
 live_cancel=False
 ```
 
-Guojin is the sole bounded exception: fingerprint-pinned, current-session-pinned, one submit and one cancel per session, with fixed canary symbol/side/quantity/price and fail-closed instrument preflight. This does not grant general production live-trading authority.
+Guojin is the sole bounded exception: fingerprint-pinned and current-session-pinned,
+with two named submit cases (GC001 cancel calibration and Tencent insufficient-funds
+calibration), each usable once, plus two exact-token cancel reserves. `511880.SH` is
+probe-only in this build. Every mutation remains fail-closed behind exact-symbol tick,
+instrument, account, cash and trading-window preflights. This does not grant general
+production live-trading authority.
 
 Command spool:
 
@@ -310,12 +315,14 @@ read-only startup probe found no instrument master for `.HK/.HGT/.SGT` in the
 model runtime. Build-4 proved that `.HK/.HGT/.SGT` all return accepted tick subscription IDs,
 while all three remain empty through instrument-master probe attempt 10. Subscription
 acceptance is therefore non-discriminative. Build-5 attaches bounded quote callbacks
-and publishes only normalized `instrument_tick_capabilities` evidence, leaving the
-submit preflight and mutation surface unchanged.
+and publishes only normalized `instrument_tick_capabilities` evidence. After the
+broker login capability changed, exact instrument metadata observed `.SGT` as canonical
+`HK/00700` with `HSGTFlag=5`. The current build-5 gate therefore permits only the two
+explicit cases above and adds `204001.SH`/`511880.SH` to the read-only tick evidence set.
 
 ### Still pending
 
-This Gate approves only the single bounded Guojin LIVE_CANARY surface described
+This Gate approves only the two bounded Guojin LIVE_CANARY cases described
 above; it does **not** approve a general Guojin production mapper or any Galaxy
 mapper. `galaxy` remains SHADOW and mutation-free. Enabling the simulation
 mapper in an operating Host also requires explicit durable OMS identity
@@ -376,11 +383,14 @@ This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 build-4 proved subscription acceptance is non-discriminative and instrument master is unavailable for all three Tencent route candidates; build-5 now collects bounded real-tick callback evidence. Guojin retains only the single pinned LIVE_CANARY mutation surface; Galaxy and generic deployments remain mutation-free.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 build-5 now collects exact-route tick evidence for GC001, 511880 and the three Tencent route candidates. Guojin retains only two named one-shot LIVE_CANARY cases; Galaxy and generic deployments remain mutation-free.**
 
 Next safety checkpoint:
 
-> run P6 build-5 read-only tick-evidence calibration on `.HK/.HGT/.SGT`; do not publish another live canary submit until route evidence is reviewed. In parallel, continue broker-specific raw ORDER/DEAL/query → BrokerEvidence v1 mapper work without changing the frozen evidence semantics.
+> restart the current Guojin build-5 once; review exact tick and instrument evidence,
+> then execute GC001 and fully reconcile it before the one-shot Tencent
+> insufficient-funds case. Keep 511880 probe-only until sufficient funds and a separate
+> T+0 round-trip authorization are available.
 
 Gate evidence:
 

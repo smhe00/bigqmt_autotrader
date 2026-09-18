@@ -447,7 +447,9 @@ BROKER_MUTATION_UNKNOWN
 6. Galaxy/generic production mutation call surface 必须保持为零；Guojin 仅允许已通过独立 Gate 的 fingerprint-pinned LIVE_CANARY surface，任何权限扩大都必须经过新的明确 Gate。
 
 API v1 现在定义 `LIVE_CANARY` 的传输语义，但协议存在不等于自动授权。只有
-manifest 与 `bridge_ready` 同时固定账户指纹、每 session 一次 submit/cancel 上限，
+manifest 与 `bridge_ready` 同时固定账户指纹。当前国金校准 session 仅允许两个互斥
+且各最多一次的 submit 场景（GC001 挂撤、腾讯资金不足）及最多两次 cancel（为每个
+canary 各保留一次精确 token 匹配的紧急撤单能力）；
 Host 显式使用 `--allow-live-canary`，并由独立 publisher 提供精确确认字符串时才允许
 国金 canary 命令。`command_result` 仍然不是 broker evidence，不能产生 ACK。
 

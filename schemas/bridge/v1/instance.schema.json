@@ -55,8 +55,8 @@
           "live_cancel": {"const": true},
           "simulation_only": {"const": false},
           "max_order_quantity": {"const": 100},
-          "max_submit_calls_per_session": {"const": 1},
-          "max_cancel_calls_per_session": {"const": 1}
+          "max_submit_calls_per_session": {"const": 2},
+          "max_cancel_calls_per_session": {"const": 2}
         }
       }
     }

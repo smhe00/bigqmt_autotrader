@@ -319,7 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-live-canary",
         action="store_true",
-        help="Explicitly admit a fingerprint-pinned, one-submit LIVE_CANARY instance.",
+        help="Explicitly admit the fingerprint-pinned two-case LIVE_CANARY instance.",
     )
     parser.add_argument("--poll-interval", type=float, default=0.2)
     parser.add_argument("--host", default="127.0.0.1")

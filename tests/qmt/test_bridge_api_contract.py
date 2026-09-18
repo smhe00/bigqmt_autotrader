@@ -93,8 +93,8 @@ def live_canary_manifest() -> dict:
             "simulation_only": False,
             "authorized_account_fingerprint": FP,
             "max_order_quantity": 100,
-            "max_submit_calls_per_session": 1,
-            "max_cancel_calls_per_session": 1,
+            "max_submit_calls_per_session": 2,
+        "max_cancel_calls_per_session": 2,
         }
     )
     return value

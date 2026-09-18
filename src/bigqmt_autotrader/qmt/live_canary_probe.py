@@ -17,7 +17,20 @@ ACCOUNT_FINGERPRINT = (
     "sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5"
 )
 BRIDGE_BUILD = "p6-guojin-live-canary-5"
-ALLOWED_SYMBOL = "00700.SGT"
+GC001_SYMBOL = "204001.SH"
+TENCENT_SYMBOL = "00700.SGT"
+
+
+def _live_canary_submit_window_open(symbol: str) -> bool:
+    now = time.localtime()
+    if now.tm_wday >= 5:
+        return False
+    minutes = now.tm_hour * 60 + now.tm_min
+    if symbol == GC001_SYMBOL:
+        return (570 <= minutes <= 680) or (780 <= minutes <= 920)
+    if symbol == TENCENT_SYMBOL:
+        return (570 <= minutes <= 710) or (780 <= minutes <= 950)
+    return False
 
 
 def _cancel_command_id(client_order_id: str, broker_order_id: str) -> str:
@@ -115,18 +128,33 @@ def main(argv: list[str] | None = None) -> int:
     spool = QmtCommandSpool(instance.root)
 
     if args.command == "submit":
-        if (
-            args.symbol != ALLOWED_SYMBOL
-            or args.side != "BUY"
-            or args.quantity != 100
-        ):
-            raise SystemExit("live canary permits only 00700.SGT BUY 100")
         try:
             limit_price = Decimal(args.limit_price)
         except InvalidOperation as exc:
             raise SystemExit("--limit-price must be decimal text") from exc
-        if not limit_price.is_finite() or limit_price != Decimal("1.00"):
-            raise SystemExit("--limit-price must equal 1.00 HKD for the live canary")
+        if not limit_price.is_finite():
+            raise SystemExit("--limit-price must be finite")
+        if args.symbol == GC001_SYMBOL:
+            if (
+                args.side != "SELL"
+                or args.quantity != 10
+                or limit_price != Decimal("100.000")
+            ):
+                raise SystemExit("live canary permits GC001 SELL 10 at 100.000")
+        elif args.symbol == TENCENT_SYMBOL:
+            if (
+                args.side != "BUY"
+                or args.quantity != 100
+                or limit_price < Decimal("100.00")
+                or limit_price > Decimal("1000.00")
+            ):
+                raise SystemExit(
+                    "live canary permits Tencent BUY 100 at a guarded 100..1000 HKD price"
+                )
+        else:
+            raise SystemExit("unsupported live canary symbol")
+        if not _live_canary_submit_window_open(args.symbol):
+            raise SystemExit("live canary trading window is closed")
         command = spool.publish_submit(
             account_fingerprint=instance.account_fingerprint,
             client_order_id=args.client_order_id,

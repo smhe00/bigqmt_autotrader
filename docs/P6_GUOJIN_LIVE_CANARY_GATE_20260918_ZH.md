@@ -11,7 +11,10 @@
 三种代码；实机中三者均返回空证券主数据。build-4 对三个候选代码建立只读 tick
 订阅。实机结果表明 `.HK/.HGT/.SGT` 三者的订阅 API 均返回成功，但直到第 10 次
 延迟探测，三者的 `get_instrument_detail` 仍全部为空，因此“订阅成功”本身不能用于
-判定真实可交易路由。build-5 改为采集真实 tick callback 证据；现有交易授权面不变。
+判定真实可交易路由。build-5 改为采集真实 tick callback 证据。券商登录权限开放后，
+实机证券主数据又确认 `.SGT` 可归一为 `HK/00700` 且 `HSGTFlag=5`；因此在新的明确
+授权下，build-5 将下一轮校准扩展为两个各一次的独立 case，并将 `511880.SH` 保持
+为只读行情探测对象。
 
 ## 固定授权面
 
@@ -21,12 +24,20 @@ execution_mode              = LIVE_CANARY
 bridge_build                = p6-guojin-live-canary-5
 account_type                = STOCK
 authorized fingerprint      = sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5
-allowed submit              = 00700.SGT BUY 100 @ 1.00 HKD
-max submit calls/session    = 1
-max cancel calls/session    = 1
+allowed submit case 1       = 204001.SH SELL 10 @ 100.000 (GC001 minimum repo, cancel calibration)
+allowed submit case 2       = 00700.SGT BUY 100 @ exact-tick guarded 100..1000 HKD (insufficient-funds path)
+probe-only instrument       = 511880.SH (no mutation authorization)
+max submit calls/session    = 2 (one per named case)
+max cancel calls/session    = 2 (one exact-token emergency cancel reserve per case)
 cancel identity             = exact broker_order_id + broker_token
-instrument preflight        = get_instrument_detail/get_instrumentdetail must return non-empty SGT/00700 metadata
+GC001 preflight             = exact 204001.SH master + exact-symbol tick + >=1000 CNY available
+Tencent preflight           = HK/00700, HSGTFlag 3|5, SHENGANGTONG observed, exact .SGT tick,
+                              price within +/-2% of tick, available cash < 50% of order notional
 ```
+
+两笔 submit 不会批量发布：必须先完成 GC001 的 ORDER/DEAL/query reconciliation，只有
+状态完全解析后才允许发布腾讯 case。任一 broker mutation 出现异常或 UNKNOWN，当前
+session 永久熔断；禁止继续第二笔或自动重试。
 
 `galaxy` 和通用模板仍无 `passorder`/`cancel` 调用面。`guojin_sim` 保持独立模拟
 profile，不与实盘 spool、session 或 fingerprint 混用。
@@ -151,6 +162,9 @@ evidence.amount
 1. 重新加载 `p6-guojin-live-canary-5`；
 2. 启动 Host 并读取 `bridge_ready.instrument_subscription`；
 3. 收集 `instrument_tick_capabilities`；
-4. 比较 `.HK/.HGT/.SGT` 哪些 route 真正产生 tick callback。
+4. 比较 `.HK/.HGT/.SGT` 哪些 route 真正产生 tick callback，并为
+   `204001.SH`/`511880.SH` 记录精确代码 tick 证据；
+5. 只在全部 preflight 通过时按 GC001 → reconciliation → 腾讯的顺序执行。
 
-现有交易 preflight 仍保持严格 fail-close 行为，因此 build-5 本身不会因为 tick callback 出现而自动允许下一笔 canary。任何实盘提交仍需要新的独立授权判断。
+tick callback 只是必要条件，不是下单授权。Host publisher、当前 session、固定账户
+指纹、时间窗、账户/证券主数据和资金条件仍须同时满足；任何一项不满足都 fail-close。

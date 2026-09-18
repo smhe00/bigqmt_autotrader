@@ -22,8 +22,15 @@ class Obj:
 
 class Context:
     def get_instrument_detail(self, symbol):
+        if symbol == "204001.SH":
+            return {"ExchangeID": "SH", "InstrumentID": "204001", "IsTrading": True}
         assert symbol == "00700.SGT"
-        return {"ExchangeID": "SGT", "InstrumentID": "00700", "IsTrading": True}
+        return {
+            "ExchangeID": "HK",
+            "InstrumentID": "00700",
+            "IsTrading": True,
+            "HSGTFlag": 5,
+        }
 
 
 def load_bridge():
@@ -35,6 +42,7 @@ def load_bridge():
     module._STATE.account_type = "STOCK"
     module._STATE.account_fingerprint = module.AUTHORIZED_ACCOUNT_FINGERPRINT
     module._STATE.session_id = "live-session-01"
+    module._STATE.detected_account_types.add("SHENGANGTONG")
     return module
 
 
@@ -47,10 +55,10 @@ def command(bridge, command_type="SUBMIT_LIMIT", **overrides):
     if command_type == "SUBMIT_LIMIT":
         payload.update(
             {
-                "symbol": "00700.SGT",
-                "side": "BUY",
-                "quantity": 100,
-                "limit_price": "1.00",
+                "symbol": "204001.SH",
+                "side": "SELL",
+                "quantity": 10,
+                "limit_price": "100.000",
             }
         )
     else:
@@ -92,8 +100,8 @@ def test_live_canary_artifact_has_exact_mutation_surface_and_identity():
     assert bridge.EXECUTION_MODE == "LIVE_CANARY"
     assert bridge.TERMINAL_INSTANCE_ID == "guojin"
     assert bridge.SIMULATION_ONLY is False
-    assert bridge.SIMULATION_MAX_SUBMIT_CALLS == 1
-    assert bridge.SIMULATION_MAX_CANCEL_CALLS == 1
+    assert bridge.SIMULATION_MAX_SUBMIT_CALLS == 2
+    assert bridge.SIMULATION_MAX_CANCEL_CALLS == 2
     assert called_names(BRIDGE) == [
         ("passorder", "_execute_order_command"),
         ("cancel", "_execute_order_command"),
@@ -104,15 +112,106 @@ def test_live_canary_submit_is_exactly_bounded(monkeypatch):
     bridge = load_bridge()
     calls = []
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
+    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
+    account = Obj()
+    account.m_dAvailable = 2168.79
+    monkeypatch.setattr(
+        bridge, "get_trade_detail_data", lambda *_args: [account], raising=False
+    )
+    bridge._STATE.instrument_tick_records = {
+        "204001.SH": {
+            "tick_observed": True,
+            "evidence": {"exact_symbol": True, "last_price": "1.18"},
+        }
+    }
 
     result = bridge._execute_order_command(command(bridge), Context())
 
     assert result == ("LIVE_CANARY_SUBMIT_CALL_RETURNED", True)
-    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "00700.SGT", 11, 1.0, 100)
+    assert calls[0][:7] == (24, 1101, "LIVE_ACCOUNT", "204001.SH", 11, 100.0, 10)
     assert calls[0][7:10] == ("BIGQMT_LIVE_CANARY", 2, command(bridge)["broker_token"])
-    with pytest.raises(bridge.CommandError, match="session limit"):
+    with pytest.raises(bridge.CommandError, match="case already submitted"):
         bridge._execute_order_command(command(bridge), Context())
     assert len(calls) == 1
+
+
+def test_live_canary_tencent_case_requires_exact_tick_and_insufficient_cash(monkeypatch):
+    bridge = load_bridge()
+    calls = []
+    monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
+    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
+    account = Obj()
+    account.m_dAvailable = 2168.79
+    monkeypatch.setattr(
+        bridge, "get_trade_detail_data", lambda *_args: [account], raising=False
+    )
+    bridge._STATE.instrument_tick_records = {
+        "00700.SGT": {
+            "tick_observed": True,
+            "evidence": {"exact_symbol": True, "last_price": "604.00"},
+        }
+    }
+    candidate = command(
+        bridge,
+        symbol="00700.SGT",
+        side="BUY",
+        quantity=100,
+        limit_price="604.00",
+    )
+
+    assert bridge._execute_order_command(candidate, Context()) == (
+        "LIVE_CANARY_SUBMIT_CALL_RETURNED",
+        True,
+    )
+    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "00700.SGT", 11, 604.0, 100)
+
+
+def test_live_canary_tencent_fails_closed_without_exact_tick(monkeypatch):
+    bridge = load_bridge()
+    calls = []
+    monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
+    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
+    account = Obj()
+    account.m_dAvailable = 2168.79
+    monkeypatch.setattr(
+        bridge, "get_trade_detail_data", lambda *_args: [account], raising=False
+    )
+    candidate = command(
+        bridge,
+        symbol="00700.SGT",
+        side="BUY",
+        quantity=100,
+        limit_price="604.00",
+    )
+    with pytest.raises(bridge.CommandError, match="tick evidence unavailable"):
+        bridge._execute_order_command(candidate, Context())
+    assert calls == []
+
+
+def test_live_canary_511880_is_probe_only(monkeypatch):
+    bridge = load_bridge()
+    calls = []
+    monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
+    candidate = command(
+        bridge,
+        symbol="511880.SH",
+        side="BUY",
+        quantity=100,
+        limit_price="100.00",
+    )
+    with pytest.raises(bridge.CommandError, match="unsupported live canary symbol"):
+        bridge._execute_order_command(candidate, Context())
+    assert calls == []
+
+
+def test_live_canary_halted_session_rejects_every_later_mutation(monkeypatch):
+    bridge = load_bridge()
+    bridge._STATE.live_canary_halted = True
+    calls = []
+    monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
+    with pytest.raises(bridge.CommandError, match="session halted"):
+        bridge._execute_order_command(command(bridge), Context())
+    assert calls == []
 
 
 @pytest.mark.parametrize(
@@ -121,9 +220,9 @@ def test_live_canary_submit_is_exactly_bounded(monkeypatch):
         ("live_canary", False),
         ("expected_qmt_session_id", "stale"),
         ("symbol", "000001.SZ"),
-        ("side", "SELL"),
-        ("quantity", 99),
-        ("limit_price", "1.01"),
+        ("side", "BUY"),
+        ("quantity", 11),
+        ("limit_price", "99.99"),
     ],
 )
 def test_live_canary_rejects_any_scope_expansion(monkeypatch, field, value):
@@ -154,7 +253,7 @@ def test_live_canary_fails_closed_on_instrument_identity_mismatch(monkeypatch):
         def get_instrumentdetail(self, _symbol):
             return {"ExchangeID": "HK", "InstrumentID": "00700"}
 
-    with pytest.raises(bridge.CommandError, match="exchange mismatch"):
+    with pytest.raises(bridge.CommandError, match="identity mismatch"):
         bridge._execute_order_command(command(bridge), WrongContext())
     assert calls == []
 
@@ -184,12 +283,10 @@ def test_live_canary_runtime_probe_reports_all_market_routes():
 
     payload = bridge._runtime_instrument_probe(ProbeContext())
     assert [row["symbol"] for row in payload["candidates"]] == [
-        "00700.HK",
-        "00700.HGT",
-        "00700.SGT",
+        "204001.SH", "511880.SH", "00700.HK", "00700.HGT", "00700.SGT",
     ]
-    assert [row["observed"] for row in payload["candidates"]] == [False, False, True]
-    assert payload["candidates"][2]["exchange_id"] == "SGT"
+    assert [row["observed"] for row in payload["candidates"]] == [False, False, False, False, True]
+    assert payload["candidates"][4]["exchange_id"] == "SGT"
 
 
 def test_live_canary_read_only_subscription_and_delayed_probe(monkeypatch):
@@ -218,6 +315,8 @@ def test_live_canary_read_only_subscription_and_delayed_probe(monkeypatch):
 
     result = bridge._runtime_instrument_subscribe(context)
     assert subscribed == [
+        ("204001.SH", "tick", "none"),
+        ("511880.SH", "tick", "none"),
         ("00700.HK", "tick", "none"),
         ("00700.HGT", "tick", "none"),
         ("00700.SGT", "tick", "none"),
@@ -281,6 +380,27 @@ def test_live_canary_read_only_subscription_and_delayed_probe(monkeypatch):
     assert final_tick_events[-1][2]["observed_count"] == 1
     assert bridge._STATE.simulation_submit_calls == 0
     assert bridge._STATE.simulation_cancel_calls == 0
+
+
+def test_live_canary_subscription_preserves_synchronous_tick(monkeypatch):
+    bridge = load_bridge()
+
+    class ImmediateContext:
+        def subscribe_quote(self, symbol, _period, _dividend_type="none", callback=None):
+            callback({symbol: {"stockCode": symbol, "lastPrice": 100.0}})
+            return 9
+
+        def run_time(self, _callback, _period, _start):
+            return None
+
+    monkeypatch.setattr(bridge, "_enqueue", lambda *_args: None)
+    monkeypatch.setattr(bridge, "_safe_log", lambda *_args: None)
+    monkeypatch.setattr(bridge, "flush_transport", lambda: None)
+    bridge._runtime_instrument_subscribe(ImmediateContext())
+    assert all(
+        row["tick_observed"] is True
+        for row in bridge._tick_capabilities_payload()["candidates"]
+    )
 
 def test_live_canary_cancel_requires_exact_broker_id_and_token(monkeypatch):
     bridge = load_bridge()
