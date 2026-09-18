@@ -118,6 +118,20 @@ def _event_summary(result: IngressResult, ingestion: QmtHostIngestion) -> dict[s
                 ),
             }
         )
+    elif event.event_type == "instrument_tick_capabilities":
+        records = event.payload.get("candidates", [])
+        payload.update(
+            {
+                "tick_route_count": len(records),
+                "tick_observed_count": event.payload.get("observed_count", 0),
+                "tick_final": event.payload.get("final", False),
+                "tick_observed_symbols": [
+                    record.get("symbol")
+                    for record in records
+                    if record.get("tick_observed")
+                ],
+            }
+        )
     return payload
 
 
@@ -136,6 +150,7 @@ def _should_log_event(
         "snapshot",
         "account_capabilities",
         "instrument_capabilities",
+        "instrument_tick_capabilities",
         "order",
         "deal",
         "command_result",
