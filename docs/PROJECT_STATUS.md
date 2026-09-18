@@ -124,14 +124,14 @@ Real Guojin V05 also proved:
 - Host→QMT→Host `REQUEST_SNAPSHOT`;
 - healthy Host read model with zero backlog/quarantine.
 
-## 6. P4 SHADOW execution plane
+## 6. P4 SHADOW execution plane and P6 Guojin exception
 
 Production standalone artifacts:
 
-- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py`
-- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py`
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GALAXY.py` — SHADOW, mutation-free;
+- `qmt_side/BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py` — independently gated P6 LIVE_CANARY.
 
-Production safety:
+Galaxy and generic production safety remains:
 
 ```text
 TRADING_ENABLED=False
@@ -140,7 +140,7 @@ live_submit=False
 live_cancel=False
 ```
 
-No broker mutation call surface exists in these production artifacts.
+Guojin is the sole bounded exception: fingerprint-pinned, current-session-pinned, one submit and one cancel per session, with fixed canary symbol/side/quantity/price and fail-closed instrument preflight. This does not grant general production live-trading authority.
 
 Command spool:
 
@@ -307,7 +307,11 @@ SGT/00700 instrument-detail preflight before `passorder`. Its first authorized
 command failed that preflight closed: `REJECTED_SAFETY_GATE`,
 `live_side_effect=false`, zero `passorder` calls and no ORDER/DEAL. Build-3's
 read-only startup probe found no instrument master for `.HK/.HGT/.SGT` in the
-model runtime. Build-4 proved that `.HK/.HGT/.SGT` all return accepted tick subscription IDs,\nwhile all three remain empty through instrument-master probe attempt 10. Subscription\nacceptance is therefore non-discriminative. Build-5 attaches bounded quote callbacks\nand publishes only normalized `instrument_tick_capabilities` evidence, leaving the\nsubmit preflight and mutation surface unchanged.
+model runtime. Build-4 proved that `.HK/.HGT/.SGT` all return accepted tick subscription IDs,
+while all three remain empty through instrument-master probe attempt 10. Subscription
+acceptance is therefore non-discriminative. Build-5 attaches bounded quote callbacks
+and publishes only normalized `instrument_tick_capabilities` evidence, leaving the
+submit preflight and mutation surface unchanged.
 
 ### Still pending
 
@@ -376,7 +380,7 @@ This remains architecture direction only.
 
 Next safety checkpoint:
 
-> implement and calibrate broker-specific raw ORDER/DEAL/query → BrokerEvidence v1 mappers without changing the frozen evidence semantics.
+> run P6 build-5 read-only tick-evidence calibration on `.HK/.HGT/.SGT`; do not publish another live canary submit until route evidence is reviewed. In parallel, continue broker-specific raw ORDER/DEAL/query → BrokerEvidence v1 mapper work without changing the frozen evidence semantics.
 
 Gate evidence:
 
