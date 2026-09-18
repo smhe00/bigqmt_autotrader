@@ -94,6 +94,7 @@ class QmtReadModel:
             "bridge_ready",
             "bridge_error",
             "instrument_capabilities",
+            "instrument_tick_capabilities",
         }:
             self._view = self._replace(sequence=event.sequence, timestamp_ms=event.timestamp_ms)
         return self._view
