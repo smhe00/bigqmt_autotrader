@@ -8,7 +8,10 @@
 被明确拒绝为“下单代码 [HK00700] 不合法”，未进入券商委托表。国金本机行情日志
 已发现南向港股通行情使用 `.SGT`。build-2 的强制合约预检成功阻止了一次无法确认
 合约身份的提交，`passorder` 未被调用。build-3 在启动时只读探测 `.HK/.HGT/.SGT`
-三种代码；实机中三者均返回空证券主数据。build-4 对三个候选代码建立只读 tick\n订阅。实机结果表明 `.HK/.HGT/.SGT` 三者的订阅 API 均返回成功，但直到第 10 次\n延迟探测，三者的 `get_instrument_detail` 仍全部为空，因此“订阅成功”本身不能用于\n判定真实可交易路由。build-5 改为采集真实 tick callback 证据；现有交易授权面不变。
+三种代码；实机中三者均返回空证券主数据。build-4 对三个候选代码建立只读 tick
+订阅。实机结果表明 `.HK/.HGT/.SGT` 三者的订阅 API 均返回成功，但直到第 10 次
+延迟探测，三者的 `get_instrument_detail` 仍全部为空，因此“订阅成功”本身不能用于
+判定真实可交易路由。build-5 改为采集真实 tick callback 证据；现有交易授权面不变。
 
 ## 固定授权面
 
@@ -118,7 +121,7 @@ build-4 在国金实盘 QMT 中完成只读路由探测：
 
 ## build-5 tick-evidence probe
 
-build-5 为每个候选代码注册独立 `subscribe_quote(..., callback=...)` 回调，并仅把白名单字段写入新的 `instrument_tick_capabilities` 事件。核心判据从“subscription accepted”提升为“真实 callback 是否到达”。
+build-5 为每个候选代码注册独立 `subscribe_quote(..., callback=...)` 回调，并仅把白名单字段写入新的 `instrument_tick_capabilities` 事件。QMT callback 的标准输入按 `{code: DataFrame}` 处理；只有 callback payload 中精确存在预期 symbol，且能读取最后一条 tick，才置 `tick_observed=true`。核心判据从“subscription accepted”提升为“精确 route 的真实 tick callback 是否到达”。
 
 每个候选 route 记录：
 
@@ -130,7 +133,10 @@ callback_registered
 tick_observed
 callback_count
 evidence.requested_symbol
+evidence.reported_symbol
+evidence.exact_symbol
 evidence.raw_symbol
+evidence.tick_index
 evidence.exchange_id
 evidence.tick_time
 evidence.last_price
@@ -138,7 +144,7 @@ evidence.volume
 evidence.amount
 ```
 
-完整 tick 对象不会写入 spool。首次 callback 会立即发布证据；10 秒窗口结束后再发布 final summary。该探测纯只读，不调用 `passorder/cancel`，不消耗 submit/cancel fuse。
+完整 tick 对象不会写入 spool。首次 callback 会立即发布诊断证据；若 callback 的 symbol 与预期 route 不匹配，只记录 mismatch，不算作 `tick_observed`。首次精确 route tick 到达后会再次发布证据；10 秒窗口结束后再发布 final summary。该探测纯只读，不调用 `passorder/cancel`，不消耗 submit/cancel fuse。
 
 下一次实机动作只允许：
 
