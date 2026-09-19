@@ -74,3 +74,26 @@ Host 使用 `--allow-simulation-mutation` 完成当前会话回放：read model 
 spool pending 0、transport/semantic quarantine 0。上述行情属于上一交易日，
 本次只读验收没有发布 SUBMIT/CANCEL；交易路由能力仍须在有效交易时段以模拟账户
 ORDER/DEAL 证据校准。
+
+## 非交易时段实机安全矩阵（2026-09-19）
+
+在同一 build-5 session 中执行了仅包含只读动作或保证在 broker mutation 调用前
+失败的实机矩阵：
+
+| Case | QMT 结果 | Broker side effect |
+|---|---|---:|
+| `REQUEST_SNAPSHOT` | `SNAPSHOT_EMITTED` | false |
+| stale session | `REJECTED_SAFETY_GATE` | false |
+| missing simulation authorization | `REJECTED_SAFETY_GATE` | false |
+| malformed `700.HGT` symbol | `REJECTED_SAFETY_GATE` | false |
+| quantity `101` | `REJECTED_SAFETY_GATE` | false |
+| zero limit price | `REJECTED_SAFETY_GATE` | false |
+| cancel without exact token/order match | `REJECTED_SAFETY_GATE` | false |
+| wrong account fingerprint | command frame rejected | false |
+
+Host 发布端另外在写入 spool 前拒绝 expired command、冲突的重复 command ID，
+以及 `market=CN` 搭配 `route_hint=HGT` 的不一致路由。
+
+测试前后主动快照均为 available cash `6406056.56`、positions `2`、orders `0`、
+deals `0`、query errors `0`。最终 command inbox/claimed/unknown 均为 0；Host 回放
+`read_model_healthy=true`、spool pending 0、transport/semantic quarantine 0。
