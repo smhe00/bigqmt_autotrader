@@ -237,6 +237,77 @@ def main() -> None:
             )
 
     state_text = STATE.read_text(encoding="utf-8")
+
+    schema_version = scalar(state_text, "schema_version")
+    bootstrap_entrypoint = scalar(state_text, "bootstrap_entrypoint")
+    bootstrap_rule = scalar(state_text, "bootstrap_rule")
+    bootstrap_protocol_files = list_value(state_text, "bootstrap_protocol_files")
+    bootstrap_project_context_files = list_value(
+        state_text, "bootstrap_project_context_files"
+    )
+    bootstrap_active_handoff_fields = list_value(
+        state_text, "bootstrap_active_handoff_fields"
+    )
+    bootstrap_git_branch = scalar(state_text, "bootstrap_git_branch")
+    bootstrap_refresh = scalar(state_text, "bootstrap_refresh_main_before_work")
+    bootstrap_verify_head = scalar(state_text, "bootstrap_verify_head_before_write")
+    bootstrap_diff = scalar(state_text, "bootstrap_inspect_diff_from_audit_base")
+
+    expected_protocol_files = ["workflow/README.md"]
+    expected_project_context_files = [
+        "README.md",
+        "docs/PROJECT_OVERVIEW_ZH.md",
+        "docs/PROJECT_STATUS.md",
+        "docs/FORMAL_VERIFICATION.md",
+    ]
+    expected_active_handoff_fields = [
+        "task_file",
+        "expected_report_file",
+        "expected_review_file",
+    ]
+
+    if schema_version != "2":
+        errors.append("WORKFLOW_STATE schema_version must be 2")
+    if bootstrap_entrypoint != "workflow/control/WORKFLOW_STATE.yaml":
+        errors.append("WORKFLOW_STATE must declare itself as bootstrap_entrypoint")
+    if not bootstrap_rule:
+        errors.append("WORKFLOW_STATE bootstrap_rule is required")
+    if bootstrap_protocol_files != expected_protocol_files:
+        errors.append(
+            "bootstrap_protocol_files must contain exactly workflow/README.md"
+        )
+    if bootstrap_project_context_files != expected_project_context_files:
+        errors.append("bootstrap_project_context_files drifted from required context set")
+    if bootstrap_active_handoff_fields != expected_active_handoff_fields:
+        errors.append(
+            "bootstrap_active_handoff_fields must reference the three active handoff fields"
+        )
+    if bootstrap_git_branch != "main":
+        errors.append("bootstrap_git_branch must be main")
+    for field_name, value in (
+        ("bootstrap_refresh_main_before_work", bootstrap_refresh),
+        ("bootstrap_verify_head_before_write", bootstrap_verify_head),
+        ("bootstrap_inspect_diff_from_audit_base", bootstrap_diff),
+    ):
+        if value != "true":
+            errors.append(f"{field_name} must be true")
+
+    for context_path in bootstrap_protocol_files + bootstrap_project_context_files:
+        candidate = ROOT / context_path
+        if not candidate.is_file():
+            errors.append(f"bootstrap context file missing: {context_path}")
+
+    for field_name in bootstrap_active_handoff_fields:
+        resolved = scalar(state_text, field_name)
+        if not resolved:
+            errors.append(f"bootstrap active handoff field missing: {field_name}")
+            continue
+        candidate = ROOT / resolved
+        if not candidate.is_file():
+            errors.append(
+                f"bootstrap active handoff path from {field_name} missing: {resolved}"
+            )
+
     current_key = scalar(state_text, "task_key")
     state_name = scalar(state_text, "state")
     owner = scalar(state_text, "owner")
