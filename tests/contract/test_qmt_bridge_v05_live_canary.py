@@ -99,7 +99,7 @@ def called_names(path: Path) -> list[tuple[str, str]]:
 
 def test_live_canary_artifact_has_exact_mutation_surface_and_identity():
     bridge = load_bridge()
-    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-5"
+    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-6"
     assert bridge.EXECUTION_MODE == "LIVE_CANARY"
     assert bridge.TERMINAL_INSTANCE_ID == "guojin"
     assert bridge.SIMULATION_ONLY is False

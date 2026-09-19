@@ -706,7 +706,7 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
             source = source.replace(before, after)
     elif profile == "live_canary":
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p6-guojin-live-canary-5"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p6-guojin-live-canary-6"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "LIVE_CANARY"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',

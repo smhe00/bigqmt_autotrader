@@ -21,7 +21,7 @@
 ```text
 instance_id                 = guojin
 execution_mode              = LIVE_CANARY
-bridge_build                = p6-guojin-live-canary-5
+bridge_build                = p6-guojin-live-canary-6
 account_type                = STOCK
 authorized fingerprint      = sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5
 allowed submit case 1       = 00700.HGT BUY 100 @ 1.00 HKD (fixed non-marketable route probe)
@@ -165,7 +165,7 @@ evidence.amount
 
 下一次实机动作只允许：
 
-1. 重新加载 `p6-guojin-live-canary-5`；
+1. 重新加载 `p6-guojin-live-canary-6`；
 2. 启动 Host 并读取 `bridge_ready.instrument_subscription`；
 3. 收集 `instrument_tick_capabilities`；
 4. 比较 `.HK/.HGT/.SGT` 哪些 route 真正产生 tick callback，并为
