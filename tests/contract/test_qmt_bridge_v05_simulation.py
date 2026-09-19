@@ -141,7 +141,7 @@ def test_simulation_hong_kong_symbol_uses_same_bound_stock_account(monkeypatch, 
 def test_simulation_build_includes_stock_connect_runtime_diagnostics():
     bridge = load_bridge()
 
-    assert bridge.BRIDGE_BUILD == "p5-simulation-calibration-5"
+    assert bridge.BRIDGE_BUILD == "p5-simulation-calibration-6"
     assert bridge._SIMULATION_INSTRUMENT_CANDIDATES == (
         "204001.SH",
         "511880.SH",
@@ -151,6 +151,61 @@ def test_simulation_build_includes_stock_connect_runtime_diagnostics():
     )
     assert callable(bridge._runtime_instrument_probe)
     assert callable(bridge._runtime_instrument_subscribe)
+
+
+def test_simulation_discovers_bounded_stock_connect_candidate_routes():
+    bridge = load_bridge()
+
+    class SectorContext:
+        def get_tick_timetag(self):
+            return 1789819797000
+
+        def get_stock_list_in_sector(self, sector_name, realtime):
+            assert realtime == 1789819797000
+            if sector_name == "沪港通":
+                return ["00700.HK", "09988.HK", "00941.HK", "bad.HK"]
+            if sector_name == "深港通":
+                return ["01810.HK", "03690.HK", "00981.HK", "00700.HK"]
+            return []
+
+    payload = bridge._simulation_discover_stock_connect_candidates(SectorContext())
+
+    assert payload["method"] == "get_stock_list_in_sector"
+    assert payload["realtime"] == 1789819797000
+    assert payload["selected_underlyings"] == [
+        "00700",
+        "09988",
+        "01810",
+        "03690",
+        "00941",
+        "00981",
+    ]
+    assert payload["candidate_count"] == 20
+    assert payload["truncated"] is False
+    assert bridge._SIMULATION_INSTRUMENT_CANDIDATES[:2] == (
+        "204001.SH",
+        "511880.SH",
+    )
+    assert "09988.HK" in bridge._SIMULATION_INSTRUMENT_CANDIDATES
+    assert "09988.HGT" in bridge._SIMULATION_INSTRUMENT_CANDIDATES
+    assert "09988.SGT" in bridge._SIMULATION_INSTRUMENT_CANDIDATES
+    assert len(bridge._SIMULATION_INSTRUMENT_CANDIDATES) == 20
+
+
+def test_simulation_sector_discovery_fails_closed_to_fixed_candidates():
+    bridge = load_bridge()
+
+    payload = bridge._simulation_discover_stock_connect_candidates(object())
+
+    assert payload["error"] == "SECTOR_QUERY_UNAVAILABLE"
+    assert payload["selected_underlyings"] == ["00700"]
+    assert bridge._SIMULATION_INSTRUMENT_CANDIDATES == (
+        "204001.SH",
+        "511880.SH",
+        "00700.HK",
+        "00700.HGT",
+        "00700.SGT",
+    )
 
 
 @pytest.mark.parametrize(

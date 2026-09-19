@@ -128,6 +128,128 @@ def _execute_order_command(command, ContextInfo):
     raise CommandError("unsupported simulation mutation command")
 '''
 
+SIMULATION_SECTOR_DISCOVERY = '''_SIMULATION_SECTOR_NAMES = (
+    "\\u6e2f\\u80a1\\u901a",
+    "\\u6caa\\u6e2f\\u901a",
+    "\\u6df1\\u6e2f\\u901a",
+    "\\u6e2f\\u80a1\\u901a(\\u6caa)",
+    "\\u6e2f\\u80a1\\u901a(\\u6df1)",
+    "\\u6caa\\u6e2f\\u901a\\u6807\\u7684",
+    "\\u6df1\\u6e2f\\u901a\\u6807\\u7684",
+)
+_SIMULATION_PREFERRED_HK_CODES = (
+    "00700",
+    "09988",
+    "01810",
+    "03690",
+    "00941",
+    "00981",
+    "00388",
+    "00005",
+    "00939",
+    "01211",
+)
+_SIMULATION_DISCOVERY_UNDERLYING_LIMIT = 6
+_SIMULATION_DISCOVERY_ROUTE_LIMIT = 20
+_SIMULATION_SECTOR_SAMPLE_LIMIT = 10
+
+
+def _simulation_sector_realtime(ContextInfo):
+    query = getattr(ContextInfo, "get_tick_timetag", None)
+    if callable(query):
+        try:
+            value = int(query())
+            if value > 0:
+                return value
+        except Exception:
+            pass
+    return int(time.time() * 1000)
+
+
+def _simulation_hk_symbol(value):
+    value = _text(value)
+    parts = value.split(".")
+    if (
+        len(parts) != 2
+        or not parts[0].isdigit()
+        or len(parts[0]) != 5
+        or parts[1] not in ("HK", "HGT", "SGT")
+    ):
+        return None
+    return value
+
+
+def _simulation_discover_stock_connect_candidates(ContextInfo):
+    global _SIMULATION_INSTRUMENT_CANDIDATES
+    query = getattr(ContextInfo, "get_stock_list_in_sector", None)
+    realtime = _simulation_sector_realtime(ContextInfo)
+    sector_results = []
+    underlying_codes = set(["00700"])
+    if not callable(query):
+        payload = {
+            "method": None,
+            "realtime": realtime,
+            "sector_results": [],
+            "selected_underlyings": ["00700"],
+            "candidate_count": len(_SIMULATION_INSTRUMENT_CANDIDATES),
+            "candidates": list(_SIMULATION_INSTRUMENT_CANDIDATES),
+            "error": "SECTOR_QUERY_UNAVAILABLE",
+        }
+        return payload
+
+    for sector_name in _SIMULATION_SECTOR_NAMES:
+        record = {"sector_name": sector_name, "count": 0, "sample": []}
+        try:
+            try:
+                rows = query(sector_name, realtime)
+            except TypeError:
+                rows = query(sector_name)
+            if rows is None:
+                record["error"] = "SECTOR_QUERY_NONE"
+            else:
+                normalized = []
+                for row in rows:
+                    symbol = _simulation_hk_symbol(row)
+                    if symbol is not None:
+                        normalized.append(symbol)
+                        underlying_codes.add(symbol.split(".")[0])
+                normalized = sorted(set(normalized))
+                record["count"] = len(normalized)
+                record["sample"] = normalized[:_SIMULATION_SECTOR_SAMPLE_LIMIT]
+        except Exception as exc:
+            record["error"] = "SECTOR_QUERY_EXCEPTION"
+            record["error_type"] = type(exc).__name__
+        sector_results.append(record)
+
+    selected = []
+    for code in _SIMULATION_PREFERRED_HK_CODES:
+        if code in underlying_codes and code not in selected:
+            selected.append(code)
+    for code in sorted(underlying_codes):
+        if code not in selected:
+            selected.append(code)
+    selected = selected[:_SIMULATION_DISCOVERY_UNDERLYING_LIMIT]
+
+    candidates = ["204001.SH", "511880.SH"]
+    for code in selected:
+        for market in ("HK", "HGT", "SGT"):
+            candidates.append(code + "." + market)
+    _SIMULATION_INSTRUMENT_CANDIDATES = tuple(
+        candidates[:_SIMULATION_DISCOVERY_ROUTE_LIMIT]
+    )
+    return {
+        "method": "get_stock_list_in_sector",
+        "realtime": realtime,
+        "sector_results": sector_results,
+        "discovered_underlying_count": len(underlying_codes),
+        "selected_underlyings": selected,
+        "candidate_count": len(_SIMULATION_INSTRUMENT_CANDIDATES),
+        "candidates": list(_SIMULATION_INSTRUMENT_CANDIDATES),
+        "truncated": len(candidates) > _SIMULATION_DISCOVERY_ROUTE_LIMIT,
+    }
+
+'''
+
 LIVE_CANARY_EXECUTOR = '''_LIVE_CANARY_INSTRUMENT_CANDIDATES = (
     "204001.SH",
     "511880.SH",
@@ -688,6 +810,30 @@ SIMULATION_INSTRUMENT_DIAGNOSTICS = INSTRUMENT_DIAGNOSTICS.replace(
     '_LIVE_CANARY_MUTATION_SYMBOLS = ("204001.SH", "511880.SH", "00700.HGT")\n',
     "",
 )
+_SIMULATION_SUBSCRIBE_MARKER = (
+    "def _runtime_instrument_subscribe(ContextInfo):\n"
+    "    subscribe = getattr(ContextInfo, \"subscribe_quote\", None)"
+)
+if SIMULATION_INSTRUMENT_DIAGNOSTICS.count(_SIMULATION_SUBSCRIBE_MARKER) != 1:
+    raise RuntimeError("simulation subscription marker must appear exactly once")
+SIMULATION_INSTRUMENT_DIAGNOSTICS = SIMULATION_INSTRUMENT_DIAGNOSTICS.replace(
+    _SIMULATION_SUBSCRIBE_MARKER,
+    "def _runtime_instrument_subscribe(ContextInfo):\n"
+    "    sector_discovery = _simulation_discover_stock_connect_candidates(ContextInfo)\n"
+    "    subscribe = getattr(ContextInfo, \"subscribe_quote\", None)",
+)
+_SIMULATION_SUBSCRIBE_RETURN_MARKER = (
+    '        "tick_evidence_required": True,\n'
+    "    }"
+)
+if SIMULATION_INSTRUMENT_DIAGNOSTICS.count(_SIMULATION_SUBSCRIBE_RETURN_MARKER) != 1:
+    raise RuntimeError("simulation subscription return marker must appear exactly once")
+SIMULATION_INSTRUMENT_DIAGNOSTICS = SIMULATION_INSTRUMENT_DIAGNOSTICS.replace(
+    _SIMULATION_SUBSCRIBE_RETURN_MARKER,
+    '        "tick_evidence_required": True,\n'
+    '        "sector_discovery": sector_discovery,\n'
+    "    }",
+)
 
 
 def rendered(instance_id: str, *, profile: str) -> bytes:
@@ -697,7 +843,7 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
     source = source.replace(TOKEN, instance_id)
     if profile == "simulation":
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-5"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-6"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "SIMULATION_CALIBRATION"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',
@@ -711,7 +857,11 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
             'SIMULATION_MAX_CANCEL_CALLS = 0': 'SIMULATION_MAX_CANCEL_CALLS = 2000',
             'and SIMULATION_MAX_SUBMIT_CALLS == 2': 'and SIMULATION_MAX_SUBMIT_CALLS == 2000',
             'and SIMULATION_MAX_CANCEL_CALLS == 2': 'and SIMULATION_MAX_CANCEL_CALLS == 2000',
-            SHADOW_EXECUTOR: SIMULATION_INSTRUMENT_DIAGNOSTICS + SIMULATION_EXECUTOR,
+            SHADOW_EXECUTOR: (
+                SIMULATION_SECTOR_DISCOVERY
+                + SIMULATION_INSTRUMENT_DIAGNOSTICS
+                + SIMULATION_EXECUTOR
+            ),
         }
         for before, after in replacements.items():
             if source.count(before) != 1:

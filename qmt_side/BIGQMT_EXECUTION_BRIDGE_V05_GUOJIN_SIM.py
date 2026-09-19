@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p5-simulation-calibration-5"
+BRIDGE_BUILD = "p5-simulation-calibration-6"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -1003,6 +1003,126 @@ def _reject_claimed(claimed_path, name, code, exc=None):
     _runtime_error(code, exc, {"file": name})
 
 
+_SIMULATION_SECTOR_NAMES = (
+    "\u6e2f\u80a1\u901a",
+    "\u6caa\u6e2f\u901a",
+    "\u6df1\u6e2f\u901a",
+    "\u6e2f\u80a1\u901a(\u6caa)",
+    "\u6e2f\u80a1\u901a(\u6df1)",
+    "\u6caa\u6e2f\u901a\u6807\u7684",
+    "\u6df1\u6e2f\u901a\u6807\u7684",
+)
+_SIMULATION_PREFERRED_HK_CODES = (
+    "00700",
+    "09988",
+    "01810",
+    "03690",
+    "00941",
+    "00981",
+    "00388",
+    "00005",
+    "00939",
+    "01211",
+)
+_SIMULATION_DISCOVERY_UNDERLYING_LIMIT = 6
+_SIMULATION_DISCOVERY_ROUTE_LIMIT = 20
+_SIMULATION_SECTOR_SAMPLE_LIMIT = 10
+
+
+def _simulation_sector_realtime(ContextInfo):
+    query = getattr(ContextInfo, "get_tick_timetag", None)
+    if callable(query):
+        try:
+            value = int(query())
+            if value > 0:
+                return value
+        except Exception:
+            pass
+    return int(time.time() * 1000)
+
+
+def _simulation_hk_symbol(value):
+    value = _text(value)
+    parts = value.split(".")
+    if (
+        len(parts) != 2
+        or not parts[0].isdigit()
+        or len(parts[0]) != 5
+        or parts[1] not in ("HK", "HGT", "SGT")
+    ):
+        return None
+    return value
+
+
+def _simulation_discover_stock_connect_candidates(ContextInfo):
+    global _SIMULATION_INSTRUMENT_CANDIDATES
+    query = getattr(ContextInfo, "get_stock_list_in_sector", None)
+    realtime = _simulation_sector_realtime(ContextInfo)
+    sector_results = []
+    underlying_codes = set(["00700"])
+    if not callable(query):
+        payload = {
+            "method": None,
+            "realtime": realtime,
+            "sector_results": [],
+            "selected_underlyings": ["00700"],
+            "candidate_count": len(_SIMULATION_INSTRUMENT_CANDIDATES),
+            "candidates": list(_SIMULATION_INSTRUMENT_CANDIDATES),
+            "error": "SECTOR_QUERY_UNAVAILABLE",
+        }
+        return payload
+
+    for sector_name in _SIMULATION_SECTOR_NAMES:
+        record = {"sector_name": sector_name, "count": 0, "sample": []}
+        try:
+            try:
+                rows = query(sector_name, realtime)
+            except TypeError:
+                rows = query(sector_name)
+            if rows is None:
+                record["error"] = "SECTOR_QUERY_NONE"
+            else:
+                normalized = []
+                for row in rows:
+                    symbol = _simulation_hk_symbol(row)
+                    if symbol is not None:
+                        normalized.append(symbol)
+                        underlying_codes.add(symbol.split(".")[0])
+                normalized = sorted(set(normalized))
+                record["count"] = len(normalized)
+                record["sample"] = normalized[:_SIMULATION_SECTOR_SAMPLE_LIMIT]
+        except Exception as exc:
+            record["error"] = "SECTOR_QUERY_EXCEPTION"
+            record["error_type"] = type(exc).__name__
+        sector_results.append(record)
+
+    selected = []
+    for code in _SIMULATION_PREFERRED_HK_CODES:
+        if code in underlying_codes and code not in selected:
+            selected.append(code)
+    for code in sorted(underlying_codes):
+        if code not in selected:
+            selected.append(code)
+    selected = selected[:_SIMULATION_DISCOVERY_UNDERLYING_LIMIT]
+
+    candidates = ["204001.SH", "511880.SH"]
+    for code in selected:
+        for market in ("HK", "HGT", "SGT"):
+            candidates.append(code + "." + market)
+    _SIMULATION_INSTRUMENT_CANDIDATES = tuple(
+        candidates[:_SIMULATION_DISCOVERY_ROUTE_LIMIT]
+    )
+    return {
+        "method": "get_stock_list_in_sector",
+        "realtime": realtime,
+        "sector_results": sector_results,
+        "discovered_underlying_count": len(underlying_codes),
+        "selected_underlyings": selected,
+        "candidate_count": len(_SIMULATION_INSTRUMENT_CANDIDATES),
+        "candidates": list(_SIMULATION_INSTRUMENT_CANDIDATES),
+        "truncated": len(candidates) > _SIMULATION_DISCOVERY_ROUTE_LIMIT,
+    }
+
 _SIMULATION_INSTRUMENT_CANDIDATES = (
     "204001.SH",
     "511880.SH",
@@ -1224,6 +1344,7 @@ def _tick_callback(symbol):
 
 
 def _runtime_instrument_subscribe(ContextInfo):
+    sector_discovery = _simulation_discover_stock_connect_candidates(ContextInfo)
     subscribe = getattr(ContextInfo, "subscribe_quote", None)
     state = _tick_state()
     records = []
@@ -1290,6 +1411,7 @@ def _runtime_instrument_subscribe(ContextInfo):
         "probe_timer_registered": _STATE.instrument_probe_timer_registered,
         "max_probe_attempts": _SIMULATION_TICK_WINDOW_SECONDS,
         "tick_evidence_required": True,
+        "sector_discovery": sector_discovery,
     }
 
 

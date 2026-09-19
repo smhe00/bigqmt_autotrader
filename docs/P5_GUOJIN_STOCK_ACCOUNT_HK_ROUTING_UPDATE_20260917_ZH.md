@@ -64,7 +64,9 @@ order ID 的撤单。交易时段仍需用新的 client order ID 做一次受限
 
 ## build 5 后续更新（2026-09-19）
 
-当前 `guojin_sim` 已升级为 `p5-simulation-calibration-5`。模拟账户现已附挂港股通
+当前 `guojin_sim` 已升级为 `p5-simulation-calibration-6`。模拟账户现已附挂港股通
 能力，因此发布器与执行器同时接受五位 `.HK/.HGT/.SGT`，并在启动时对
 `00700.HK/HGT/SGT` 发布证券主数据和精确代码 tick 证据。资金账号仍是唯一固定的
 `STOCK` 指纹；附挂能力不会产生第二个交易身份。生产实例未随本次更新改变。
+build-6 进一步从大QMT板块成分接口有界选择最多 6 个底层港股和 20 条诊断
+route；只读发现不等于交易授权。

@@ -2,7 +2,7 @@
 
 ## 结论
 
-`guojin_sim` V5 build 已升级为 `p5-simulation-calibration-5`。
+`guojin_sim` V5 build 已升级为 `p5-simulation-calibration-6`。
 
 原限制：
 
@@ -44,7 +44,7 @@ simulation command 必须由操作者在新 build 启动后，根据新鲜行情
 ## 国金单一股票账号下的港股通修正
 
 实机确认国金将 A 股和港股通交易挂在同一个 `STOCK` 资金账号后，模拟 build
-升级为 `p5-simulation-calibration-5`。交易仍使用清单固定的 `STOCK` 账号；启动时
+升级为 `p5-simulation-calibration-6`。交易仍使用清单固定的 `STOCK` 账号；启动时
 同时只读探测 `STOCK/HUGANGTONG/SHENGANGTONG` 能力，但不会把附挂能力错误建模为
 第二个资金账号。交易市场由证券代码后缀表达。
 
@@ -97,3 +97,15 @@ Host 发布端另外在写入 spool 前拒绝 expired command、冲突的重复 
 测试前后主动快照均为 available cash `6406056.56`、positions `2`、orders `0`、
 deals `0`、query errors `0`。最终 command inbox/claimed/unknown 均为 0；Host 回放
 `read_model_healthy=true`、spool pending 0、transport/semantic quarantine 0。
+
+## build 6 有界板块发现
+
+build-6 在大QMT策略内部调用只读 `ContextInfo.get_stock_list_in_sector`，尝试多个
+常见港股通板块名称。无论板块返回多少成分，最多选择 6 个底层五位港股代码，并
+展开为 `.HK/.HGT/.SGT`；连同 `204001.SH`、`511880.SH`，启动诊断 route 总数
+上限为 20。板块返回值、选择结果、截断状态和查询错误均写入
+`bridge_ready.instrument_subscription.sector_discovery`。
+
+板块不可用、名称不匹配或查询异常时，系统退回腾讯加两只沪市证券的原固定候选。
+发现列表只用于证券主数据和精确 tick 证据，不发布命令、不调用 `passorder/cancel`，
+也不代表证券已经获得交易授权。
