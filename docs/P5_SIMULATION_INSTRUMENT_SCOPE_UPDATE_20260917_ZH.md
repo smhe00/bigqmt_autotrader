@@ -52,3 +52,25 @@ simulation command 必须由操作者在新 build 启动后，根据新鲜行情
 规则保持不变。build-5 还复用实盘已验证的只读证券主数据与精确
 `get_full_tick([exact_symbol])` 证据探测，以便先校准实际路由再提交。该扩展仍仅
 存在于 `guojin_sim` 生成物；生产 `guojin`、`galaxy` 文件未发生变化。
+
+## build 5 实机启动结果（2026-09-19）
+
+模拟 QMT 已加载 build `p5-simulation-calibration-5`，新 session 为
+`3b81348312894dce8df6de5d83e1dcb3`。主动账户探测同时发现 `STOCK`、
+`HUGANGTONG`、`SHENGANGTONG`，选定交易身份仍为清单固定的 `STOCK`。
+
+证券主数据对 `00700.HK/.HGT/.SGT` 均返回规范身份 `HK/00700`、腾讯控股和
+`HSGTFlag=5`。五个候选代码全部取得严格同代码 quote callback：
+
+```text
+204001.SH  exact=true  last=1.025
+511880.SH  exact=true  last=100.8
+00700.HK   exact=true  last=419.0
+00700.HGT  exact=true  last=419.0
+00700.SGT  exact=true  last=419.0
+```
+
+Host 使用 `--allow-simulation-mutation` 完成当前会话回放：read model healthy、
+spool pending 0、transport/semantic quarantine 0。上述行情属于上一交易日，
+本次只读验收没有发布 SUBMIT/CANCEL；交易路由能力仍须在有效交易时段以模拟账户
+ORDER/DEAL 证据校准。
