@@ -121,16 +121,21 @@ general live trading enabled = NO
 
 ## 12. Handoff to Architect
 
-完成后将顶部：
+完成实现并填写本报告后，不手工改 control state。执行：
 
-```text
-status: AWAITING_AGENT
+```bash
+python tools/agent_workflow_handoff.py --implementation-commit <FULL_SHA>
+python tools/verify_workflow_contract.py
 ```
 
-改为：
+然后把 **代码 + 本 report + `WORKFLOW_STATE.yaml`** 一起提交。
 
-```text
-status: REVIEW_READY
-```
+工具会自动：
 
-并填写最终 commit SHA。不得自行创建下一 task。
+- 将 report frontmatter 改为 `REVIEW_READY`；
+- 将 control state 改为 `REVIEW_READY`；
+- owner 交还 `architect`；
+- 清空 `authorized_next`；
+- 递增 `handoff_seq` 并生成新的 handoff ID。
+
+不得修改 Architect review 文件，也不得自行创建下一 task。
