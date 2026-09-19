@@ -147,3 +147,28 @@ REVIEW_READY                       |
 
 During `AGENT_READY` or `CHANGES_REQUIRED`, `authorized_next` must contain exactly the current
 `task_key`. During Architect-owned states it must be empty.
+
+
+### Agent -> Architect handoff
+
+Agent 完成实现时必须在同一个提交中完成两类 communication 更新：
+
+1. 更新当前 `workflow/reports/<task_key>__implementation-report.md`
+   - `status: REVIEW_READY`
+   - 填写 implementation/final commit、验证结果与安全声明；
+2. 更新 `workflow/control/WORKFLOW_STATE.yaml`
+   - `handoff_seq` 递增；
+   - 使用新的唯一 `handoff_id`；
+   - `state: REVIEW_READY`；
+   - `owner: architect`；
+   - `report_status: REVIEW_READY`；
+   - `review_status: AWAITING_REVIEW`；
+   - `authorized_next: []`。
+
+Agent 不得修改对应 `workflow/reviews/` 文件，也不得创建下一任务。
+
+如果只改 report 而不交还 control state，或只改 control state 而不改 report，`verify_workflow_contract.py`
+必须使 CI 失败。
+
+`audit_base_commit` 是 Architect 做代码审计时的参考快照，不要求 Agent checkout 到该提交。
+Agent 实现时应从收到任务时的最新 `main` 开始，并保留之后已合入的 workflow/文档基础设施。
