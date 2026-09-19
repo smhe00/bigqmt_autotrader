@@ -209,8 +209,23 @@ def main() -> None:
             errors.append(f"{rel(review_path)} review_of mismatch")
         if review_meta.get("task_file") != rel(task_path):
             errors.append(f"{rel(review_path)} task_file mismatch")
-        if review_meta.get("status") not in REVIEW_STATUSES:
+        review_status_for_key = review_meta.get("status")
+        report_status_for_key = report_meta.get("status")
+        if review_status_for_key not in REVIEW_STATUSES:
             errors.append(f"{rel(review_path)} invalid review status")
+        if report_status_for_key == "AWAITING_AGENT" and review_status_for_key != "AWAITING_REVIEW":
+            errors.append(
+                f"{key} awaiting-agent report requires AWAITING_REVIEW architect status"
+            )
+        if review_status_for_key in {
+            "PASS",
+            "CHANGES_REQUIRED",
+            "BLOCKED",
+            "USER_ESCALATION",
+        } and report_status_for_key != "REVIEW_READY":
+            errors.append(
+                f"{key} terminal review requires matched report_status=REVIEW_READY"
+            )
 
     for group, values in sorted(iterations.items()):
         ordered = sorted(values)
@@ -280,9 +295,15 @@ def main() -> None:
             errors.append("REVIEW_READY requires report_status=REVIEW_READY")
         if review_status != "AWAITING_REVIEW":
             errors.append("REVIEW_READY requires review_status=AWAITING_REVIEW")
+    elif state_name == "PASS":
+        if authorized_next:
+            errors.append("PASS must have authorized_next=[]")
+        if report_status != "REVIEW_READY":
+            errors.append("PASS requires report_status=REVIEW_READY")
+        if review_status != "PASS":
+            errors.append("PASS requires review_status=PASS")
     elif state_name in {
         "ARCHITECT_PLANNING",
-        "PASS",
         "BLOCKED",
         "USER_ESCALATION",
     }:
