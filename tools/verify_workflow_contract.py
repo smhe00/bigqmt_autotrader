@@ -302,13 +302,22 @@ def main() -> None:
             errors.append("PASS requires report_status=REVIEW_READY")
         if review_status != "PASS":
             errors.append("PASS requires review_status=PASS")
-    elif state_name in {
-        "ARCHITECT_PLANNING",
-        "BLOCKED",
-        "USER_ESCALATION",
-    }:
+    elif state_name == "ARCHITECT_PLANNING":
+        if authorized_next:
+            errors.append("ARCHITECT_PLANNING must have authorized_next=[]")
+        if report_status != "REVIEW_READY":
+            errors.append("ARCHITECT_PLANNING requires report_status=REVIEW_READY")
+        if review_status not in {"PASS", "CHANGES_REQUIRED"}:
+            errors.append(
+                "ARCHITECT_PLANNING requires review_status=PASS or CHANGES_REQUIRED"
+            )
+    elif state_name in {"BLOCKED", "USER_ESCALATION"}:
         if authorized_next:
             errors.append(f"{state_name} must have authorized_next=[]")
+        if report_status != "REVIEW_READY":
+            errors.append(f"{state_name} requires report_status=REVIEW_READY")
+        if review_status != state_name:
+            errors.append(f"{state_name} requires review_status={state_name}")
 
     if current_key and handoff_id and current_key not in handoff_id:
         errors.append("handoff_id must include current task_key")
