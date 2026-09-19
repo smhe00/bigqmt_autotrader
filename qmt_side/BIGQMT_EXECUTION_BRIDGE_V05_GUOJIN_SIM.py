@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p5-simulation-calibration-4"
+BRIDGE_BUILD = "p5-simulation-calibration-5"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -1003,6 +1003,349 @@ def _reject_claimed(claimed_path, name, code, exc=None):
     _runtime_error(code, exc, {"file": name})
 
 
+_SIMULATION_INSTRUMENT_CANDIDATES = (
+    "204001.SH",
+    "511880.SH",
+    "00700.HK",
+    "00700.HGT",
+    "00700.SGT",
+)
+_SIMULATION_TICK_WINDOW_SECONDS = 10
+
+
+def _runtime_instrument_probe(ContextInfo):
+    query = None
+    method = None
+    for name in ("get_instrument_detail", "get_instrumentdetail"):
+        candidate = getattr(ContextInfo, name, None)
+        if callable(candidate):
+            query = candidate
+            method = name
+            break
+    records = []
+    for symbol in _SIMULATION_INSTRUMENT_CANDIDATES:
+        record = {"symbol": symbol, "method": method, "observed": False}
+        if query is None:
+            record["error"] = "INSTRUMENT_QUERY_UNAVAILABLE"
+        else:
+            try:
+                details = query(symbol)
+                if isinstance(details, dict):
+                    record.update(
+                        {
+                            "exchange_id": _text(details.get("ExchangeID")),
+                            "exchange_code": _text(details.get("ExchangeCode")),
+                            "instrument_id": _text(details.get("InstrumentID")),
+                            "instrument_name": _text(details.get("InstrumentName")),
+                            "is_trading": details.get("IsTrading"),
+                            "hsgt_flag": details.get("HSGTFlag"),
+                        }
+                    )
+                    record["observed"] = bool(
+                        record["exchange_id"] and record["instrument_id"]
+                    )
+                else:
+                    record["error"] = "INSTRUMENT_QUERY_INVALID_RESULT"
+            except Exception as exc:
+                record["error"] = "INSTRUMENT_QUERY_EXCEPTION"
+                record["error_type"] = type(exc).__name__
+        records.append(record)
+    return {"candidates": records}
+
+
+def _tick_state():
+    records = getattr(_STATE, "instrument_tick_records", None)
+    if not isinstance(records, dict):
+        records = {}
+        _STATE.instrument_tick_records = records
+    return records
+
+
+def _tick_scalar(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    try:
+        scalar = value.item()
+        if scalar is None or isinstance(scalar, (str, int, float, bool)):
+            return scalar
+    except Exception:
+        pass
+    return _text(value)
+
+
+def _tick_row(data):
+    if isinstance(data, dict):
+        return data, None
+    try:
+        if hasattr(data, "iloc") and hasattr(data, "index") and len(data.index) > 0:
+            return data.iloc[-1], data.index[-1]
+    except Exception:
+        return None, None
+    return None, None
+
+
+def _normalize_tick_evidence(symbol, data):
+    payload = {
+        "requested_symbol": symbol,
+        "reported_symbol": None,
+        "exact_symbol": False,
+        "data_type": type(data).__name__,
+    }
+    if not isinstance(data, dict):
+        payload["error"] = "TICK_CALLBACK_INVALID_RESULT"
+        return payload
+    if symbol not in data:
+        payload["error"] = "TICK_CALLBACK_SYMBOL_MISMATCH"
+        try:
+            payload["reported_symbols"] = sorted(
+                [_text(key) for key in data.keys() if _text(key)]
+            )
+        except Exception:
+            payload["reported_symbols"] = []
+        return payload
+    frame = data.get(symbol)
+    payload["reported_symbol"] = symbol
+    payload["data_type"] = type(frame).__name__
+    row, tick_index = _tick_row(frame)
+    if row is None:
+        payload["error"] = "TICK_CALLBACK_EMPTY"
+        return payload
+    raw_symbol = (
+        row.get("stockCode")
+        or row.get("stock_code")
+        or row.get("code")
+        or row.get("InstrumentID")
+        if hasattr(row, "get")
+        else None
+    )
+    exchange = (
+        row.get("ExchangeID") or row.get("exchangeID") or row.get("market")
+        if hasattr(row, "get")
+        else None
+    )
+    tick_time = (
+        row.get("time") or row.get("timetag") or row.get("timestamp")
+        if hasattr(row, "get")
+        else None
+    )
+    last_price = row.get("lastPrice") if hasattr(row, "get") else None
+    if last_price is None and hasattr(row, "get"):
+        last_price = row.get("last_price")
+    volume = row.get("volume") if hasattr(row, "get") else None
+    amount = row.get("amount") if hasattr(row, "get") else None
+    payload.update(
+        {
+            "exact_symbol": True,
+            "raw_symbol": _text(_tick_scalar(raw_symbol)),
+            "exchange_id": _text(_tick_scalar(exchange)),
+            "tick_index": _tick_scalar(tick_index),
+            "tick_time": _tick_scalar(tick_time),
+            "last_price": _decimal_text(_tick_scalar(last_price)),
+            "volume": _decimal_text(_tick_scalar(volume)),
+            "amount": _decimal_text(_tick_scalar(amount)),
+        }
+    )
+    return payload
+
+
+def _tick_capabilities_payload(final=False):
+    state = _tick_state()
+    candidates = []
+    observed_count = 0
+    for symbol in _SIMULATION_INSTRUMENT_CANDIDATES:
+        record = dict(
+            state.get(
+                symbol,
+                {
+                    "symbol": symbol,
+                    "subscription_id": None,
+                    "accepted": False,
+                    "callback_registered": False,
+                    "tick_observed": False,
+                    "callback_count": 0,
+                },
+            )
+        )
+        if record.get("tick_observed"):
+            observed_count += 1
+        candidates.append(record)
+    return {
+        "candidates": candidates,
+        "observed_count": observed_count,
+        "window_seconds": _SIMULATION_TICK_WINDOW_SECONDS,
+        "final": bool(final),
+    }
+
+
+def _publish_tick_capabilities(source, final=False):
+    payload = _tick_capabilities_payload(final=final)
+    _enqueue("instrument_tick_capabilities", source, payload)
+    _safe_log("instrument_tick_capabilities", payload)
+    flush_transport()
+    return payload
+
+
+def _record_tick_evidence(symbol, data, source="quote_callback"):
+    state = _tick_state()
+    record = state.setdefault(
+        symbol,
+        {
+            "symbol": symbol,
+            "subscription_id": None,
+            "accepted": False,
+            "callback_registered": True,
+            "tick_observed": False,
+            "callback_count": 0,
+        },
+    )
+    record["callback_count"] = int(record.get("callback_count") or 0) + 1
+    record["last_callback_ms"] = int(time.time() * 1000)
+    evidence = _normalize_tick_evidence(symbol, data)
+    record["evidence"] = evidence
+    first_observed = not record.get("tick_observed") and evidence.get("exact_symbol") is True
+    if evidence.get("exact_symbol") is True:
+        record["tick_observed"] = True
+        record["evidence_source"] = source
+    if first_observed or record["callback_count"] == 1:
+        _publish_tick_capabilities(source, final=False)
+
+
+def _tick_callback(symbol):
+    def callback(data):
+        try:
+            _record_tick_evidence(symbol, data)
+        except Exception as exc:
+            _runtime_error(
+                "INSTRUMENT_TICK_CALLBACK_FAILED",
+                exc,
+                {"symbol": symbol},
+            )
+    return callback
+
+
+def _runtime_instrument_subscribe(ContextInfo):
+    subscribe = getattr(ContextInfo, "subscribe_quote", None)
+    state = _tick_state()
+    records = []
+    for symbol in _SIMULATION_INSTRUMENT_CANDIDATES:
+        record = {
+            "symbol": symbol,
+            "method": "subscribe_quote",
+            "accepted": False,
+            "subscription_id": None,
+            "callback_registered": False,
+            "tick_observed": False,
+            "callback_count": 0,
+        }
+        state[symbol] = dict(record)
+        if not callable(subscribe):
+            record["error"] = "SUBSCRIBE_QUOTE_UNAVAILABLE"
+        else:
+            callback = _tick_callback(symbol)
+            try:
+                subscription_id = subscribe(symbol, "tick", "none", callback=callback)
+                record["callback_registered"] = True
+            except TypeError:
+                try:
+                    subscription_id = subscribe(symbol, "tick", callback=callback)
+                    record["callback_registered"] = True
+                except Exception as exc:
+                    subscription_id = None
+                    record["error"] = "SUBSCRIBE_QUOTE_CALLBACK_EXCEPTION"
+                    record["error_type"] = type(exc).__name__
+            except Exception as exc:
+                subscription_id = None
+                record["error"] = "SUBSCRIBE_QUOTE_CALLBACK_EXCEPTION"
+                record["error_type"] = type(exc).__name__
+            if isinstance(subscription_id, bool):
+                normalized_id = None
+            else:
+                try:
+                    normalized_id = int(subscription_id)
+                except Exception:
+                    normalized_id = None
+            record["subscription_id"] = normalized_id
+            record["accepted"] = normalized_id is not None and normalized_id > 0
+        # A QMT subscription may invoke its callback synchronously. Preserve
+        # any tick evidence written during subscribe_quote instead of
+        # overwriting it with the pre-call zero values in ``record``.
+        current = state.get(symbol, {})
+        current["symbol"] = symbol
+        current["method"] = record["method"]
+        current["accepted"] = record["accepted"]
+        current["subscription_id"] = record["subscription_id"]
+        current["callback_registered"] = record["callback_registered"]
+        if "error" in record:
+            current["error"] = record["error"]
+        if "error_type" in record:
+            current["error_type"] = record["error_type"]
+        state[symbol] = current
+        records.append(dict(current))
+    _STATE.instrument_probe_attempts = 0
+    _STATE.instrument_probe_timer_registered = _register_timer(
+        ContextInfo, "instrument_probe_tick", "1nSecond"
+    )
+    return {
+        "candidates": records,
+        "probe_timer_registered": _STATE.instrument_probe_timer_registered,
+        "max_probe_attempts": _SIMULATION_TICK_WINDOW_SECONDS,
+        "tick_evidence_required": True,
+    }
+
+
+def _runtime_full_tick_probe(ContextInfo):
+    query = getattr(ContextInfo, "get_full_tick", None)
+    result = {"method": "get_full_tick", "attempted": 0, "observed": 0}
+    if not callable(query):
+        result["error"] = "GET_FULL_TICK_UNAVAILABLE"
+        return result
+    for symbol in _SIMULATION_INSTRUMENT_CANDIDATES:
+        record = _tick_state().get(symbol, {})
+        if record.get("tick_observed") is True:
+            continue
+        result["attempted"] += 1
+        try:
+            data = query([symbol])
+            before = bool(record.get("tick_observed"))
+            _record_tick_evidence(symbol, data, source="full_tick_poll")
+            after = bool(_tick_state().get(symbol, {}).get("tick_observed"))
+            if after and not before:
+                result["observed"] += 1
+        except Exception as exc:
+            current = _tick_state().setdefault(symbol, {"symbol": symbol})
+            current["full_tick_error"] = "GET_FULL_TICK_EXCEPTION"
+            current["full_tick_error_type"] = type(exc).__name__
+    return result
+
+
+def instrument_probe_tick(ContextInfo):
+    attempts = getattr(_STATE, "instrument_probe_attempts", 0)
+    if attempts >= _SIMULATION_TICK_WINDOW_SECONDS:
+        return
+    attempts += 1
+    _STATE.instrument_probe_attempts = attempts
+    payload = _runtime_instrument_probe(ContextInfo)
+    payload["attempt"] = attempts
+    payload["max_attempts"] = _SIMULATION_TICK_WINDOW_SECONDS
+    observed = any(record.get("observed") for record in payload["candidates"])
+    if attempts == 1 or attempts == _SIMULATION_TICK_WINDOW_SECONDS or observed:
+        _enqueue("instrument_capabilities", "active_query", payload)
+        _safe_log("instrument_capabilities", payload)
+        flush_transport()
+    payload["full_tick_probe"] = _runtime_full_tick_probe(ContextInfo)
+    tick_payload = _tick_capabilities_payload(final=False)
+    all_ticks = tick_payload["observed_count"] == len(_SIMULATION_INSTRUMENT_CANDIDATES)
+    if attempts == _SIMULATION_TICK_WINDOW_SECONDS or observed or all_ticks:
+        _publish_tick_capabilities(
+            "probe_window",
+            final=(attempts == _SIMULATION_TICK_WINDOW_SECONDS or all_ticks),
+        )
+    if observed or all_ticks:
+        _STATE.instrument_probe_attempts = _SIMULATION_TICK_WINDOW_SECONDS
+
+
+
+
 def _simulation_order_symbol(value):
     value = _text(value)
     if not value:
@@ -1013,7 +1356,7 @@ def _simulation_order_symbol(value):
     market = parts[1]
     if market in ("SH", "SZ") and len(parts[0]) == 6:
         return value
-    if market == "HK" and len(parts[0]) == 5:
+    if market in ("HK", "HGT", "SGT") and len(parts[0]) == 5:
         return value
     return None
 

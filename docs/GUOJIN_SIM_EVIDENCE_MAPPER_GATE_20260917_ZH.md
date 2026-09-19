@@ -142,3 +142,7 @@ GC001 SELL 校准；其余身份、session、token、价格、次数及撤单 Ga
 
 新 artifact 仍需操作员在 Big QMT 中替换并重启后才会生效。港股通复用当前
 manifest 固定的 `STOCK` simulation account；`guojin` / `galaxy` 权限没有变化。
+
+后续 build `p5-simulation-calibration-5` 将港股格式扩展为五位
+`.HK/.HGT/.SGT`，并加入只读证券身份与精确 tick 探测；本 mapper 的 broker-token、
+ORDER/DEAL 和状态语义边界不变。

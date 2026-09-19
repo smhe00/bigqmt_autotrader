@@ -18,7 +18,7 @@ def instance(tmp_path) -> QmtInstance:
         session_id="session-01",
         account_fingerprint=FINGERPRINT,
         account_type="STOCK",
-        bridge_build="p5-simulation-calibration-4",
+        bridge_build="p5-simulation-calibration-5",
         created_ms=1_700_000_000_000,
         execution_mode="SIMULATION_CALIBRATION",
         trading_enabled=True,
@@ -126,8 +126,9 @@ def test_simulation_probe_publishes_bounded_sell(tmp_path, monkeypatch, capsys):
     assert payload["quantity"] == 10
 
 
+@pytest.mark.parametrize("market", ["HK", "HGT", "SGT"])
 def test_simulation_probe_publishes_hk_symbol_on_same_stock_account(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, market
 ):
     monkeypatch.setattr(
         "bigqmt_autotrader.qmt.simulation_probe._load_authorized_instance",
@@ -141,9 +142,9 @@ def test_simulation_probe_publishes_hk_symbol_on_same_stock_account(
             CONFIRMATION,
             "submit",
             "--client-order-id",
-            "cid-hk",
+            "cid-" + market.lower(),
             "--symbol",
-            "00700.HK",
+            "00700." + market,
             "--side",
             "BUY",
             "--quantity",
@@ -157,7 +158,7 @@ def test_simulation_probe_publishes_hk_symbol_on_same_stock_account(
     capsys.readouterr()
     path = next((tmp_path / "commands" / "inbox").glob("*.json"))
     payload = json.loads(path.read_text(encoding="utf-8"))["command"]["payload"]
-    assert payload["symbol"] == "00700.HK"
+    assert payload["symbol"] == "00700." + market
 
 
 def test_simulation_probe_rejects_more_than_100_units(tmp_path, monkeypatch):

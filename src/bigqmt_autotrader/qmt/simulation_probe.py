@@ -20,7 +20,7 @@ def _is_supported_simulation_symbol(symbol: str) -> bool:
         return False
     market = parts[1]
     return (market in {"SH", "SZ"} and len(parts[0]) == 6) or (
-        market == "HK" and len(parts[0]) == 5
+        market in {"HK", "HGT", "SGT"} and len(parts[0]) == 5
     )
 
 
@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("simulation calibration quantity must be in 1..100")
         if not _is_supported_simulation_symbol(args.symbol):
             raise SystemExit(
-                "--symbol must be six-digit .SH/.SZ or five-digit .HK"
+                "--symbol must be six-digit .SH/.SZ or five-digit .HK/.HGT/.SGT"
             )
         try:
             limit_price = Decimal(args.limit_price)

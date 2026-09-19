@@ -249,6 +249,7 @@ def test_live_canary_rejects_any_scope_expansion(monkeypatch, field, value):
 def test_live_canary_fails_closed_when_instrument_preflight_is_missing(monkeypatch):
     bridge = load_bridge()
     calls = []
+    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
     with pytest.raises(bridge.CommandError, match="instrument preflight"):
         bridge._execute_order_command(command(bridge), object())
@@ -258,6 +259,7 @@ def test_live_canary_fails_closed_when_instrument_preflight_is_missing(monkeypat
 def test_live_canary_fails_closed_on_instrument_identity_mismatch(monkeypatch):
     bridge = load_bridge()
     calls = []
+    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
 
     class WrongContext:

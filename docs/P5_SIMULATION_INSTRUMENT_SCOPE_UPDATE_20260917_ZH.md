@@ -2,7 +2,7 @@
 
 ## 结论
 
-`guojin_sim` V5 build 已升级为 `p5-simulation-calibration-4`。
+`guojin_sim` V5 build 已升级为 `p5-simulation-calibration-5`。
 
 原限制：
 
@@ -16,7 +16,7 @@ quantity = 100
 ```text
 side in {BUY, SELL}
 1 <= quantity <= 100
-symbol = six-digit .SH/.SZ or five-digit .HK security
+symbol = six-digit .SH/.SZ or five-digit .HK/.HGT/.SGT security
 ```
 
 BUY 使用官方 passorder opType `23`，SELL 使用 opType `24`。这允许在绑定的
@@ -44,10 +44,11 @@ simulation command 必须由操作者在新 build 启动后，根据新鲜行情
 ## 国金单一股票账号下的港股通修正
 
 实机确认国金将 A 股和港股通交易挂在同一个 `STOCK` 资金账号后，模拟 build
-升级为 `p5-simulation-calibration-4`。账号发现仍只需要确认清单固定的 `STOCK`
-账号；交易市场由证券代码后缀表达，不再要求额外发现 `HUGANGTONG` 或
-`SHENGANGTONG` 账号类型。
+升级为 `p5-simulation-calibration-5`。交易仍使用清单固定的 `STOCK` 账号；启动时
+同时只读探测 `STOCK/HUGANGTONG/SHENGANGTONG` 能力，但不会把附挂能力错误建模为
+第二个资金账号。交易市场由证券代码后缀表达。
 
-新增的唯一证券格式为五位 `.HK`，例如 `00700.HK`。六位 `.SH/.SZ` 规则保持
-不变。该扩展仍仅存在于 `guojin_sim` 生成物，生产 `guojin`、`galaxy` 文件没有
-任何 broker mutation 调用面。
+允许的港股代码格式为五位 `.HK/.HGT/.SGT`，例如 `00700.HGT`。六位 `.SH/.SZ`
+规则保持不变。build-5 还复用实盘已验证的只读证券主数据与精确
+`get_full_tick([exact_symbol])` 证据探测，以便先校准实际路由再提交。该扩展仍仅
+存在于 `guojin_sim` 生成物；生产 `guojin`、`galaxy` 文件未发生变化。

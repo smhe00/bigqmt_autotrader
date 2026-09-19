@@ -67,7 +67,7 @@ The mutation path opens only when every layer agrees:
 
 - side: explicit `BUY` or `SELL`;
 - quantity: integer `1..100` units;
-- symbol: any six-digit `.SH` / `.SZ` or five-digit `.HK` security code
+- symbol: any six-digit `.SH` / `.SZ` or five-digit `.HK` / `.HGT` / `.SGT` security code
   accepted by the bound simulation STOCK account;
 - price: explicit positive limit price;
 - maximum submit calls per QMT session: 2,000;
@@ -105,11 +105,12 @@ python -m bigqmt_autotrader.qmt.host `
 7. Publish the fill-calibration 100-share BUY and collect ORDER/DEAL callback
    plus active-query convergence.
 
-Current build `p5-simulation-calibration-4` removes the original BUY-only and
+Current build `p5-simulation-calibration-5` removes the original BUY-only and
 exactly-100 restrictions inside the dedicated simulation artifact. It maps
 `BUY -> passorder opType 23` and `SELL -> opType 24`; the Host publisher also
 requires an explicit side. Guojin Hong Kong Connect uses the same bound STOCK
-account and is routed by the five-digit `.HK` symbol suffix. The account fingerprint, current QMT session,
+account; the bridge accepts five-digit `.HK/.HGT/.SGT` routes and publishes
+read-only instrument/tick evidence for all three before calibration. The account fingerprint, current QMT session,
 simulation-only mode, 100-unit per-command ceiling, finite session fuses,
 price bounds, exact broker token and cancel identity checks remain mandatory.
 Production artifacts are unchanged.

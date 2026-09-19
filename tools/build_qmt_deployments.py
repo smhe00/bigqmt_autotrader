@@ -30,7 +30,7 @@ SIMULATION_EXECUTOR = '''def _simulation_order_symbol(value):
     market = parts[1]
     if market in ("SH", "SZ") and len(parts[0]) == 6:
         return value
-    if market == "HK" and len(parts[0]) == 5:
+    if market in ("HK", "HGT", "SGT") and len(parts[0]) == 5:
         return value
     return None
 
@@ -676,6 +676,19 @@ def _execute_order_command(command, ContextInfo):
     raise CommandError("unsupported live canary mutation command")
 '''
 
+_LIVE_EXECUTOR_MARKER = "\ndef _live_canary_symbol"
+if LIVE_CANARY_EXECUTOR.count(_LIVE_EXECUTOR_MARKER) != 1:
+    raise RuntimeError("live canary diagnostics marker must appear exactly once")
+INSTRUMENT_DIAGNOSTICS = (
+    LIVE_CANARY_EXECUTOR.split(_LIVE_EXECUTOR_MARKER, 1)[0] + "\n\n\n"
+)
+SIMULATION_INSTRUMENT_DIAGNOSTICS = INSTRUMENT_DIAGNOSTICS.replace(
+    "_LIVE_CANARY_INSTRUMENT_CANDIDATES", "_SIMULATION_INSTRUMENT_CANDIDATES"
+).replace("_LIVE_CANARY_TICK_WINDOW_SECONDS", "_SIMULATION_TICK_WINDOW_SECONDS").replace(
+    '_LIVE_CANARY_MUTATION_SYMBOLS = ("204001.SH", "511880.SH", "00700.HGT")\n',
+    "",
+)
+
 
 def rendered(instance_id: str, *, profile: str) -> bytes:
     source = TEMPLATE.read_text(encoding="utf-8")
@@ -684,7 +697,7 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
     source = source.replace(TOKEN, instance_id)
     if profile == "simulation":
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-4"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-5"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "SIMULATION_CALIBRATION"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',
@@ -698,7 +711,7 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
             'SIMULATION_MAX_CANCEL_CALLS = 0': 'SIMULATION_MAX_CANCEL_CALLS = 2000',
             'and SIMULATION_MAX_SUBMIT_CALLS == 2': 'and SIMULATION_MAX_SUBMIT_CALLS == 2000',
             'and SIMULATION_MAX_CANCEL_CALLS == 2': 'and SIMULATION_MAX_CANCEL_CALLS == 2000',
-            SHADOW_EXECUTOR: SIMULATION_EXECUTOR,
+            SHADOW_EXECUTOR: SIMULATION_INSTRUMENT_DIAGNOSTICS + SIMULATION_EXECUTOR,
         }
         for before, after in replacements.items():
             if source.count(before) != 1:

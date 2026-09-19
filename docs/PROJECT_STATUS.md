@@ -289,13 +289,16 @@ in the 15:00 closing auction: broker order `5652`, trade `50043738`, 100 shares
 at `4.532`. Callback and active-query replay independently produced FULL_FILL.
 
 The generated `guojin_sim` V5 artifact is now build
-`p5-simulation-calibration-4`. Its submit gate supports explicit BUY/SELL and
+`p5-simulation-calibration-5`. Its submit gate supports explicit BUY/SELL and
 integer quantity `1..100` for six-digit `.SH`/`.SZ` securities and five-digit
-`.HK` securities on the same manifest-pinned `STOCK` simulation account, while retaining
+`.HK`/`.HGT`/`.SGT` securities on the same manifest-pinned `STOCK` simulation account, while retaining
 all simulation identity/session/token/price/fuse gates. This permits a bounded
 GC001 sell-path and Hong Kong Connect routing calibration without enabling any
 production artifact. It does not invent a second account: Guojin routes those
-markets through the same bound `STOCK` account.
+markets through the same bound `STOCK` account. Build-5 also emits the bounded
+instrument-detail and exact-symbol tick evidence used by the live bridge so the
+simulation route can be calibrated before mutation. The production artifacts
+remain byte-for-byte unchanged by this update.
 
 The first build-4 after-hours `00700.HK` probe reached `passorder` through that
 bound STOCK account, but produced no ORDER/DEAL callback and no row in the

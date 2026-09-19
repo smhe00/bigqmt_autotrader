@@ -114,7 +114,8 @@ def test_simulation_sell_and_sub_hundred_quantity_are_supported(monkeypatch):
     assert observed[0][:7] == (24, 1101, "SIM_ACCOUNT", "204001.SH", 11, 10.0, 10)
 
 
-def test_simulation_hong_kong_symbol_uses_same_bound_stock_account(monkeypatch):
+@pytest.mark.parametrize("market", ["HK", "HGT", "SGT"])
+def test_simulation_hong_kong_symbol_uses_same_bound_stock_account(monkeypatch, market):
     bridge = load_bridge()
     observed = []
     monkeypatch.setattr(
@@ -122,11 +123,34 @@ def test_simulation_hong_kong_symbol_uses_same_bound_stock_account(monkeypatch):
     )
 
     result = bridge._execute_order_command(
-        command(bridge, side="BUY", quantity=100, symbol="00700.HK"), object()
+        command(bridge, side="BUY", quantity=100, symbol="00700." + market), object()
     )
 
     assert result == ("SIMULATION_SUBMIT_CALL_RETURNED", True)
-    assert observed[0][:7] == (23, 1101, "SIM_ACCOUNT", "00700.HK", 11, 10.0, 100)
+    assert observed[0][:7] == (
+        23,
+        1101,
+        "SIM_ACCOUNT",
+        "00700." + market,
+        11,
+        10.0,
+        100,
+    )
+
+
+def test_simulation_build_includes_stock_connect_runtime_diagnostics():
+    bridge = load_bridge()
+
+    assert bridge.BRIDGE_BUILD == "p5-simulation-calibration-5"
+    assert bridge._SIMULATION_INSTRUMENT_CANDIDATES == (
+        "204001.SH",
+        "511880.SH",
+        "00700.HK",
+        "00700.HGT",
+        "00700.SGT",
+    )
+    assert callable(bridge._runtime_instrument_probe)
+    assert callable(bridge._runtime_instrument_subscribe)
 
 
 @pytest.mark.parametrize(
