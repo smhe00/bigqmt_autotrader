@@ -1,5 +1,31 @@
 # Repository Agent Workflow
 
+## Single bootstrap entrypoint
+
+任何新 Agent、Architect 或自动化执行器进入仓库时，**唯一允许的启动入口**是：
+
+```text
+workflow/control/WORKFLOW_STATE.yaml
+```
+
+不要先扫描 `docs/`、不要按日期找“最新任务”、不要从 git log 猜当前工作。
+
+读取顺序由 `WORKFLOW_STATE.yaml` 自己声明：
+
+1. `bootstrap_protocol_files`：协作协议；
+2. `bootstrap_project_context_files`：必须掌握的长期项目上下文；
+3. `bootstrap_active_handoff_fields` 指向的当前 task/report/review；
+4. 刷新并确认 `main` HEAD；
+5. 根据 `audit_base_commit` 检查必要 diff；
+6. 再按 `state / owner / authorized_next` 决定是否允许执行。
+
+其中当前 task/report/review 的真实路径只保存在顶层
+`task_file / expected_report_file / expected_review_file`，bootstrap 只引用这些字段名，
+避免复制路径形成第二个 truth source。
+
+`tools/verify_workflow_contract.py` 会在 CI 中验证 single-bootstrap contract、
+必读文件存在性和 active handoff 引用是否有效。
+
 本目录专门承载 Architect ↔ Agent 的任务交接、执行报告和审计结果。长期设计、正式规范和项目状态仍放在 `docs/`；不得再把临时任务书、Agent implementation report 或 Architect review 混入 `docs/`。
 
 ## Directory contract
