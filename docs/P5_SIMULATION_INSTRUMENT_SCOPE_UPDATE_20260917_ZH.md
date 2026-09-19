@@ -130,3 +130,26 @@ build-7 保留板块发现优先级；当板块数据为空、只返回少量股
 `fallback_underlyings`，从而区分券商板块发现证据与内置校准样本。该回退只扩大
 只读证券主数据和行情证据采样，不扩大订单授权，不发布命令，也不自动调用任何
 broker mutation。
+
+### build 7 实机结果（2026-09-19）
+
+国金模拟 QMT 已加载 build-7，session 为
+`3a958aea1584464083756592bf912bd9`。七个板块名称仍返回空列表，因此明确启用
+preferred fallback：
+
+```text
+discovered_underlying_count = 0
+fallback_used = true
+selected_underlyings = 00700,09988,01810,03690,00941,00981
+candidate_count = 20
+truncated = false
+```
+
+六只港股的 `.HK/.HGT/.SGT` 共 18 条 route，加上 `204001.SH`、`511880.SH`，
+证券主数据 `observed=20/20`、quote callback `observed=20/20`、
+`exact_symbol=true 20/20`。腾讯控股、阿里巴巴-W、小米集团-W、美团-W、中国移动、
+中芯国际三种 route 均规范化为相同的 `HK` 证券身份并返回 `HSGTFlag=5`。
+
+本次为非交易时段只读证据；行情时间属于上一交易日。未发布 SUBMIT/CANCEL，不能
+据此把任一 route 判定为 broker 下单 ACK，但足以通过扩大后的证券身份和行情路由
+发现 Gate。

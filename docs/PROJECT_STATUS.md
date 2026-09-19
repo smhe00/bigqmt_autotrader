@@ -306,6 +306,14 @@ It probes at most six underlying codes and 20 total diagnostic routes. Runtime
 evidence records discovered and fallback codes separately. Discovery never
 submits or broadens command authorization.
 
+Build-7 was then loaded by the Guojin simulation terminal in session
+`3a958aea1584464083756592bf912bd9`. Local sector-name queries remained empty,
+so the bounded preferred fallback selected `00700`, `09988`, `01810`, `03690`,
+`00941`, and `00981`. Instrument detail and exact-symbol quote callbacks passed
+for all 20 routes (18 Hong Kong suffix routes plus two Shanghai probes). Every
+Hong Kong underlying resolved consistently across `.HK/.HGT/.SGT` with
+`HSGTFlag=5`. No order or cancel command was published by this calibration.
+
 The first build-4 after-hours `00700.HK` probe reached `passorder` through that
 bound STOCK account, but produced no ORDER/DEAL callback and no row in the
 immediate clean active snapshot. It is therefore recorded as API-call-returned
