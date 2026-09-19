@@ -108,3 +108,42 @@ Architect 审计后：
 - task handoff state。
 
 最终 PASS 后，如结论具有长期价值，可以由 Architect 把结论摘要同步进 `docs/`，但 `workflow/` 中的原始任务链仍保留作为审计轨迹。
+
+
+## Machine-enforced contract
+
+`python tools/verify_workflow_contract.py` is a permanent CI gate.
+
+It verifies:
+
+- every task has exactly one matched implementation report and one matched architect review;
+- the three files share the exact same `task_key`;
+- task iterations start at `I01` and remain contiguous;
+- report `reply_to` and review `review_of` point to the exact paired files;
+- `WORKFLOW_STATE.yaml` paths match the active `task_key`;
+- state/owner/authorized_next are mutually consistent;
+- active report/review frontmatter status agrees with control state.
+
+A workflow commit that breaks these invariants must fail CI instead of relying on human convention.
+
+## State transitions
+
+```text
+ARCHITECT_PLANNING
+        |
+        v
+AGENT_READY  ----------------------+
+        |                          |
+        | Agent completes          | Architect requests fixes
+        v                          |
+REVIEW_READY                       |
+        |                          |
+        +--> PASS -----------------+--> next Txxx / I01
+        |
+        +--> CHANGES_REQUIRED ----------> same Txxx / next Ixx
+        |
+        +--> BLOCKED / USER_ESCALATION
+```
+
+During `AGENT_READY` or `CHANGES_REQUIRED`, `authorized_next` must contain exactly the current
+`task_key`. During Architect-owned states it must be empty.
