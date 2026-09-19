@@ -217,6 +217,10 @@ python tools/verify_broker_evidence_contract.py
 
 ## Agent workflow
 
+**Single bootstrap entrypoint:** `workflow/control/WORKFLOW_STATE.yaml`.
+
+任何 Agent/Architect 必须先读取该文件，并按其中 `bootstrap_*` 字段加载协议、长期项目上下文和当前 handoff。不要通过“最新文件”、日期或 git log 猜当前任务。
+
 Architect 任务、Agent 执行报告和 Architect 审计不放入 `docs/`。统一使用：
 
 - `workflow/tasks/`
