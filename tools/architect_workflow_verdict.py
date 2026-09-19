@@ -96,7 +96,7 @@ def main() -> int:
     review_text = review_path.read_text(encoding="utf-8")
     review_text = replace_frontmatter_scalar(review_text, "status", args.verdict)
     review_text = re.sub(
-        r"(?m)^\x60AWAITING_REVIEW\x60\s*$",
+        r"(?m)^(?:\x60)?AWAITING_REVIEW(?:\x60)?\s*$",
         chr(96) + args.verdict + chr(96),
         review_text,
         count=1,
