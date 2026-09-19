@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a matched workflow task/report/review trio without guessing filenames."""
+"""Create and activate the next matched workflow task/report/review trio."""
 
 from __future__ import annotations
 
@@ -30,6 +30,38 @@ def scalar(text: str, key: str) -> str:
     return next(g.strip() for g in match.groups() if g is not None)
 
 
+def frontmatter_scalar(path: Path, key: str) -> str:
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        raise SystemExit(f"{path.relative_to(ROOT)} missing frontmatter")
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        raise SystemExit(f"{path.relative_to(ROOT)} unterminated frontmatter")
+    match = re.search(rf"(?m)^{re.escape(key)}:\s*(.+?)\s*$", text[:end])
+    if not match:
+        raise SystemExit(f"{path.relative_to(ROOT)} missing frontmatter field {key}")
+    return match.group(1).strip().strip('"').strip("'")
+
+
+def replace_scalar(text: str, key: str, value: str, *, quote: bool = True) -> str:
+    rendered = f'"{value}"' if quote else value
+    pattern = re.compile(rf"(?m)^{re.escape(key)}:\s*.*$")
+    if len(pattern.findall(text)) != 1:
+        raise SystemExit(f"expected exactly one {key} in WORKFLOW_STATE")
+    return pattern.sub(f"{key}: {rendered}", text, count=1)
+
+
+def replace_authorized_next(text: str, task_key: str) -> str:
+    inline = re.compile(r"(?m)^authorized_next:\s*\[\s*\]\s*$")
+    block = re.compile(r"(?m)^authorized_next:\s*$\n(?:^[ \t]+-[^\n]*\n)*")
+    replacement = f'authorized_next:\n  - "{task_key}"\n'
+    if inline.search(text):
+        return inline.sub(replacement.rstrip("\n"), text, count=1)
+    if len(block.findall(text)) == 1:
+        return block.sub(replacement, text, count=1)
+    raise SystemExit("expected one authorized_next field")
+
+
 def next_key(current: str, mode: str) -> tuple[str, str, str]:
     match = KEY_RE.fullmatch(current)
     if not match:
@@ -55,7 +87,7 @@ def write_new(path: Path, content: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Create task/report/review files sharing one deterministic workflow task_key."
+        description="Create and activate task/report/review files with one deterministic task_key."
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--next-task", action="store_true")
@@ -73,25 +105,31 @@ def main() -> int:
     state_text = STATE.read_text(encoding="utf-8")
     current_key = scalar(state_text, "task_key")
     current_state = scalar(state_text, "state")
+    owner = scalar(state_text, "owner")
+    review_rel = scalar(state_text, "expected_review_file")
+    handoff_seq = int(scalar(state_text, "handoff_seq"))
+
+    if current_state != "ARCHITECT_PLANNING" or owner != "architect":
+        raise SystemExit(
+            f"scaffolding requires ARCHITECT_PLANNING/architect, got {current_state}/{owner}"
+        )
+
+    current_review = ROOT / review_rel
+    if not current_review.is_file():
+        raise SystemExit(f"current review missing: {review_rel}")
+    current_verdict = frontmatter_scalar(current_review, "status")
 
     requested_mode = "next-task" if args.next_task else "next-iteration"
-    if requested_mode == "next-task" and current_state not in {
-        "PASS",
-        "ARCHITECT_PLANNING",
-        "BLOCKED",
-        "USER_ESCALATION",
-    }:
+    expected_verdict = "PASS" if requested_mode == "next-task" else "CHANGES_REQUIRED"
+    if current_verdict != expected_verdict:
         raise SystemExit(
-            f"next task may not be scaffolded from state={current_state}; "
-            "finish the current Gate first"
-        )
-    if requested_mode == "next-iteration" and current_state != "CHANGES_REQUIRED":
-        raise SystemExit(
-            f"next iteration requires CHANGES_REQUIRED, got state={current_state}"
+            f"{requested_mode} requires current review verdict={expected_verdict}, "
+            f"got {current_verdict}"
         )
 
     key, task_id, iteration = next_key(current_key, requested_mode)
     phase = key.split("-", 1)[0]
+    active_state = "AGENT_READY" if requested_mode == "next-task" else "CHANGES_REQUIRED"
 
     task_path = TASKS / f"{key}__{args.slug}.md"
     report_path = REPORTS / f"{key}__implementation-report.md"
@@ -99,7 +137,7 @@ def main() -> int:
 
     task_rel = task_path.relative_to(ROOT).as_posix()
     report_rel = report_path.relative_to(ROOT).as_posix()
-    review_rel = review_path.relative_to(ROOT).as_posix()
+    review_rel_new = review_path.relative_to(ROOT).as_posix()
 
     task = f"""---
 workflow_schema: 1
@@ -107,11 +145,11 @@ phase: {phase}
 task_id: {task_id}
 iteration: {iteration}
 task_key: {key}
-state: AGENT_READY
+state: {active_state}
 owner: agent
 audit_base_commit: {args.audit_base_commit}
 expected_report: {report_rel}
-expected_review: {review_rel}
+expected_review: {review_rel_new}
 ---
 
 # {args.title}
@@ -123,6 +161,17 @@ Architect: fill the exact implementation objective.
 ## Scope
 
 Architect: fill allowed files and required changes.
+
+## Workflow communication files
+
+Agent may always update:
+
+- {report_rel}
+- workflow/control/WORKFLOW_STATE.yaml
+
+Agent must not modify:
+
+- {review_rel_new}
 
 ## Safety boundaries
 
@@ -146,14 +195,14 @@ task_key: {key}
 reply_to: {task_rel}
 status: AWAITING_AGENT
 owner: agent
-review_target: {review_rel}
+review_target: {review_rel_new}
 ---
 
 # {key} Implementation Report
 
 ## 1. Result
 
-- Status: `AWAITING_AGENT`
+- Status: AWAITING_AGENT
 - Implementation commit:
 - Base commit:
 - Final commit:
@@ -176,11 +225,19 @@ Agent: explicitly state whether any prohibited side effect occurred.
 
 ## 6. Deviations / unresolved items
 
-Agent: fill, or `NONE`.
+Agent: fill, or NONE.
 
 ## 7. Handoff to Architect
 
-When complete, change frontmatter `status` to `REVIEW_READY`, fill final commit SHA,
+After filling this report, run:
+
+python tools/agent_workflow_handoff.py --implementation-commit <FULL_SHA>
+
+Then run:
+
+python tools/verify_workflow_contract.py
+
+Commit the report and WORKFLOW_STATE changes together. Do not modify the Architect review
 and do not create the next task.
 """
 
@@ -200,7 +257,7 @@ owner: architect
 
 ## 1. Gate verdict
 
-`AWAITING_REVIEW`
+AWAITING_REVIEW
 
 ## 2. Reviewed commits
 
@@ -226,20 +283,42 @@ Architect: PASS / CHANGES_REQUIRED / BLOCKED / USER_ESCALATION.
 
 ## 7. Next handoff
 
-Architect: record next task key or stop condition.
+After completing the review body, run tools/architect_workflow_verdict.py.
 """
 
     write_new(task_path, task)
     write_new(report_path, report)
     write_new(review_path, review)
 
-    print("WORKFLOW TRIO CREATED")
+    new_seq = handoff_seq + 1
+    handoff_id = f"{key}-architect-to-agent-{new_seq:04d}"
+    state_text = replace_scalar(state_text, "handoff_seq", str(new_seq), quote=False)
+    state_text = replace_scalar(state_text, "handoff_id", handoff_id)
+    state_text = replace_scalar(state_text, "phase", phase)
+    state_text = replace_scalar(state_text, "task_id", task_id)
+    state_text = replace_scalar(state_text, "iteration", iteration)
+    state_text = replace_scalar(state_text, "task_key", key)
+    state_text = replace_scalar(state_text, "state", active_state)
+    state_text = replace_scalar(state_text, "owner", "agent")
+    state_text = replace_scalar(state_text, "audit_base_commit", args.audit_base_commit)
+    state_text = replace_scalar(state_text, "task_file", task_rel)
+    state_text = replace_scalar(state_text, "expected_report_file", report_rel)
+    state_text = replace_scalar(state_text, "expected_review_file", review_rel_new)
+    state_text = replace_scalar(state_text, "report_status", "AWAITING_AGENT")
+    state_text = replace_scalar(state_text, "review_status", "AWAITING_REVIEW")
+    state_text = replace_authorized_next(state_text, key)
+    STATE.write_text(state_text, encoding="utf-8", newline="\n")
+
+    print("WORKFLOW HANDOFF ACTIVATED")
     print(f"  task_key: {key}")
+    print(f"  state: {active_state}")
+    print("  owner: agent")
     print(f"  task: {task_rel}")
     print(f"  report: {report_rel}")
-    print(f"  review: {review_rel}")
+    print(f"  review: {review_rel_new}")
+    print(f"  handoff_id: {handoff_id}")
     print()
-    print("Next: fill the task body, then explicitly update WORKFLOW_STATE.yaml to activate it.")
+    print("Run: python tools/verify_workflow_contract.py")
     return 0
 
 
