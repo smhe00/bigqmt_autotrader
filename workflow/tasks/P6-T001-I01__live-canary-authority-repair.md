@@ -235,6 +235,20 @@ general production live trading = NO
 
 若必须修改其它执行代码，先在 implementation report 中说明原因；不要顺手重构 OMS、Risk、BrokerEvidence 或 simulation path。
 
+### Workflow communication files
+
+以下两个协作文件始终属于本任务允许写入范围，不计入产品代码 Allowed Files：
+
+- `workflow/reports/P6-T001-I01__implementation-report.md`
+- `workflow/control/WORKFLOW_STATE.yaml`
+
+Agent 完成后必须按 `workflow/README.md` 的 Agent -> Architect handoff 规则，在同一提交中把
+report 与 control state 一起切换到 `REVIEW_READY`。Agent 禁止修改
+`workflow/reviews/P6-T001-I01__architect-review.md`。
+
+> `audit_base_commit` 仅表示本任务审计所依据的代码快照；实现应基于执行任务时最新 `main`，
+> 不要回退仓库以丢失之后已经合入的 workflow 基础设施。
+
 ## 7. 明确禁止
 
 本任务禁止：
