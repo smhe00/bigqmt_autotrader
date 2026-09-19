@@ -147,5 +147,6 @@ manifest 固定的 `STOCK` simulation account；`guojin` / `galaxy` 权限没有
 `.HK/.HGT/.SGT`，并加入只读证券身份与精确 tick 探测；本 mapper 的 broker-token、
 ORDER/DEAL 和状态语义边界不变。
 
-build `p5-simulation-calibration-6` 进一步增加只读、有界的港股通板块成分发现；
-其结果仅用于扩大证券身份/tick 校准样本，不改变 mapper 或订单状态权限。
+build `p5-simulation-calibration-7` 进一步增加板块发现为空或不完整时的有界代表性
+港股清单回退；发现和回退结果仅用于扩大证券身份/tick 校准样本，不改变 mapper
+或订单状态权限。

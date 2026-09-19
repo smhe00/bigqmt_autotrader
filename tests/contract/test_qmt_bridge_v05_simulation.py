@@ -141,7 +141,7 @@ def test_simulation_hong_kong_symbol_uses_same_bound_stock_account(monkeypatch, 
 def test_simulation_build_includes_stock_connect_runtime_diagnostics():
     bridge = load_bridge()
 
-    assert bridge.BRIDGE_BUILD == "p5-simulation-calibration-6"
+    assert bridge.BRIDGE_BUILD == "p5-simulation-calibration-7"
     assert bridge._SIMULATION_INSTRUMENT_CANDIDATES == (
         "204001.SH",
         "511880.SH",
@@ -180,6 +180,9 @@ def test_simulation_discovers_bounded_stock_connect_candidate_routes():
         "00941",
         "00981",
     ]
+    assert payload["discovered_underlying_count"] == 6
+    assert payload["fallback_used"] is False
+    assert payload["fallback_underlyings"] == []
     assert payload["candidate_count"] == 20
     assert payload["truncated"] is False
     assert bridge._SIMULATION_INSTRUMENT_CANDIDATES[:2] == (
@@ -192,20 +195,53 @@ def test_simulation_discovers_bounded_stock_connect_candidate_routes():
     assert len(bridge._SIMULATION_INSTRUMENT_CANDIDATES) == 20
 
 
-def test_simulation_sector_discovery_fails_closed_to_fixed_candidates():
+def test_simulation_sector_discovery_uses_bounded_preferred_fallback():
     bridge = load_bridge()
 
     payload = bridge._simulation_discover_stock_connect_candidates(object())
 
     assert payload["error"] == "SECTOR_QUERY_UNAVAILABLE"
-    assert payload["selected_underlyings"] == ["00700"]
-    assert bridge._SIMULATION_INSTRUMENT_CANDIDATES == (
-        "204001.SH",
-        "511880.SH",
-        "00700.HK",
-        "00700.HGT",
-        "00700.SGT",
-    )
+    assert payload["discovered_underlying_count"] == 0
+    assert payload["fallback_used"] is True
+    assert payload["selected_underlyings"] == [
+        "00700",
+        "09988",
+        "01810",
+        "03690",
+        "00941",
+        "00981",
+    ]
+    assert payload["fallback_underlyings"] == payload["selected_underlyings"]
+    assert payload["candidate_count"] == 20
+    assert len(bridge._SIMULATION_INSTRUMENT_CANDIDATES) == 20
+
+
+def test_simulation_sector_discovery_fills_partial_result_with_preferred_codes():
+    bridge = load_bridge()
+
+    class SectorContext:
+        def get_stock_list_in_sector(self, sector_name, realtime):
+            if sector_name == "沪港通":
+                return ["01211.HK", "00700.HK"]
+            return []
+
+    payload = bridge._simulation_discover_stock_connect_candidates(SectorContext())
+
+    assert payload["discovered_underlying_count"] == 2
+    assert payload["selected_underlyings"] == [
+        "00700",
+        "01211",
+        "09988",
+        "01810",
+        "03690",
+        "00941",
+    ]
+    assert payload["fallback_underlyings"] == [
+        "09988",
+        "01810",
+        "03690",
+        "00941",
+    ]
 
 
 @pytest.mark.parametrize(

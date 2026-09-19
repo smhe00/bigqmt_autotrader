@@ -289,7 +289,7 @@ in the 15:00 closing auction: broker order `5652`, trade `50043738`, 100 shares
 at `4.532`. Callback and active-query replay independently produced FULL_FILL.
 
 The generated `guojin_sim` V5 artifact is now build
-`p5-simulation-calibration-6`. Its submit gate supports explicit BUY/SELL and
+`p5-simulation-calibration-7`. Its submit gate supports explicit BUY/SELL and
 integer quantity `1..100` for six-digit `.SH`/`.SZ` securities and five-digit
 `.HK`/`.HGT`/`.SGT` securities on the same manifest-pinned `STOCK` simulation account, while retaining
 all simulation identity/session/token/price/fuse gates. This permits a bounded
@@ -300,10 +300,11 @@ instrument-detail and exact-symbol tick evidence used by the live bridge so the
 simulation route can be calibrated before mutation. The production artifacts
 remain byte-for-byte unchanged by this update.
 
-Build-6 additionally uses Big QMT's read-only sector-membership API to probe a
-bounded Stock Connect sample: at most six underlying Hong Kong codes and 20
-total diagnostic routes. Empty/unavailable sectors fail back to the original
-fixed candidates. Discovery never submits or broadens command authorization.
+Build-7 uses Big QMT's read-only sector-membership API first, then fills an
+empty or partial result from a bounded preferred Hong Kong calibration list.
+It probes at most six underlying codes and 20 total diagnostic routes. Runtime
+evidence records discovered and fallback codes separately. Discovery never
+submits or broadens command authorization.
 
 The first build-4 after-hours `00700.HK` probe reached `passorder` through that
 bound STOCK account, but produced no ORDER/DEAL callback and no row in the

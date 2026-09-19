@@ -184,42 +184,34 @@ def _simulation_discover_stock_connect_candidates(ContextInfo):
     query = getattr(ContextInfo, "get_stock_list_in_sector", None)
     realtime = _simulation_sector_realtime(ContextInfo)
     sector_results = []
-    underlying_codes = set(["00700"])
-    if not callable(query):
-        payload = {
-            "method": None,
-            "realtime": realtime,
-            "sector_results": [],
-            "selected_underlyings": ["00700"],
-            "candidate_count": len(_SIMULATION_INSTRUMENT_CANDIDATES),
-            "candidates": list(_SIMULATION_INSTRUMENT_CANDIDATES),
-            "error": "SECTOR_QUERY_UNAVAILABLE",
-        }
-        return payload
-
-    for sector_name in _SIMULATION_SECTOR_NAMES:
-        record = {"sector_name": sector_name, "count": 0, "sample": []}
-        try:
+    underlying_codes = set()
+    discovery_error = None
+    if callable(query):
+        for sector_name in _SIMULATION_SECTOR_NAMES:
+            record = {"sector_name": sector_name, "count": 0, "sample": []}
             try:
-                rows = query(sector_name, realtime)
-            except TypeError:
-                rows = query(sector_name)
-            if rows is None:
-                record["error"] = "SECTOR_QUERY_NONE"
-            else:
-                normalized = []
-                for row in rows:
-                    symbol = _simulation_hk_symbol(row)
-                    if symbol is not None:
-                        normalized.append(symbol)
-                        underlying_codes.add(symbol.split(".")[0])
-                normalized = sorted(set(normalized))
-                record["count"] = len(normalized)
-                record["sample"] = normalized[:_SIMULATION_SECTOR_SAMPLE_LIMIT]
-        except Exception as exc:
-            record["error"] = "SECTOR_QUERY_EXCEPTION"
-            record["error_type"] = type(exc).__name__
-        sector_results.append(record)
+                try:
+                    rows = query(sector_name, realtime)
+                except TypeError:
+                    rows = query(sector_name)
+                if rows is None:
+                    record["error"] = "SECTOR_QUERY_NONE"
+                else:
+                    normalized = []
+                    for row in rows:
+                        symbol = _simulation_hk_symbol(row)
+                        if symbol is not None:
+                            normalized.append(symbol)
+                            underlying_codes.add(symbol.split(".")[0])
+                    normalized = sorted(set(normalized))
+                    record["count"] = len(normalized)
+                    record["sample"] = normalized[:_SIMULATION_SECTOR_SAMPLE_LIMIT]
+            except Exception as exc:
+                record["error"] = "SECTOR_QUERY_EXCEPTION"
+                record["error_type"] = type(exc).__name__
+            sector_results.append(record)
+    else:
+        discovery_error = "SECTOR_QUERY_UNAVAILABLE"
 
     selected = []
     for code in _SIMULATION_PREFERRED_HK_CODES:
@@ -228,6 +220,13 @@ def _simulation_discover_stock_connect_candidates(ContextInfo):
     for code in sorted(underlying_codes):
         if code not in selected:
             selected.append(code)
+    fallback_underlyings = []
+    for code in _SIMULATION_PREFERRED_HK_CODES:
+        if len(selected) >= _SIMULATION_DISCOVERY_UNDERLYING_LIMIT:
+            break
+        if code not in selected:
+            selected.append(code)
+            fallback_underlyings.append(code)
     selected = selected[:_SIMULATION_DISCOVERY_UNDERLYING_LIMIT]
 
     candidates = ["204001.SH", "511880.SH"]
@@ -237,16 +236,21 @@ def _simulation_discover_stock_connect_candidates(ContextInfo):
     _SIMULATION_INSTRUMENT_CANDIDATES = tuple(
         candidates[:_SIMULATION_DISCOVERY_ROUTE_LIMIT]
     )
-    return {
-        "method": "get_stock_list_in_sector",
+    payload = {
+        "method": "get_stock_list_in_sector" if callable(query) else None,
         "realtime": realtime,
         "sector_results": sector_results,
         "discovered_underlying_count": len(underlying_codes),
+        "fallback_used": bool(fallback_underlyings),
+        "fallback_underlyings": fallback_underlyings,
         "selected_underlyings": selected,
         "candidate_count": len(_SIMULATION_INSTRUMENT_CANDIDATES),
         "candidates": list(_SIMULATION_INSTRUMENT_CANDIDATES),
         "truncated": len(candidates) > _SIMULATION_DISCOVERY_ROUTE_LIMIT,
     }
+    if discovery_error is not None:
+        payload["error"] = discovery_error
+    return payload
 
 '''
 
@@ -843,7 +847,7 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
     source = source.replace(TOKEN, instance_id)
     if profile == "simulation":
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-6"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-7"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "SIMULATION_CALIBRATION"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',

@@ -105,7 +105,7 @@ python -m bigqmt_autotrader.qmt.host `
 7. Publish the fill-calibration 100-share BUY and collect ORDER/DEAL callback
    plus active-query convergence.
 
-Current build `p5-simulation-calibration-6` removes the original BUY-only and
+Current build `p5-simulation-calibration-7` removes the original BUY-only and
 exactly-100 restrictions inside the dedicated simulation artifact. It maps
 `BUY -> passorder opType 23` and `SELL -> opType 24`; the Host publisher also
 requires an explicit side. Guojin Hong Kong Connect uses the same bound STOCK
@@ -115,12 +115,13 @@ simulation-only mode, 100-unit per-command ceiling, finite session fuses,
 price bounds, exact broker token and cancel identity checks remain mandatory.
 Production artifacts are unchanged.
 
-Build-6 also performs read-only bounded Stock Connect sector discovery through
-Big QMT `ContextInfo.get_stock_list_in_sector`. It tries a fixed set of common
-sector-name variants, retains at most six underlying Hong Kong codes, and
-expands them to at most 20 total `.HK/.HGT/.SGT` diagnostic routes including
-the two existing Shanghai probes. Discovery only changes startup diagnostics;
-it never publishes an order or changes the explicit command safety gates.
+Build-7 performs read-only bounded Stock Connect sector discovery through Big
+QMT `ContextInfo.get_stock_list_in_sector`, then fills empty or partial sector
+results from a fixed representative calibration list. It retains at most six
+underlying Hong Kong codes and expands them to at most 20 total
+`.HK/.HGT/.SGT` diagnostic routes including the two existing Shanghai probes.
+Discovery only changes startup diagnostics; it never publishes an order or
+changes the explicit command safety gates.
 8. Run `calibration_probe --details`; do not enable an evidence mapper until
    all acceptance criteria in
    `P4_ORDER_DEAL_BROKER_TOKEN_CALIBRATION.md` pass.

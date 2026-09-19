@@ -2,7 +2,7 @@
 
 ## 结论
 
-`guojin_sim` V5 build 已升级为 `p5-simulation-calibration-6`。
+`guojin_sim` V5 build 已升级为 `p5-simulation-calibration-7`。
 
 原限制：
 
@@ -44,7 +44,7 @@ simulation command 必须由操作者在新 build 启动后，根据新鲜行情
 ## 国金单一股票账号下的港股通修正
 
 实机确认国金将 A 股和港股通交易挂在同一个 `STOCK` 资金账号后，模拟 build
-升级为 `p5-simulation-calibration-6`。交易仍使用清单固定的 `STOCK` 账号；启动时
+升级为 `p5-simulation-calibration-7`。交易仍使用清单固定的 `STOCK` 账号；启动时
 同时只读探测 `STOCK/HUGANGTONG/SHENGANGTONG` 能力，但不会把附挂能力错误建模为
 第二个资金账号。交易市场由证券代码后缀表达。
 
@@ -106,6 +106,27 @@ build-6 在大QMT策略内部调用只读 `ContextInfo.get_stock_list_in_sector`
 上限为 20。板块返回值、选择结果、截断状态和查询错误均写入
 `bridge_ready.instrument_subscription.sector_discovery`。
 
-板块不可用、名称不匹配或查询异常时，系统退回腾讯加两只沪市证券的原固定候选。
+build-6 中，板块不可用、名称不匹配或查询异常时，系统退回腾讯加两只沪市证券的
+原固定候选。
 发现列表只用于证券主数据和精确 tick 证据，不发布命令、不调用 `passorder/cancel`，
 也不代表证券已经获得交易授权。
+
+### build 6 实机发现结果
+
+2026-09-19，build-6 session `5df8b9ea4a0d4edcbb6b862c0a586f59` 正确加载。
+国金模拟客户端对七个常见港股通板块名称均返回空列表，但原固定候选的五条 route
+全部取得精确 quote callback；其中 `00700.HK/.HGT/.SGT` 均返回腾讯控股、
+`HSGTFlag=5` 和完全匹配的代码证据。因此零结果表示本地板块分类数据/名称未命中，
+不表示港股行情 route 不可用。
+
+## build 7 有界代表性清单回退
+
+build-7 保留板块发现优先级；当板块数据为空、只返回少量股票或接口不可用时，用
+固定且有界的代表性港股清单补足至 6 个底层代码。当前优先顺序为 `00700`、
+`09988`、`01810`、`03690`、`00941`、`00981`，并分别展开为 `.HK/.HGT/.SGT`；
+连同两只沪市诊断证券，总数仍严格不超过 20。
+
+事件额外记录 `discovered_underlying_count`、`fallback_used` 和
+`fallback_underlyings`，从而区分券商板块发现证据与内置校准样本。该回退只扩大
+只读证券主数据和行情证据采样，不扩大订单授权，不发布命令，也不自动调用任何
+broker mutation。

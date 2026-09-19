@@ -18,7 +18,7 @@ def instance(tmp_path) -> QmtInstance:
         session_id="session-01",
         account_fingerprint=FINGERPRINT,
         account_type="STOCK",
-        bridge_build="p5-simulation-calibration-6",
+        bridge_build="p5-simulation-calibration-7",
         created_ms=1_700_000_000_000,
         execution_mode="SIMULATION_CALIBRATION",
         trading_enabled=True,
