@@ -1,6 +1,6 @@
 # bigqmt_autotrader 中文总览
 
-更新：2026-09-18
+更新：2026-09-19
 
 ## 1. 项目目标
 
@@ -29,7 +29,7 @@ Big QMT 被定位为 **券商执行终端 / Broker Gateway**。复杂策略、OM
 | P4 SHADOW execution bridge | **DEPLOYMENT GATE PASS** |
 | P5 国金模拟账户 submit/cancel/fill 校准 | **BOUNDED CALIBRATION PASS** |
 | Production live trading | **NO** |
-| 国金 LIVE_CANARY | **build-4 已证明订阅成功无法区分 route；build-5 增加精确 symbol 的真实 tick callback 证据，mutation authority 不变** |
+| 国金 LIVE_CANARY | **`p6-guojin-live-canary-6` 已完成启动/路由预检；仅保留 P6 两个命名单次案例，待有效交易窗口** |
 
 `galaxy` 与通用 production artifact 仍然在源代码级禁用 broker mutation；`guojin` 仅保留 P6 独立 Gate 下的 fingerprint-pinned LIVE_CANARY surface，不代表通用实盘授权。
 
@@ -293,7 +293,7 @@ Big QMT Quote                Big QMT Broker
 1. Broker ORDER/DEAL/query → 标准 OMS evidence mapper；
 2. replay-safe OMS evidence convergence；
 3. partial fill / cancel race / reject / disconnect / restart soak；
-4. 保持 production artifact mutation-free；
+4. 保持 generic / `galaxy` production artifact mutation-free；`guojin` 仅保留 P6 固定例外；
 5. 国金 LIVE_CANARY 只按 P6 独立 Gate 部署；银河仍禁止 mutation；
 6. Market Data Bridge 另行立项，不与 execution safety surface 混合。
 

@@ -2,9 +2,11 @@
 
 ## Current state
 
-**P4: SHADOW DEPLOYMENT GATE PASS. Galaxy and Guojin production-account
-artifacts remain SHADOW-only. A separately authorized P5 mutation surface now
-exists only in the account-pinned `guojin_sim` artifact.**
+**P4: SHADOW DEPLOYMENT GATE PASS. The generic and Galaxy artifacts remain
+SHADOW-only. P5 later added the account-pinned `guojin_sim` calibration
+surface, and P6 added a separate fingerprint-pinned Guojin LIVE_CANARY
+exception limited to two named cases. Neither exception changes the P4
+contract or authorizes general production trading.**
 
 The purpose of the first P4 checkpoint is to calibrate the asynchronous execution plumbing against Guojin QMT without creating broker side effects.
 
@@ -188,14 +190,14 @@ The separately authorized simulation workflow is documented in
 only API dispatch/return status. It is not broker ACK evidence; ORDER/DEAL
 callback or active-query evidence remains required.
 
-## Still explicitly out of scope
+## Still explicitly out of scope for P4
 
-- any `passorder` or cancel call in `galaxy` or `guojin`
+- any `passorder` or cancel call in `galaxy`, or any Guojin call outside the later P6 Gate
 - any production-account mutation
-- LIVE_CANARY / LIVE_ARMED
+- LIVE_ARMED and any LIVE_CANARY outside the later P6 named cases
 - treating QMT callback status codes as calibrated broker lifecycle evidence
 - automatic resend after UNKNOWN
 
 Those require a separate authorization after simulation ORDER/DEAL and
-status-code calibration. Static CI requires zero mutation calls in the
-production-account template and generated artifacts.
+status-code calibration. Static CI requires zero mutation calls in the generic
+and Galaxy artifacts and permits only the independently reviewed P5/P6 surfaces.

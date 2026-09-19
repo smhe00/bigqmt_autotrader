@@ -21,18 +21,18 @@
 | Guojin simulation raw status mapper | **PASS（仅 `guojin_sim`）** |
 | Production Guojin / Galaxy mapper | **尚未实现/未授权** |
 | Production live trading | **NO** |
-| LIVE_CANARY | **未启用** |
+| 国金 LIVE_CANARY | **仅 P6 两个 fingerprint-pinned 单次案例；build-6 已部署校验，仍非通用 LIVE** |
 
-生产账户 `galaxy` / `guojin` artifact 仍然：
+当前部署基线：
 
 ```text
-TRADING_ENABLED = False
-execution_mode = SHADOW
-live_submit = false
-live_cancel = false
+generic / galaxy = p4-shadow-command-spool-5       SHADOW, mutation-free
+guojin_sim      = p5-simulation-calibration-7      simulation-only calibration
+guojin          = p6-guojin-live-canary-6          two named P6 canary cases only
 ```
 
-并由静态审计保证 production artifact 中没有 broker mutation call surface。
+静态审计保证 generic / `galaxy` 没有 broker mutation call surface；`guojin` 只允许
+P6 独立 Gate 固定的 LIVE_CANARY 调用面，任何扩权都必须经过新的明确 Gate。
 
 `guojin_sim` 是 fingerprint-pinned 的 simulation calibration artifact。它能调用受限模拟账户 submit/cancel API，但**不构成生产实盘授权**。
 

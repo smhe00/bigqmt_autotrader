@@ -31,7 +31,8 @@ Host 发布器与 QMT V5 执行器执行同一证券格式校验。`00700.HK` �
 ## 不变的安全边界
 
 - 只允许实例 `guojin_sim`；
-- `guojin`、`galaxy` 仍为 SHADOW，`live_submit=false`、`live_cancel=false`；
+- 本节 build-4 校准时 `guojin`、`galaxy` 仍为 SHADOW；后续只有 `guojin` 获得
+  P6 两个命名单次 LIVE_CANARY 例外，`galaxy` 继续永久禁止 mutation；
 - 港股代码必须是五位数字，`700.HK` 等非规范格式拒绝；
 - build 3 运行实例不会接受 `.HK`，必须显式加载 build 4 后才能校准；
 - 非交易时段不以券商返回作为成交能力校准证据；
@@ -62,7 +63,7 @@ V5 返回 `SIMULATION_SUBMIT_CALL_RETURNED` 与 `live_side_effect=true`，证明
 ACK、拒绝证据或成交证据。由于处于非交易时段，没有重发，也没有构造无 broker
 order ID 的撤单。交易时段仍需用新的 client order ID 做一次受限校准。
 
-## build 5 后续更新（2026-09-19）
+## build 5–7 后续更新（2026-09-19）
 
 当前 `guojin_sim` 已升级为 `p5-simulation-calibration-7`。模拟账户现已附挂港股通
 能力，因此发布器与执行器同时接受五位 `.HK/.HGT/.SGT`，并在启动时对

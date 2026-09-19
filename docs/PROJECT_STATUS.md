@@ -1,6 +1,6 @@
 # Project Status
 
-Updated: 2026-09-18
+Updated: 2026-09-19
 
 ## 1. Summary
 
@@ -22,7 +22,7 @@ Updated: 2026-09-18
 | Guojin simulation raw status mapper | **PASS — `qmt-guojin-sim-20260917-v1`** |
 | Production Guojin / Galaxy mapper | **NOT IMPLEMENTED / NOT AUTHORIZED** |
 | Production-account live trading allowed | **NO** |
-| Guojin LIVE_CANARY implementation | **BUILD-4 READ-ONLY RESULT RECORDED; BUILD-5 REAL-TICK EVIDENCE PROBE READY** |
+| Guojin LIVE_CANARY implementation | **`p6-guojin-live-canary-6` STARTUP/ROUTE PREFLIGHT PASS; TWO NAMED CASES ONLY** |
 | Production broker mutation call surface | **GUOJIN: ONE PINNED LIVE_CANARY SURFACE; GALAXY/GENERIC: ZERO** |
 | QMT submit/cancel implementation | **GUOJIN_SIM + PINNED GUOJIN LIVE_CANARY** |
 | P2 execution-authority policy | **SIMULATION only** |
@@ -333,12 +333,12 @@ command failed that preflight closed: `REJECTED_SAFETY_GATE`,
 read-only startup probe found no instrument master for `.HK/.HGT/.SGT` in the
 model runtime. Build-4 proved that `.HK/.HGT/.SGT` all return accepted tick subscription IDs,
 while all three remain empty through instrument-master probe attempt 10. Subscription
-acceptance is therefore non-discriminative. Build-5 attaches bounded quote callbacks
+acceptance is therefore non-discriminative. Build-5 introduced bounded quote callbacks
 and publishes only normalized `instrument_tick_capabilities` evidence. Build-5 also
 uses exact-key `get_full_tick([symbol])` as a read-only fallback when a broker QMT
 distribution cannot load subscription callbacks; aliases never satisfy this gate. After the
 broker login capability changed, exact instrument metadata observed `.SGT` as canonical
-`HK/00700` with `HSGTFlag=5`. The current build-5 gate therefore permits only the two
+`HK/00700` with `HSGTFlag=5`. The current `p6-guojin-live-canary-6` gate therefore permits only the two
 explicit cases above and adds `204001.SH`/`511880.SH` to the read-only tick evidence set.
 
 ### Still pending
@@ -404,7 +404,7 @@ This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 bounded Guojin simulation submit/cancel/fill calibration PASS. Broker Evidence Runtime Conformance PASS. P6 build-5 now collects exact-route tick evidence for GC001, 511880 and the three Tencent route candidates. Guojin retains only two named one-shot LIVE_CANARY cases; Galaxy and generic deployments remain mutation-free.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 `p5-simulation-calibration-7` bounded simulation calibration PASS, including 20/20 read-only Stock Connect route evidence. Broker Evidence Runtime Conformance PASS. P6 `p6-guojin-live-canary-6` startup/route preflight PASS. Guojin retains only two named one-shot LIVE_CANARY cases; Galaxy and generic deployments remain mutation-free.**
 
 Next safety checkpoint:
 

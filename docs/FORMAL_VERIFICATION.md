@@ -174,9 +174,12 @@ No broker-specific mapper is treated as PASS by this Gate yet; that remains the 
 
 `tools/audit_side_effect_calls.py` remains a structural drift detector.
 
-Production `galaxy` and `guojin` artifacts must continue to expose **zero broker mutation call surface**.
+Generic and `galaxy` production artifacts must continue to expose **zero broker mutation call surface**.
 
-Only the separately reviewed, fingerprint-pinned `guojin_sim` calibration artifact may contain bounded simulation mutation logic.
+The separately reviewed, fingerprint-pinned `guojin_sim` artifact may contain
+bounded simulation mutation logic. `guojin` may contain only the two explicitly
+modelled P6 LIVE_CANARY cases; the static audit rejects every broader production
+mutation surface.
 
 ## 9. Toolchain
 
@@ -216,7 +219,8 @@ A TLC counterexample is a design/model/implementation defect until resolved. The
 - **Guojin simulation raw status mapper: PASS (`guojin_sim` only)**
 - **Production Guojin / Galaxy mapper: NOT IMPLEMENTED / NOT AUTHORIZED**
 - **Production live trading: NO**
-- **Guojin LIVE_CANARY: MODELLED AND IMPLEMENTED; NOT YET DEPLOYED/CALIBRATED**
+- **Guojin simulation deployment: `p5-simulation-calibration-7`, 20/20 read-only route evidence**
+- **Guojin LIVE_CANARY: `p6-guojin-live-canary-6` DEPLOYED/PREFLIGHT PASS; TWO NAMED CASES ONLY**
 
 The Guojin simulation mapper is now implemented under the versioned
 `qmt-guojin-sim-20260917-v1` profile. The next execution-safety checkpoints are
