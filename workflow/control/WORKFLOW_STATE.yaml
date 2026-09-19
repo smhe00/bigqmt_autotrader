@@ -1,0 +1,36 @@
+schema_version: 1
+handoff_seq: 1
+handoff_id: "P6-T001-I01-architect-to-agent"
+
+phase: "P6"
+task_id: "P6-T001"
+iteration: "I01"
+task_key: "P6-T001-I01"
+
+state: "AGENT_READY"
+owner: "agent"
+
+audit_base_commit: "1e5c42e9a6e19107fb01a888ea95499751a8726d"
+task_file: "workflow/tasks/P6-T001-I01__live-canary-authority-repair.md"
+expected_report_file: "workflow/reports/P6-T001-I01__implementation-report.md"
+expected_review_file: "workflow/reviews/P6-T001-I01__architect-review.md"
+
+report_status: "MISSING"
+review_status: "MISSING"
+
+authorized_next:
+  - "P6-T001-I01"
+
+ordering:
+  task_width: 3
+  iteration_width: 2
+  rule: "lexicographic filename order equals workflow order"
+
+matching:
+  rule: "task, report, and review must share the exact task_key prefix"
+
+separation:
+  docs_accept_workflow_handoffs: false
+  tasks_dir: "workflow/tasks"
+  reports_dir: "workflow/reports"
+  reviews_dir: "workflow/reviews"
