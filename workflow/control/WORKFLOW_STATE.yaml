@@ -1,4 +1,27 @@
-schema_version: 1
+schema_version: 2
+
+bootstrap_entrypoint: "workflow/control/WORKFLOW_STATE.yaml"
+bootstrap_rule: "Read this file first; follow bootstrap_* references and active handoff fields. Do not discover current work by newest filename, dates, docs search, or git-log guessing."
+
+bootstrap_protocol_files:
+  - "workflow/README.md"
+
+bootstrap_project_context_files:
+  - "README.md"
+  - "docs/PROJECT_OVERVIEW_ZH.md"
+  - "docs/PROJECT_STATUS.md"
+  - "docs/FORMAL_VERIFICATION.md"
+
+bootstrap_active_handoff_fields:
+  - "task_file"
+  - "expected_report_file"
+  - "expected_review_file"
+
+bootstrap_git_branch: "main"
+bootstrap_refresh_main_before_work: true
+bootstrap_verify_head_before_write: true
+bootstrap_inspect_diff_from_audit_base: true
+
 handoff_seq: 1
 handoff_id: "P6-T001-I01-architect-to-agent"
 
