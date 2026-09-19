@@ -90,7 +90,7 @@ def main() -> int:
     report_text = report_path.read_text(encoding="utf-8")
     report_text = replace_frontmatter_scalar(report_text, "status", "REVIEW_READY")
     report_text = re.sub(
-        r"(?m)^- Status:\s*\x60AWAITING_AGENT\x60\s*$",
+        r"(?m)^- Status:\s*(?:\x60)?AWAITING_AGENT(?:\x60)?\s*$",
         "- Status: " + chr(96) + "REVIEW_READY" + chr(96),
         report_text,
         count=1,
