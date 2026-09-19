@@ -93,6 +93,7 @@ guojin_sim authority changed = NO/YES
 ## 9. Verification results
 
 ```text
+python tools/verify_workflow_contract.py:
 pytest -q:
 python tools/audit_side_effect_calls.py:
 python tools/build_qmt_deployments.py --check:
