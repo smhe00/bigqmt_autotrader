@@ -174,3 +174,32 @@ evidence.amount
 
 tick callback 只是必要条件，不是下单授权。Host publisher、当前 session、固定账户
 指纹、时间窗、账户/证券主数据和资金条件仍须同时满足；任何一项不满足都 fail-close。
+
+## build-6 启动校验（2026-09-19）
+
+QMT 已实际加载 build-6，并生成新的隔离会话：
+
+```text
+bridge_build = p6-guojin-live-canary-6
+session_id   = 8756a38e70004a5ca3df026540bd4a6a
+instance_id  = guojin
+mode         = LIVE_CANARY
+submit/cancel fuse = 2/2
+```
+
+启动主动查询确认 `STOCK`、`HUGANGTONG`、`SHENGANGTONG` 均为 `DETECTED`。
+只读证券主数据将 `00700.HGT` 规范化到 `HK/00700`，名称为腾讯控股，
+`HSGTFlag=5`。`get_full_tick([exact_symbol])` 回退取得了严格同代码证据：
+
+```text
+00700.HGT  exact_symbol=true  last_price=419.0
+511880.SH  exact_symbol=true  last_price=100.8
+```
+
+上述 tick 来自上一交易日，不构成非交易时段下单依据。build-6 启动与路由预检通过，
+但交易校准仍待下一个有效交易窗口。GC001 已完成，不重复提交；后续只允许依次执行：
+
+1. `00700.HGT BUY 100 @ 1.00 HKD` 固定非市价路由探测；
+2. 完成结果与 ORDER/DEAL reconciliation，若出现未知状态立即停止；
+3. `511880.SH BUY 100` 使用当时精确 tick，并验证资金不足路径；
+4. 任一委托若意外进入可撤状态，仅按该笔精确 `broker_token` 撤单。
