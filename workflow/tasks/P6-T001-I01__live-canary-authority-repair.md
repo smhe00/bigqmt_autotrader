@@ -266,9 +266,20 @@ report 与 control state 一起切换到 `REVIEW_READY`。Agent 禁止修改
 
 ## 8. 必须运行的验证
 
+开始修改产品代码前先运行：
+
+```bash
+python tools/verify_workflow_contract.py
+```
+
+如果这里失败，先停止实现并修复/报告 workflow handoff，不要在错误任务上下文中继续改业务代码。
+
+完成实现后至少：
+
 至少：
 
 ```bash
+python tools/verify_workflow_contract.py
 pytest -q
 python tools/audit_side_effect_calls.py
 python tools/build_qmt_deployments.py --check
