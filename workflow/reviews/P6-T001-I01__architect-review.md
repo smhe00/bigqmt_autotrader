@@ -56,3 +56,17 @@ owner: architect
 - PASS -> 新建下一 `Txxx-I01`
 - CHANGES_REQUIRED -> 保持 `T001`，新建 `I02`
 - BLOCKED / USER_ESCALATION -> 停止自动推进
+
+
+## 9. Workflow transition
+
+完成独立审计并填写本 review 后，用工具记录 verdict，不手工改 control state：
+
+```bash
+python tools/architect_workflow_verdict.py --verdict PASS
+# 或 CHANGES_REQUIRED / BLOCKED / USER_ESCALATION
+python tools/verify_workflow_contract.py
+```
+
+非最终 PASS 会进入 `ARCHITECT_PLANNING`，随后再用
+`tools/scaffold_workflow_handoff.py` 创建并激活下一任务。
