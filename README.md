@@ -213,3 +213,15 @@ python tools/verify_broker_evidence_contract.py
 项目状态见 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
 
 **任何阶段都不能通过配置直接跳到生产实盘。**
+
+
+## Agent workflow
+
+Architect 任务、Agent 执行报告和 Architect 审计不放入 `docs/`。统一使用：
+
+- `workflow/tasks/`
+- `workflow/reports/`
+- `workflow/reviews/`
+- `workflow/control/WORKFLOW_STATE.yaml`
+
+命名、匹配和排序规则见 [`workflow/README.md`](workflow/README.md)。
