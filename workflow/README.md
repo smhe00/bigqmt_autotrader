@@ -172,3 +172,41 @@ Agent 不得修改对应 `workflow/reviews/` 文件，也不得创建下一任�
 
 `audit_base_commit` 是 Architect 做代码审计时的参考快照，不要求 Agent checkout 到该提交。
 Agent 实现时应从收到任务时的最新 `main` 开始，并保留之后已合入的 workflow/文档基础设施。
+
+
+## Recommended command flow
+
+Agent completes implementation:
+
+    python tools/agent_workflow_handoff.py --implementation-commit <FULL_SHA>
+    python tools/verify_workflow_contract.py
+
+Architect completes review body, then records verdict:
+
+    python tools/architect_workflow_verdict.py --verdict PASS
+    # or CHANGES_REQUIRED / BLOCKED / USER_ESCALATION
+    python tools/verify_workflow_contract.py
+
+For a non-final PASS, the verdict tool enters ARCHITECT_PLANNING. Create and activate the
+next logical task:
+
+    python tools/scaffold_workflow_handoff.py \
+      --next-task \
+      --slug <short-slug> \
+      --title "<title>" \
+      --audit-base-commit <FULL_SHA>
+
+For CHANGES_REQUIRED, create and activate the next iteration of the same task:
+
+    python tools/scaffold_workflow_handoff.py \
+      --next-iteration \
+      --slug <short-slug> \
+      --title "<fix title>" \
+      --audit-base-commit <FULL_SHA>
+
+A final project/Gate PASS can be recorded with:
+
+    python tools/architect_workflow_verdict.py --verdict PASS --final
+
+The scripts deliberately do not commit or push. Git remains the final transaction boundary,
+so the operator can inspect the diff before publishing.
