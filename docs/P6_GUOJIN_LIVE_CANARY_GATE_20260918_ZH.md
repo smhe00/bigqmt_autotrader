@@ -2,6 +2,14 @@
 
 日期：2026-09-18
 
+> **当前授权（2026-09-20，任务 P6-T001 后生效）：`p6-guojin-live-canary-7`。**
+> 一个 production LIVE_CANARY build 只授权一个 submit case：
+> `00700.HGT BUY 100 @ 1.00 HKD`；submit/cancel fuse = 1/1。
+> GC001 is a completed historical case and is **no longer authorized** in any current
+> or later LIVE_CANARY mutation whitelist. `511880.SH` 保持 read-only diagnostic
+> candidate，须等 HGT 实机结果经独立审计 PASS 后，由新的独立 Gate/build 授权，
+> 本 build 不具有 511880 mutation authority。下文 build-1..build-6 内容仅作历史审计轨迹保留。
+
 ## 状态
 
 已在国金实盘 QMT 中加载并完成首轮低风险校准。`00700.HK` 命令于本地交易模块
@@ -21,22 +29,23 @@
 ```text
 instance_id                 = guojin
 execution_mode              = LIVE_CANARY
-bridge_build                = p6-guojin-live-canary-6
+bridge_build                = p6-guojin-live-canary-7
 account_type                = STOCK
 authorized fingerprint      = sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5
-allowed submit case 1       = 00700.HGT BUY 100 @ 1.00 HKD (fixed non-marketable route probe)
-allowed submit case 2       = 511880.SH BUY 100 @ exact-tick guarded 90..110 CNY (insufficient-funds path)
-max submit calls/session    = 2 (one per named case)
-max cancel calls/session    = 2 (one exact-token emergency cancel reserve per case)
+allowed submit case (only)  = 00700.HGT BUY 100 @ 1.00 HKD (fixed non-marketable route probe)
+max submit calls/session    = 1
+max cancel calls/session    = 1 (one exact-token emergency cancel reserve)
 cancel identity             = exact broker_order_id + broker_token
 Tencent HGT preflight       = HK/00700, HSGTFlag 3|5, HUGANGTONG observed, fixed price 1.00
-511880 preflight            = exact SH/511880 master + exact .SH tick, price within +/-2%,
-                              available cash < 50% of order notional
+511880                      = read-only diagnostic candidate only; no mutation authority
+GC001                       = historical completed case; no longer authorized
 ```
 
-两笔 submit 不会批量发布：必须先完成前一笔 ORDER/DEAL/query reconciliation，只有
-状态完全解析后才允许发布后一笔。任一 broker mutation 出现异常或 UNKNOWN，当前
-session 永久熔断；禁止继续第二笔或自动重试。
+每个 build/session 至多一笔 submit。broker mutation crossing 后若发生异常：结果进入
+UNKNOWN、当前 session 永久熔断、禁止自动 retry，重启也不得自动重新发布旧命令。
+511880 的 exact-tick 路径须等下一个独立 Gate；其 freshness primitive
+（`_live_canary_fresh_tick_price`，broker tick timestamp 权威、15 s 窗口、无时间语义即
+fail closed）已在 build-7 中预先做对，但本 build 不使用它扩大任何 mutation symbol。
 
 ### 2026-09-18 GC001 实机结果
 
@@ -163,17 +172,12 @@ evidence.amount
 
 完整 tick 对象不会写入 spool。首次 callback 会立即发布诊断证据；若 callback 的 symbol 与预期 route 不匹配，只记录 mismatch，不算作 `tick_observed`。首次精确 route tick 到达后会再次发布证据；10 秒窗口结束后再发布 final summary。该探测纯只读，不调用 `passorder/cancel`，不消耗 submit/cancel fuse。
 
-下一次实机动作只允许：
-
-1. 重新加载 `p6-guojin-live-canary-6`；
-2. 启动 Host 并读取 `bridge_ready.instrument_subscription`；
-3. 收集 `instrument_tick_capabilities`；
-4. 比较 `.HK/.HGT/.SGT` 哪些 route 真正产生 tick callback，并为
-   `204001.SH`/`511880.SH` 记录精确代码 tick 证据；
-5. 只在全部 preflight 通过时按 GC001 → reconciliation → 腾讯的顺序执行。
+下一次实机动作（历史 build-5 计划，已被 build-7 收窄取代）当时只允许只读证据收集。
+**当前有效指令以 build-7 为准（见文末）：旧的“先 GC001、reconciliation、再腾讯”多笔
+顺序已作废；一个 build 只有一笔 `00700.HGT BUY 100 @ 1.00 HKD`。**
 
 tick callback 只是必要条件，不是下单授权。Host publisher、当前 session、固定账户
-指纹、时间窗、账户/证券主数据和资金条件仍须同时满足；任何一项不满足都 fail-close。
+指纹、时间窗、账户/证券主数据仍须同时满足；任何一项不满足都 fail-close。
 
 ## build-6 启动校验（2026-09-19）
 
@@ -197,9 +201,28 @@ submit/cancel fuse = 2/2
 ```
 
 上述 tick 来自上一交易日，不构成非交易时段下单依据。build-6 启动与路由预检通过，
-但交易校准仍待下一个有效交易窗口。GC001 已完成，不重复提交；后续只允许依次执行：
+但交易校准仍待下一个有效交易窗口。
 
-1. `00700.HGT BUY 100 @ 1.00 HKD` 固定非市价路由探测；
-2. 完成结果与 ORDER/DEAL reconciliation，若出现未知状态立即停止；
-3. `511880.SH BUY 100` 使用当时精确 tick，并验证资金不足路径；
-4. 任一委托若意外进入可撤状态，仅按该笔精确 `broker_token` 撤单。
+> build-6 的后续多笔执行计划（HGT 之后再做 511880）**已作废**：build-7 已将授权
+> 收窄为单笔 HGT，见下节。
+
+## build-7 授权收窄（2026-09-20，任务 P6-T001）
+
+审计发现 build-6 的“two named cases only”只是文档声明，代码仍保留第三条
+GC001 mutation 路径，且 case 去重/session 计数不能强制“上一笔完全收敛后才允许下一笔”。
+build-7 的修复决策是更窄、更易审计的规则：**一个 production LIVE_CANARY build 只授权
+一个 submit case**。
+
+当前有效执行指令：
+
+1. 加载 `p6-guojin-live-canary-7`，启动 Host 并读取 `bridge_ready`；
+2. 在下一个有效交易窗口内，仅发布一次 `00700.HGT BUY 100 @ 1.00 HKD`；
+3. 随后完整做 ORDER/DEAL/query/BrokerEvidence reconciliation；任何 UNKNOWN 立即永久熔断；
+4. 如该委托意外进入可撤状态，仅允许一次按精确 `broker_order_id + broker_token` 的撤单；
+5. 不授权 `511880.SH` submit：它保持只读诊断身份，待 HGT 结果被独立审计 PASS 后，
+   由新的独立 Gate/build 授权，届时 exact-tick preflight 必须通过
+   `_live_canary_fresh_tick_price`（broker tick timestamp 权威、15 s 新鲜窗口、
+   无法证明时间语义即拒绝；本地刚调用过 `get_full_tick` 不会把旧 tick 变成新 tick）。
+
+永久 regression gate：`tests/qmt/test_live_canary_authority_contract.py`
+（host/artifact/schema/docs 的授权语义，而非仅 call-site 数量）。

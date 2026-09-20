@@ -21,18 +21,19 @@
 | Guojin simulation raw status mapper | **PASS（仅 `guojin_sim`）** |
 | Production Guojin / Galaxy mapper | **尚未实现/未授权** |
 | Production live trading | **NO** |
-| 国金 LIVE_CANARY | **仅 P6 两个 fingerprint-pinned 单次案例；build-6 已部署校验，仍非通用 LIVE** |
+| 国金 LIVE_CANARY | **仅单一 fingerprint-pinned 案例 `00700.HGT BUY 100 @ 1.00`；p6-guojin-live-canary-7，submit/cancel fuse = 1/1，仍非通用 LIVE** |
 
 当前部署基线：
 
 ```text
 generic / galaxy = p4-shadow-command-spool-5       SHADOW, mutation-free
 guojin_sim      = p5-simulation-calibration-7      simulation-only calibration
-guojin          = p6-guojin-live-canary-6          two named P6 canary cases only
+guojin          = p6-guojin-live-canary-7          one submit case only: 00700.HGT BUY 100 @ 1.00 HKD; submit/cancel fuse = 1/1
 ```
 
 静态审计保证 generic / `galaxy` 没有 broker mutation call surface；`guojin` 只允许
-P6 独立 Gate 固定的 LIVE_CANARY 调用面，任何扩权都必须经过新的明确 Gate。
+P6 独立 Gate 固定的 LIVE_CANARY 单一案例调用面。GC001 是已完成的历史校准案例，不再具有 submit 授权；
+`511880.SH` 仅保留只读诊断身份，须经独立 Gate/build 才能重新获得 mutation 授权。任何扩权都必须经过新的明确 Gate。
 
 `guojin_sim` 是 fingerprint-pinned 的 simulation calibration artifact。它能调用受限模拟账户 submit/cancel API，但**不构成生产实盘授权**。
 

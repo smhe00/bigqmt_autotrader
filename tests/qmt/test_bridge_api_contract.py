@@ -85,7 +85,7 @@ def live_canary_manifest() -> dict:
     value = shadow_manifest()
     value.update(
         {
-            "bridge_build": "p6-guojin-live-canary-6",
+            "bridge_build": "p6-guojin-live-canary-7",
             "execution_mode": "LIVE_CANARY",
             "trading_enabled": True,
             "live_submit": True,
@@ -93,8 +93,8 @@ def live_canary_manifest() -> dict:
             "simulation_only": False,
             "authorized_account_fingerprint": FP,
             "max_order_quantity": 100,
-            "max_submit_calls_per_session": 2,
-        "max_cancel_calls_per_session": 2,
+            "max_submit_calls_per_session": 1,
+        "max_cancel_calls_per_session": 1,
         }
     )
     return value

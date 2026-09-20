@@ -22,7 +22,7 @@ Updated: 2026-09-19
 | Guojin simulation raw status mapper | **PASS — `qmt-guojin-sim-20260917-v1`** |
 | Production Guojin / Galaxy mapper | **NOT IMPLEMENTED / NOT AUTHORIZED** |
 | Production-account live trading allowed | **NO** |
-| Guojin LIVE_CANARY implementation | **`p6-guojin-live-canary-6` STARTUP/ROUTE PREFLIGHT PASS; TWO NAMED CASES ONLY** |
+| Guojin LIVE_CANARY implementation | **`p6-guojin-live-canary-7`; ONE NAMED CASE ONLY — `00700.HGT BUY 100 @ 1.00 HKD`; SUBMIT/CANCEL FUSE 1/1** |
 | Production broker mutation call surface | **GUOJIN: ONE PINNED LIVE_CANARY SURFACE; GALAXY/GENERIC: ZERO** |
 | QMT submit/cancel implementation | **GUOJIN_SIM + PINNED GUOJIN LIVE_CANARY** |
 | P2 execution-authority policy | **SIMULATION only** |
@@ -140,14 +140,16 @@ live_submit=False
 live_cancel=False
 ```
 
-Guojin is the sole bounded exception: fingerprint-pinned and current-session-pinned,
-with two named submit cases (Tencent HGT fixed-low-price route calibration and 511880
-insufficient-funds calibration), each usable once, plus two exact-token cancel reserves.
-The preceding GC001 canary ended in a token-matched status-57 price-range rejection with
-funds fully restored. Every mutation remains fail-closed behind instrument/account/cash/
-price guards and exact-symbol tick where available,
-instrument, account, cash and trading-window preflights. This does not grant general
-production live-trading authority.
+Guojin is the sole bounded exception: fingerprint-pinned and current-session-pinned.
+Since `p6-guojin-live-canary-7` the build authorizes exactly ONE submit case —
+`00700.HGT BUY 100 @ 1.00 HKD` (fixed non-marketable HGT route price) — with a
+one-shot submit fuse (1) and one exact-token cancel reserve (1) per build/session.
+GC001 (`204001.SH`) is a completed historical calibration (token-matched status-57
+price-range rejection, funds fully restored) and is no longer authorized; `511880.SH`
+remains a read-only diagnostic candidate and needs its own independent Gate/build
+before any submit. Every mutation remains fail-closed behind instrument/account/
+trading-window preflights and the single-case semantic gate. This does not grant
+general production live-trading authority.
 
 Command spool:
 
@@ -338,12 +340,15 @@ and publishes only normalized `instrument_tick_capabilities` evidence. Build-5 a
 uses exact-key `get_full_tick([symbol])` as a read-only fallback when a broker QMT
 distribution cannot load subscription callbacks; aliases never satisfy this gate. After the
 broker login capability changed, exact instrument metadata observed `.SGT` as canonical
-`HK/00700` with `HSGTFlag=5`. The current `p6-guojin-live-canary-6` gate therefore permits only the two
-explicit cases above and adds `204001.SH`/`511880.SH` to the read-only tick evidence set.
+`HK/00700` with `HSGTFlag=5`. The previous canary build temporarily permitted two
+explicit cases and added `204001.SH`/`511880.SH` to the read-only tick evidence set.
+The current `p6-guojin-live-canary-7` Gate (task P6-T001) narrowed that back to exactly
+one submit case — `00700.HGT BUY 100 @ 1.00 HKD` — with submit/cancel fuse 1/1; GC001 is
+no longer authorized and 511880 stays read-only pending a separate Gate.
 
 ### Still pending
 
-This Gate approves only the two bounded Guojin LIVE_CANARY cases described
+This Gate approves only the single bounded Guojin LIVE_CANARY case described
 above; it does **not** approve a general Guojin production mapper or any Galaxy
 mapper. `galaxy` remains SHADOW and mutation-free. Enabling the simulation
 mapper in an operating Host also requires explicit durable OMS identity
@@ -404,13 +409,14 @@ This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 `p5-simulation-calibration-7` bounded simulation calibration PASS, including 20/20 read-only Stock Connect route evidence. Broker Evidence Runtime Conformance PASS. P6 `p6-guojin-live-canary-6` startup/route preflight PASS. Guojin retains only two named one-shot LIVE_CANARY cases; Galaxy and generic deployments remain mutation-free.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 `p5-simulation-calibration-7` bounded simulation calibration PASS, including 20/20 read-only Stock Connect route evidence. Broker Evidence Runtime Conformance PASS. P6 `p6-guojin-live-canary-7` narrowed to one named one-shot LIVE_CANARY case (`00700.HGT BUY 100 @ 1.00 HKD`, fuse 1/1); Galaxy and generic deployments remain mutation-free.**
 
 Next safety checkpoint:
 
-> run the new-session `00700.HGT BUY 100 @ 1.00` route probe and fully reconcile it;
-> only then run `511880.SH BUY 100` at the exact guarded tick to validate the expected
-> insufficient-funds path. A 511880 T+0 round trip remains unavailable with 2168.79 CNY cash.
+> in a fresh `p6-guojin-live-canary-7` session, run `00700.HGT BUY 100 @ 1.00` exactly
+> once, then fully reconcile ORDER/DEAL/query/BrokerEvidence before anything else.
+> 511880 is NOT authorized in this build; its insufficient-funds probe needs a separate
+> independent Gate/build after the HGT result passes review.
 
 Gate evidence:
 

@@ -16,24 +16,26 @@ INSTANCE_ID = "guojin"
 ACCOUNT_FINGERPRINT = (
     "sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5"
 )
-BRIDGE_BUILD = "p6-guojin-live-canary-6"
-GC001_SYMBOL = "204001.SH"
-TENCENT_HGT_SYMBOL = "00700.HGT"
-ETF_SYMBOL = "511880.SH"
+BRIDGE_BUILD = "p6-guojin-live-canary-7"
+
+# P6-T001: one production LIVE_CANARY build authorizes exactly one submit
+# case. GC001 calibration is complete and must never be resubmitted; 511880
+# stays a read-only diagnostic candidate and gets a separate Gate/build only
+# after the HGT result is reconciled and independently reviewed.
+AUTHORIZED_SYMBOL = "00700.HGT"
+AUTHORIZED_SIDE = "BUY"
+AUTHORIZED_QUANTITY = 100
+AUTHORIZED_LIMIT_PRICE = Decimal("1.00")
+AUTHORIZED_CASE_TEXT = "00700.HGT BUY 100 @ 1.00 HKD"
 
 
-def _live_canary_submit_window_open(symbol: str) -> bool:
+def _live_canary_submit_window_open() -> bool:
     now = time.localtime()
     if now.tm_wday >= 5:
         return False
     minutes = now.tm_hour * 60 + now.tm_min
-    if symbol == GC001_SYMBOL:
-        return (570 <= minutes <= 680) or (780 <= minutes <= 920)
-    if symbol == ETF_SYMBOL:
-        return (570 <= minutes <= 680) or (780 <= minutes <= 895)
-    if symbol == TENCENT_HGT_SYMBOL:
-        return (570 <= minutes <= 710) or (780 <= minutes <= 950)
-    return False
+    # HGT continuous-session windows (Shanghai local time).
+    return (570 <= minutes <= 710) or (780 <= minutes <= 950)
 
 
 def _cancel_command_id(client_order_id: str, broker_order_id: str) -> str:
@@ -73,7 +75,7 @@ def _existing_cancel_path(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Publish one tightly bounded Guojin production LIVE_CANARY command."
+        description="Publish the single bounded Guojin production LIVE_CANARY command."
     )
     parser.add_argument("--spool-dir", required=True)
     parser.add_argument("--confirm", required=True)
@@ -137,41 +139,27 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--limit-price must be decimal text") from exc
         if not limit_price.is_finite():
             raise SystemExit("--limit-price must be finite")
-        if args.symbol == GC001_SYMBOL:
-            if (
-                args.side != "SELL"
-                or args.quantity != 10
-                or limit_price != Decimal("100.000")
-            ):
-                raise SystemExit("live canary permits GC001 SELL 10 at 100.000")
-        elif args.symbol == ETF_SYMBOL:
-            if (
-                args.side != "BUY"
-                or args.quantity != 100
-                or limit_price < Decimal("90.00")
-                or limit_price > Decimal("110.00")
-            ):
-                raise SystemExit(
-                    "live canary permits 511880 BUY 100 at a guarded 90..110 CNY price"
-                )
-        elif args.symbol == TENCENT_HGT_SYMBOL:
-            if (
-                args.side != "BUY"
-                or args.quantity != 100
-                or limit_price != Decimal("1.00")
-            ):
-                raise SystemExit("live canary permits Tencent HGT BUY 100 at 1.00 HKD")
-        else:
-            raise SystemExit("unsupported live canary symbol")
-        if not _live_canary_submit_window_open(args.symbol):
+        # Single fixed case: anything else fails closed before the durable
+        # command spool is touched. GC001 and 511880 have no submit authority
+        # in this build, regardless of side/quantity/price.
+        if (
+            args.symbol != AUTHORIZED_SYMBOL
+            or args.side != AUTHORIZED_SIDE
+            or args.quantity != AUTHORIZED_QUANTITY
+            or limit_price != AUTHORIZED_LIMIT_PRICE
+        ):
+            raise SystemExit(
+                "live canary permits exactly one submit case: " + AUTHORIZED_CASE_TEXT
+            )
+        if not _live_canary_submit_window_open():
             raise SystemExit("live canary trading window is closed")
         command = spool.publish_submit(
             account_fingerprint=instance.account_fingerprint,
             client_order_id=args.client_order_id,
-            symbol=args.symbol,
-            side=args.side,
-            quantity=args.quantity,
-            limit_price=args.limit_price,
+            symbol=AUTHORIZED_SYMBOL,
+            side=AUTHORIZED_SIDE,
+            quantity=AUTHORIZED_QUANTITY,
+            limit_price=str(AUTHORIZED_LIMIT_PRICE),
             created_ms=now_ms,
             expires_ms=expires_ms,
             live_canary=True,

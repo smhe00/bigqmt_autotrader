@@ -177,9 +177,11 @@ No broker-specific mapper is treated as PASS by this Gate yet; that remains the 
 Generic and `galaxy` production artifacts must continue to expose **zero broker mutation call surface**.
 
 The separately reviewed, fingerprint-pinned `guojin_sim` artifact may contain
-bounded simulation mutation logic. `guojin` may contain only the two explicitly
-modelled P6 LIVE_CANARY cases; the static audit rejects every broader production
-mutation surface.
+bounded simulation mutation logic. Since `p6-guojin-live-canary-7`, `guojin` may
+contain only the single explicitly modelled P6 LIVE_CANARY case
+(`00700.HGT BUY 100 @ 1.00 HKD`, submit/cancel fuse 1/1); the static audit and
+`tests/qmt/test_live_canary_authority_contract.py` reject every broader production
+mutation surface, including the retired GC001 and not-yet-authorized 511880 cases.
 
 ## 9. Toolchain
 
@@ -220,7 +222,7 @@ A TLC counterexample is a design/model/implementation defect until resolved. The
 - **Production Guojin / Galaxy mapper: NOT IMPLEMENTED / NOT AUTHORIZED**
 - **Production live trading: NO**
 - **Guojin simulation deployment: `p5-simulation-calibration-7`, 20/20 read-only route evidence**
-- **Guojin LIVE_CANARY: `p6-guojin-live-canary-6` DEPLOYED/PREFLIGHT PASS; TWO NAMED CASES ONLY**
+- **Guojin LIVE_CANARY: `p6-guojin-live-canary-7`; ONE NAMED CASE ONLY (`00700.HGT BUY 100 @ 1.00 HKD`), SUBMIT/CANCEL FUSE 1/1; GC001 NO LONGER AUTHORIZED; 511880 READ-ONLY PENDING A SEPARATE GATE**
 
 The Guojin simulation mapper is now implemented under the versioned
 `qmt-guojin-sim-20260917-v1` profile. The next execution-safety checkpoints are

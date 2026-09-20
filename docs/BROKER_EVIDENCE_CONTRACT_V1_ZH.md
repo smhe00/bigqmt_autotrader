@@ -519,4 +519,6 @@ CI permanent gate
 
 本契约本身不授予任何 mutation authority。当前部署边界由 Bridge API 与独立 Gate
 共同约束：generic / `galaxy` 的 broker mutation call surface 必须保持为零；
-`guojin` 仅允许 P6 明确固定的两个 LIVE_CANARY 案例，且不能解释为通用实盘授权。
+`guojin` 自 `p6-guojin-live-canary-7` 起仅允许 P6 明确固定的**一个** LIVE_CANARY 案例
+（`00700.HGT BUY 100 @ 1.00 HKD`，submit/cancel fuse = 1/1），GC001 不再授权、511880
+仅为只读诊断候选，且不能解释为通用实盘授权。

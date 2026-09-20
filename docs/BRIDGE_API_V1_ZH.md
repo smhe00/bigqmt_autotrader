@@ -167,7 +167,7 @@ live_submit = true
 live_cancel = true
 ```
 
-该模式不是 general LIVE。它必须同时固定账户指纹、当前 QMT session、每 session submit/cancel fuse，并由独立 publisher 的精确确认字符串授权。当前 canary 仍被固定 symbol/side/quantity/price 与 instrument preflight 限制。
+该模式不是 general LIVE。它必须同时固定账户指纹、当前 QMT session、每 session submit/cancel fuse，并由独立 publisher 的精确确认字符串授权。自 `p6-guojin-live-canary-7` 起，每个 build 只有一个授权案例 `00700.HGT BUY 100 @ 1.00 HKD`，submit/cancel fuse = 1/1；GC001 已完成并不再授权，511880 仅为只读诊断候选，由独立 Gate 决定未来授权。
 
 P6 build-5 新增的 `instrument_tick_capabilities` 仅用于只读 route 诊断，不改变上述 mutation authority。
 
@@ -447,9 +447,9 @@ BROKER_MUTATION_UNKNOWN
 6. Galaxy/generic production mutation call surface 必须保持为零；Guojin 仅允许已通过独立 Gate 的 fingerprint-pinned LIVE_CANARY surface，任何权限扩大都必须经过新的明确 Gate。
 
 API v1 现在定义 `LIVE_CANARY` 的传输语义，但协议存在不等于自动授权。只有
-manifest 与 `bridge_ready` 同时固定账户指纹。当前国金校准 session 仅允许两个
-各最多一次的 submit 场景（腾讯 HGT 固定低价路由、511880 资金不足）及最多两次 cancel（为每个
-canary 各保留一次精确 token 匹配的紧急撤单能力）；
+manifest 与 `bridge_ready` 同时固定账户指纹。`p6-guojin-live-canary-7` 的国金 session
+仅允许一个 submit 案例（`00700.HGT BUY 100 @ 1.00 HKD` 固定低价路由）及一次精确 token
+匹配的紧急 cancel（fuse 1/1）；GC001 为已完成历史案例、不再授权，511880 仅保留只读诊断身份；
 Host 显式使用 `--allow-live-canary`，并由独立 publisher 提供精确确认字符串时才允许
 国金 canary 命令。`command_result` 仍然不是 broker evidence，不能产生 ACK。
 

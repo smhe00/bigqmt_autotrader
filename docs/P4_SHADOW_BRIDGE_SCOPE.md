@@ -5,8 +5,9 @@
 **P4: SHADOW DEPLOYMENT GATE PASS. The generic and Galaxy artifacts remain
 SHADOW-only. P5 later added the account-pinned `guojin_sim` calibration
 surface, and P6 added a separate fingerprint-pinned Guojin LIVE_CANARY
-exception limited to two named cases. Neither exception changes the P4
-contract or authorizes general production trading.**
+exception — one named case only since `p6-guojin-live-canary-7`
+(`00700.HGT BUY 100 @ 1.00 HKD`, submit/cancel fuse 1/1). Neither exception
+changes the P4 contract or authorizes general production trading.**
 
 The purpose of the first P4 checkpoint is to calibrate the asynchronous execution plumbing against Guojin QMT without creating broker side effects.
 

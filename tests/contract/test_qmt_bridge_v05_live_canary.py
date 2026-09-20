@@ -58,10 +58,10 @@ def command(bridge, command_type="SUBMIT_LIMIT", **overrides):
     if command_type == "SUBMIT_LIMIT":
         payload.update(
             {
-                "symbol": "204001.SH",
-                "side": "SELL",
-                "quantity": 10,
-                "limit_price": "100.000",
+                "symbol": "00700.HGT",
+                "side": "BUY",
+                "quantity": 100,
+                "limit_price": "1.00",
             }
         )
     else:
@@ -99,120 +99,78 @@ def called_names(path: Path) -> list[tuple[str, str]]:
 
 def test_live_canary_artifact_has_exact_mutation_surface_and_identity():
     bridge = load_bridge()
-    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-6"
+    assert bridge.BRIDGE_BUILD == "p6-guojin-live-canary-7"
     assert bridge.EXECUTION_MODE == "LIVE_CANARY"
     assert bridge.TERMINAL_INSTANCE_ID == "guojin"
     assert bridge.SIMULATION_ONLY is False
-    assert bridge.SIMULATION_MAX_SUBMIT_CALLS == 2
-    assert bridge.SIMULATION_MAX_CANCEL_CALLS == 2
+    assert bridge.SIMULATION_MAX_SUBMIT_CALLS == 1
+    assert bridge.SIMULATION_MAX_CANCEL_CALLS == 1
+    assert bridge._LIVE_CANARY_MUTATION_SYMBOLS == ("00700.HGT",)
+    assert bridge._LIVE_CANARY_AUTHORIZED_SIDE == "BUY"
+    assert bridge._LIVE_CANARY_AUTHORIZED_QUANTITY == 100
+    assert bridge._LIVE_CANARY_AUTHORIZED_LIMIT_PRICE == 1.0
     assert called_names(BRIDGE) == [
         ("passorder", "_execute_order_command"),
         ("cancel", "_execute_order_command"),
     ]
 
 
-def test_live_canary_submit_is_exactly_bounded(monkeypatch):
-    bridge = load_bridge()
+def _arm_hgt_submit(bridge, monkeypatch):
     calls = []
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
-    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
+    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda: True)
     account = Obj()
     account.m_dAvailable = 2168.79
     monkeypatch.setattr(
         bridge, "get_trade_detail_data", lambda *_args: [account], raising=False
     )
-    bridge._STATE.instrument_tick_records = {
-        "204001.SH": {
-            "tick_observed": True,
-            "evidence": {"exact_symbol": True, "last_price": "1.18"},
-        }
-    }
+    return calls
+
+
+def test_live_canary_submit_is_exactly_bounded(monkeypatch):
+    bridge = load_bridge()
+    calls = _arm_hgt_submit(bridge, monkeypatch)
 
     result = bridge._execute_order_command(command(bridge), Context())
 
     assert result == ("LIVE_CANARY_SUBMIT_CALL_RETURNED", True)
-    assert calls[0][:7] == (24, 1101, "LIVE_ACCOUNT", "204001.SH", 11, 100.0, 10)
+    # op_type 23 = BUY; fixed non-marketable 1.00 HKD route price; size 100.
+    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "00700.HGT", 11, 1.0, 100)
     assert calls[0][7:10] == ("BIGQMT_LIVE_CANARY", 2, command(bridge)["broker_token"])
-    with pytest.raises(bridge.CommandError, match="case already submitted"):
+    # P6-T001 fuse = 1: a second submit is rejected by the session quota,
+    # not merely by per-case bookkeeping.
+    with pytest.raises(bridge.CommandError, match="submit session limit reached"):
         bridge._execute_order_command(command(bridge), Context())
     assert len(calls) == 1
 
 
-def test_live_canary_511880_case_requires_exact_tick_and_insufficient_cash(monkeypatch):
+@pytest.mark.parametrize("symbol", ["204001.SH", "511880.SH"])
+def test_live_canary_rejects_historical_and_future_symbols(monkeypatch, symbol):
     bridge = load_bridge()
-    calls = []
-    monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
-    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
-    account = Obj()
-    account.m_dAvailable = 2168.79
-    monkeypatch.setattr(
-        bridge, "get_trade_detail_data", lambda *_args: [account], raising=False
-    )
-    bridge._STATE.instrument_tick_records = {
-        "511880.SH": {
-            "tick_observed": True,
-            "evidence": {"exact_symbol": True, "last_price": "100.805"},
-        }
-    }
+    calls = _arm_hgt_submit(bridge, monkeypatch)
+    side = "SELL" if symbol == "204001.SH" else "BUY"
+    quantity = 10 if symbol == "204001.SH" else 100
+    price = "100.000" if symbol == "204001.SH" else "100.805"
     candidate = command(
-        bridge,
-        symbol="511880.SH",
-        side="BUY",
-        quantity=100,
-        limit_price="100.805",
+        bridge, symbol=symbol, side=side, quantity=quantity, limit_price=price
     )
-
-    assert bridge._execute_order_command(candidate, Context()) == (
-        "LIVE_CANARY_SUBMIT_CALL_RETURNED",
-        True,
-    )
-    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "511880.SH", 11, 100.805, 100)
-
-
-def test_live_canary_511880_fails_closed_without_exact_tick(monkeypatch):
-    bridge = load_bridge()
-    calls = []
-    monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
-    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
-    account = Obj()
-    account.m_dAvailable = 2168.79
-    monkeypatch.setattr(
-        bridge, "get_trade_detail_data", lambda *_args: [account], raising=False
-    )
-    candidate = command(
-        bridge,
-        symbol="511880.SH",
-        side="BUY",
-        quantity=100,
-        limit_price="100.805",
-    )
-    with pytest.raises(bridge.CommandError, match="tick evidence unavailable"):
+    with pytest.raises(bridge.CommandError, match="exactly one submit case"):
         bridge._execute_order_command(candidate, Context())
     assert calls == []
 
 
-def test_live_canary_tencent_hgt_uses_fixed_non_marketable_price(monkeypatch):
+def test_live_canary_rejects_hgt_with_any_other_case_shape(monkeypatch):
     bridge = load_bridge()
-    calls = []
-    monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
-    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
-    account = Obj()
-    account.m_dAvailable = 2168.79
-    monkeypatch.setattr(
-        bridge, "get_trade_detail_data", lambda *_args: [account], raising=False
-    )
-    candidate = command(
-        bridge,
-        symbol="00700.HGT",
-        side="BUY",
-        quantity=100,
-        limit_price="1.00",
-    )
-    assert bridge._execute_order_command(candidate, Context()) == (
-        "LIVE_CANARY_SUBMIT_CALL_RETURNED",
-        True,
-    )
-    assert calls[0][:7] == (23, 1101, "LIVE_ACCOUNT", "00700.HGT", 11, 1.0, 100)
+    calls = _arm_hgt_submit(bridge, monkeypatch)
+    for overrides in (
+        {"side": "SELL"},
+        {"quantity": 200},
+        {"limit_price": "1.01"},
+        {"limit_price": "0.99"},
+    ):
+        with pytest.raises(bridge.CommandError, match="exactly one submit case"):
+            bridge._execute_order_command(command(bridge, **overrides), Context())
+    assert calls == []
 
 
 def test_live_canary_halted_session_rejects_every_later_mutation(monkeypatch):
@@ -231,9 +189,13 @@ def test_live_canary_halted_session_rejects_every_later_mutation(monkeypatch):
         ("live_canary", False),
         ("expected_qmt_session_id", "stale"),
         ("symbol", "000001.SZ"),
-        ("side", "BUY"),
+        ("symbol", "204001.SH"),
+        ("symbol", "511880.SH"),
+        ("side", "SELL"),
         ("quantity", 11),
-        ("limit_price", "99.99"),
+        ("quantity", 1000),
+        ("limit_price", "1.01"),
+        ("limit_price", "0.99"),
     ],
 )
 def test_live_canary_rejects_any_scope_expansion(monkeypatch, field, value):
@@ -249,7 +211,7 @@ def test_live_canary_rejects_any_scope_expansion(monkeypatch, field, value):
 def test_live_canary_fails_closed_when_instrument_preflight_is_missing(monkeypatch):
     bridge = load_bridge()
     calls = []
-    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
+    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda: True)
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
     with pytest.raises(bridge.CommandError, match="instrument preflight"):
         bridge._execute_order_command(command(bridge), object())
@@ -259,7 +221,7 @@ def test_live_canary_fails_closed_when_instrument_preflight_is_missing(monkeypat
 def test_live_canary_fails_closed_on_instrument_identity_mismatch(monkeypatch):
     bridge = load_bridge()
     calls = []
-    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda _symbol: True)
+    monkeypatch.setattr(bridge, "_live_canary_trade_window_open", lambda: True)
     monkeypatch.setattr(bridge, "passorder", lambda *args: calls.append(args), raising=False)
 
     class WrongContext:

@@ -30,8 +30,8 @@ LIVE_CANCEL_ENABLED = True
 SIMULATION_ONLY = False
 AUTHORIZED_ACCOUNT_FINGERPRINT = "sha256:7cbd3cda92705081654ef838f9b93ab9f7928349ecf05fe97205c2d2948434e5"
 SIMULATION_MAX_ORDER_QUANTITY = 100
-SIMULATION_MAX_SUBMIT_CALLS = 2
-SIMULATION_MAX_CANCEL_CALLS = 2
+SIMULATION_MAX_SUBMIT_CALLS = 1
+SIMULATION_MAX_CANCEL_CALLS = 1
 
 import hashlib
 import json
@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p6-guojin-live-canary-6"
+BRIDGE_BUILD = "p6-guojin-live-canary-7"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -828,8 +828,8 @@ def _bind_runtime(ContextInfo):
                 EXECUTION_MODE == "LIVE_CANARY"
                 and SIMULATION_ONLY is False
                 and _spool_instance_id() == "guojin"
-                and SIMULATION_MAX_SUBMIT_CALLS == 2
-                and SIMULATION_MAX_CANCEL_CALLS == 2
+                and SIMULATION_MAX_SUBMIT_CALLS == 1
+                and SIMULATION_MAX_CANCEL_CALLS == 1
             )
         )
         if not mutation_gate_valid:
@@ -1010,8 +1010,12 @@ _LIVE_CANARY_INSTRUMENT_CANDIDATES = (
     "00700.HGT",
     "00700.SGT",
 )
-_LIVE_CANARY_MUTATION_SYMBOLS = ("204001.SH", "511880.SH", "00700.HGT")
+_LIVE_CANARY_MUTATION_SYMBOLS = ("00700.HGT",)
+_LIVE_CANARY_AUTHORIZED_SIDE = "BUY"
+_LIVE_CANARY_AUTHORIZED_QUANTITY = 100
+_LIVE_CANARY_AUTHORIZED_LIMIT_PRICE = 1.0
 _LIVE_CANARY_TICK_WINDOW_SECONDS = 10
+_LIVE_CANARY_TICK_FRESHNESS_MS = 15000
 
 
 def _runtime_instrument_probe(ContextInfo):
@@ -1363,33 +1367,28 @@ def _live_canary_instrument_preflight(ContextInfo, symbol):
         raise CommandError("live canary instrument preflight failed")
     exchange = _text(details.get("ExchangeID") or details.get("ExchangeCode"))
     instrument = _text(details.get("InstrumentID") or details.get("InstrumentCode"))
-    if symbol == "204001.SH":
-        if exchange != "SH" or instrument != "204001":
-            raise CommandError("live canary GC001 instrument identity mismatch")
-    elif symbol == "511880.SH":
-        if exchange != "SH" or instrument != "511880":
-            raise CommandError("live canary 511880 instrument identity mismatch")
-    elif symbol == "00700.HGT":
-        try:
-            hsgt_flag = int(details.get("HSGTFlag"))
-        except Exception:
-            hsgt_flag = None
-        if exchange != "HK" or instrument != "00700" or hsgt_flag not in (3, 5):
-            raise CommandError("live canary Tencent HGT identity mismatch")
-        if "HUGANGTONG" not in _STATE.detected_account_types:
-            raise CommandError("live canary Shanghai Stock Connect account unavailable")
+    # P6-T001: 00700.HGT is the only mutation symbol, so preflight knows
+    # exactly one identity. 204001.SH/511880.SH remain read-only diagnostic
+    # candidates and never reach preflight.
+    if symbol != "00700.HGT":
+        raise CommandError("live canary instrument identity mismatch")
+    try:
+        hsgt_flag = int(details.get("HSGTFlag"))
+    except Exception:
+        hsgt_flag = None
+    if exchange != "HK" or instrument != "00700" or hsgt_flag not in (3, 5):
+        raise CommandError("live canary Tencent HGT identity mismatch")
+    if "HUGANGTONG" not in _STATE.detected_account_types:
+        raise CommandError("live canary Shanghai Stock Connect account unavailable")
     return details
 
 
-def _live_canary_trade_window_open(symbol):
+def _live_canary_trade_window_open():
     now = time.localtime()
     if now.tm_wday >= 5:
         return False
     minutes = now.tm_hour * 60 + now.tm_min
-    if symbol == "204001.SH":
-        return (570 <= minutes <= 680) or (780 <= minutes <= 920)
-    if symbol == "511880.SH":
-        return (570 <= minutes <= 680) or (780 <= minutes <= 895)
+    # HGT continuous-session windows (Shanghai local time).
     return (570 <= minutes <= 710) or (780 <= minutes <= 950)
 
 
@@ -1423,6 +1422,56 @@ def _live_canary_tick_price(symbol):
         raise CommandError("live canary last price unavailable")
     if last_price <= 0.0:
         raise CommandError("live canary last price invalid")
+    return last_price
+
+
+def _live_canary_tick_epoch_ms(value):
+    # QMT tick time/timetag is normally an epoch in milliseconds; tolerate
+    # seconds as well. Anything unparseable stays untrusted.
+    try:
+        text = _text(value)
+        if not text:
+            return None
+        number = int(float(text))
+    except Exception:
+        return None
+    if number <= 0:
+        return None
+    if number < 10000000000:
+        return number * 1000
+    return number
+
+
+def _live_canary_fresh_tick_price(
+    symbol, now_ms=None, freshness_ms=_LIVE_CANARY_TICK_FRESHNESS_MS
+):
+    # Fail-closed freshness gate for a future exact-tick submit case. The
+    # broker-provided tick timestamp is authoritative: a recent local
+    # get_full_tick call must not turn an old quote into a fresh one.
+    record = _tick_state().get(symbol)
+    if not isinstance(record, dict) or record.get("tick_observed") is not True:
+        raise CommandError("live canary exact-symbol tick evidence unavailable")
+    evidence = record.get("evidence")
+    if not isinstance(evidence, dict) or evidence.get("exact_symbol") is not True:
+        raise CommandError("live canary exact-symbol tick evidence invalid")
+    if evidence.get("reported_symbol") != symbol:
+        raise CommandError("live canary tick symbol mismatch")
+    broker_ms = _live_canary_tick_epoch_ms(evidence.get("tick_time"))
+    if broker_ms is None:
+        raise CommandError("live canary broker tick time unavailable")
+    try:
+        last_price = float(evidence.get("last_price"))
+    except Exception:
+        raise CommandError("live canary last price unavailable")
+    if last_price <= 0.0:
+        raise CommandError("live canary last price invalid")
+    if now_ms is None:
+        now_ms = int(time.time() * 1000)
+    age_ms = now_ms - broker_ms
+    if age_ms < 0:
+        raise CommandError("live canary tick timestamp is in the future")
+    if age_ms > freshness_ms:
+        raise CommandError("live canary tick is stale")
     return last_price
 
 
@@ -1480,49 +1529,34 @@ def _execute_order_command(command, ContextInfo):
             price = float(payload.get("limit_price"))
         except Exception:
             raise CommandError("invalid live canary limit price")
-        if symbol is None:
-            raise CommandError("unsupported live canary symbol")
-        if symbol == "204001.SH":
-            case_id = "GC001_REJECT"
-        elif symbol == "511880.SH":
-            case_id = "511880_FUNDS"
-        else:
-            case_id = "TENCENT_HGT_ROUTE"
-        submitted_cases = getattr(_STATE, "live_canary_submitted_cases", set())
-        if case_id in submitted_cases:
-            raise CommandError("live canary case already submitted")
-        if not _live_canary_trade_window_open(symbol):
+        # P6-T001: exactly one authorized submit case in this build. The
+        # whitelist already rejects GC001/511880/unknown symbols; side, size
+        # and price are re-checked against fixed constants because a single
+        # passorder call site must not be able to widen authority back to
+        # multiple cases.
+        authorized_case = (
+            symbol == "00700.HGT"
+            and side == _LIVE_CANARY_AUTHORIZED_SIDE
+            and quantity == _LIVE_CANARY_AUTHORIZED_QUANTITY
+            and price == _LIVE_CANARY_AUTHORIZED_LIMIT_PRICE
+        )
+        if symbol is None or not authorized_case:
+            raise CommandError(
+                "live canary permits exactly one submit case: 00700.HGT BUY 100 at 1.00 HKD"
+            )
+        if not _live_canary_trade_window_open():
             raise CommandError("live canary trading window is closed")
         _live_canary_instrument_preflight(ContextInfo, symbol)
-        available_cash = _live_canary_cash_preflight()
-        if symbol == "204001.SH":
-            _live_canary_tick_price(symbol)
-            if side != "SELL" or quantity != 10 or price != 100.0:
-                raise CommandError("live canary permits GC001 SELL 10 at 100.000")
-            if available_cash < 1000.0:
-                raise CommandError("live canary requires at least 1000 CNY available cash")
-            op_type = 24
-        elif symbol == "511880.SH":
-            last_price = _live_canary_tick_price(symbol)
-            if side != "BUY" or quantity != 100 or not (90.0 <= price <= 110.0):
-                raise CommandError("live canary permits 511880 BUY 100 at guarded live price")
-            if price < last_price * 0.98 or price > last_price * 1.02:
-                raise CommandError("live canary 511880 price is outside exact tick guard")
-            if available_cash >= price * quantity * 0.5:
-                raise CommandError("live canary 511880 insufficient-funds condition absent")
-            op_type = 23
-        else:
-            if side != "BUY" or quantity != 100 or price != 1.0:
-                raise CommandError("live canary permits Tencent HGT BUY 100 at 1.00")
-            op_type = 23
-        submitted_cases.add(case_id)
-        _STATE.live_canary_submitted_cases = submitted_cases
-        # Reserve the case and session quota before crossing the broker API
-        # boundary. If passorder raises, the outer command handler marks the
-        # result UNKNOWN and permanently halts this bridge session.
+        # Account-query liveness check; the fixed HGT route does not use a
+        # cash threshold.
+        _live_canary_cash_preflight()
+        # Reserve the session quota before crossing the broker API boundary.
+        # If passorder raises, the outer command handler marks the result
+        # UNKNOWN and permanently halts this bridge session; fuse = 1 means
+        # no retry and no second submit in the session.
         _STATE.simulation_submit_calls += 1
         passorder(
-            op_type,
+            23,
             1101,
             _STATE.account_id,
             symbol,

@@ -29,7 +29,7 @@ Big QMT 被定位为 **券商执行终端 / Broker Gateway**。复杂策略、OM
 | P4 SHADOW execution bridge | **DEPLOYMENT GATE PASS** |
 | P5 国金模拟账户 submit/cancel/fill 校准 | **BOUNDED CALIBRATION PASS** |
 | Production live trading | **NO** |
-| 国金 LIVE_CANARY | **`p6-guojin-live-canary-6` 已完成启动/路由预检；仅保留 P6 两个命名单次案例，待有效交易窗口** |
+| 国金 LIVE_CANARY | **`p6-guojin-live-canary-7`：仅授权单一案例 `00700.HGT BUY 100 @ 1.00 HKD`，submit/cancel fuse = 1/1；GC001 历史案例不再授权，511880 仅为只读诊断候选，待有效交易窗口** |
 
 `galaxy` 与通用 production artifact 仍然在源代码级禁用 broker mutation；`guojin` 仅保留 P6 独立 Gate 下的 fingerprint-pinned LIVE_CANARY surface，不代表通用实盘授权。
 
@@ -224,7 +224,7 @@ galaxy / generic
   live_cancel = false
 ```
 
-国金生产实例只有 P6 明确固定的 LIVE_CANARY 例外：账户指纹、session、symbol、side、quantity、price 和每 session submit/cancel 次数均被限制，且当前 instrument preflight 仍 fail closed。这不能解释为 general LIVE。
+国金生产实例只有 P6 明确固定的 LIVE_CANARY 例外：账户指纹、session、symbol、side、quantity、price 和每 session submit/cancel 次数均被限制（build-7 起每个 build/session 仅一次 submit、一次 cancel），instrument preflight 继续 fail closed。当前 build 唯一授权案例是 `00700.HGT BUY 100 @ 1.00 HKD`；GC001 校准已完成且不再授权，`511880.SH` 只是只读诊断候选。这不能解释为 general LIVE。
 
 所以“技术上已验证下单链路”和“生产账户获得实盘权限”是两件完全不同的事。
 
