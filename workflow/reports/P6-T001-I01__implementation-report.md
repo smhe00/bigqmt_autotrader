@@ -5,7 +5,7 @@ task_id: P6-T001
 iteration: I01
 task_key: P6-T001-I01
 reply_to: workflow/tasks/P6-T001-I01__live-canary-authority-repair.md
-status: AWAITING_AGENT
+status: REVIEW_READY
 owner: agent
 review_target: workflow/reviews/P6-T001-I01__architect-review.md
 ---
@@ -17,12 +17,9 @@ review_target: workflow/reviews/P6-T001-I01__architect-review.md
 
 ## 1. Result
 
-- Status: `AWAITING_AGENT`
-- Implementation commit:
-- Base commit: aadc1f8ff331780897e6faa42d14f456d0f0d583
-- Final commit:
-
-任务要求的 A–E + §4 全部完成：production Guojin LIVE_CANARY 收窄为单一授权案例
+- Status: `REVIEW_READY`
+- Implementation commit: 52879b448cfae0b3b8678457732a58b56073f454
+- Final commit: 52879b448cfae0b3b8678457732a58b56073f454
 `00700.HGT BUY 100 @ 1.00 HKD`，submit/cancel fuse = 1/1，build bump 到
 `p6-guojin-live-canary-7`，GC001/511880 submit 授权在 Host publisher 与生成的 QMT
 bridge 两侧均被移除，tick freshness fail-closed primitive 已落地并带完整测试矩阵，
