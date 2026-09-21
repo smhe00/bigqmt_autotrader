@@ -22,27 +22,26 @@ bootstrap_refresh_main_before_work: true
 bootstrap_verify_head_before_write: true
 bootstrap_inspect_diff_from_audit_base: true
 
-handoff_seq: 9
-handoff_id: "P6-T004-I02-architect-to-agent-0009"
+handoff_seq: 10
+handoff_id: "P6-T004-I02-agent-to-architect-0010"
 
 phase: "P6"
 task_id: "P6-T004"
 iteration: "I02"
 task_key: "P6-T004-I02"
 
-state: "CHANGES_REQUIRED"
-owner: "agent"
+state: "REVIEW_READY"
+owner: "architect"
 
 audit_base_commit: "2e680283ac30d0de18592238ed82b66515fae445"
 task_file: "workflow/tasks/P6-T004-I02__close-pre-dispatch-crash-windows.md"
 expected_report_file: "workflow/reports/P6-T004-I02__implementation-report.md"
 expected_review_file: "workflow/reviews/P6-T004-I02__architect-review.md"
 
-report_status: "AWAITING_AGENT"
+report_status: "REVIEW_READY"
 review_status: "AWAITING_REVIEW"
 
-authorized_next:
-  - "P6-T004-I02"
+authorized_next: []
 
 ordering:
   task_width: 3
