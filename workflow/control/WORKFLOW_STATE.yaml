@@ -22,27 +22,26 @@ bootstrap_refresh_main_before_work: true
 bootstrap_verify_head_before_write: true
 bootstrap_inspect_diff_from_audit_base: true
 
-handoff_seq: 7
-handoff_id: "P6-T004-I01-architect-to-agent-0007"
+handoff_seq: 8
+handoff_id: "P6-T004-I01-agent-to-architect-0008"
 
 phase: "P6"
 task_id: "P6-T004"
 iteration: "I01"
 task_key: "P6-T004-I01"
 
-state: "AGENT_READY"
-owner: "agent"
+state: "REVIEW_READY"
+owner: "architect"
 
 audit_base_commit: "de45b30b10c934ec4dab146b29d38169476d797a"
 task_file: "workflow/tasks/P6-T004-I01__guojin-sim-single-writer-execution-loop.md"
 expected_report_file: "workflow/reports/P6-T004-I01__implementation-report.md"
 expected_review_file: "workflow/reviews/P6-T004-I01__architect-review.md"
 
-report_status: "AWAITING_AGENT"
+report_status: "REVIEW_READY"
 review_status: "AWAITING_REVIEW"
 
-authorized_next:
-  - "P6-T004-I01"
+authorized_next: []
 
 ordering:
   task_width: 3
