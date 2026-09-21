@@ -67,6 +67,13 @@ Models durable command publication/claim/terminal states, expiry, account/sessio
 
 Models terminal/account identity, session generation, sequence, duplicate, gap, session switch, `needs_resync`, and clean-snapshot recovery.
 
+### `formal/GuojinSimDispatchRecovery.tla`
+
+Models the P6 `guojin_sim` Host-owned durable dispatch plan: a pre-publication
+SQLite plan may be published only while exact absence is provable; observed
+claimed/processed/unknown command states never auto-republish; a missing file
+after recorded publication fails closed to manual review.
+
 ### `formal/BrokerEvidenceBoundary.tla`
 
 Models the authority boundary:

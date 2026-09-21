@@ -377,6 +377,7 @@ def _build_ingestion(
             evidence_sink=runtime,
             evidence_mapper=runtime.mapper,
             snapshot_evidence_mapper=runtime.mapper.map_snapshot,
+            command_result_sink=runtime,
         ),
         runtime,
     )

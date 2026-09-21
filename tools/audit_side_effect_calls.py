@@ -29,6 +29,10 @@ ALLOWED_ATTRIBUTE_CALLS = {
 ALLOWED_DIRECT_CALLS = {
     "evaluate_risk": {
         ("oms/service.py", "submit_intent"),
+        # P6-T004: this exact fingerprint-pinned simulation runtime owns the
+        # public typed execution API.  It evaluates risk itself; callers never
+        # supply an accepted decision.
+        ("qmt/guojin_sim_oms.py", "execute_intent"),
     },
 }
 

@@ -212,18 +212,6 @@ class QmtHostIngestion:
                 command_result_ingested=False,
             )
 
-        # A simulation mutation result reports only that a local QMT API call
-        # was attempted/returned. It is never broker ACK evidence and must not
-        # enter the P4 SHADOW command-result journal. ORDER/DEAL callbacks and
-        # active queries remain the sole calibration evidence path.
-        if payload.get("execution_mode") == "SIMULATION_CALIBRATION":
-            return HostIngestResult(
-                view=view,
-                evidence_ingested=False,
-                quarantined=False,
-                command_result_ingested=False,
-            )
-
         if self.command_result_sink is None:
             return HostIngestResult(
                 view=view,

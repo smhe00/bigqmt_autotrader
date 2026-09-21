@@ -293,6 +293,23 @@ class QmtCommandSpool:
                 return candidate
         return None
 
+    def locate(self, command_id: str) -> tuple[str, Path] | None:
+        """Return the sole known durable location for an immutable command.
+
+        A command visible in two states is a filesystem/history ambiguity.  It
+        is deliberately an error rather than an invitation to guess which copy
+        crossed the broker boundary.
+        """
+        filename = command_id + ".json"
+        found = [
+            (state, self.commands_root / state / filename)
+            for state in self._STATE_DIRS
+            if (self.commands_root / state / filename).exists()
+        ]
+        if len(found) > 1:
+            raise QmtCommandConflict("command appears in more than one spool state")
+        return found[0] if found else None
+
     @staticmethod
     def _build(
         *,

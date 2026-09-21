@@ -37,6 +37,12 @@ _RESULT_STATUSES = {
     "LIVE_CANARY_MUTATION_UNKNOWN",
     "LIVE_CANARY_ORPHANED_UNKNOWN",
     "REJECTED_SAFETY_GATE",
+    "SIMULATION_SUBMIT_CALL_RETURNED",
+    "SIMULATION_CANCEL_SIGNAL_SENT",
+    "SIMULATION_CANCEL_NOT_CANCELLABLE",
+    "SIMULATION_CANCEL_NOT_SENT",
+    "SIMULATION_MUTATION_UNKNOWN",
+    "SIMULATION_ORPHANED_UNKNOWN",
 }
 
 _LIVE_SIDE_EFFECT_STATUSES = {
@@ -45,6 +51,14 @@ _LIVE_SIDE_EFFECT_STATUSES = {
     "LIVE_CANARY_CANCEL_NOT_SENT",
     "LIVE_CANARY_MUTATION_UNKNOWN",
     "LIVE_CANARY_ORPHANED_UNKNOWN",
+}
+
+_SIMULATION_SIDE_EFFECT_STATUSES = {
+    "SIMULATION_SUBMIT_CALL_RETURNED",
+    "SIMULATION_CANCEL_SIGNAL_SENT",
+    "SIMULATION_CANCEL_NOT_SENT",
+    "SIMULATION_MUTATION_UNKNOWN",
+    "SIMULATION_ORPHANED_UNKNOWN",
 }
 
 
@@ -91,6 +105,9 @@ class QmtCommandResultJournal:
         elif execution_mode == "LIVE_CANARY":
             if live_side_effect is not (result_status in _LIVE_SIDE_EFFECT_STATUSES):
                 raise ValueError("LIVE_CANARY side-effect flag is inconsistent")
+        elif execution_mode == "SIMULATION_CALIBRATION":
+            if live_side_effect is not (result_status in _SIMULATION_SIDE_EFFECT_STATUSES):
+                raise ValueError("SIMULATION_CALIBRATION side-effect flag is inconsistent")
         else:
             raise ValueError("unsupported command result execution mode")
         if not isinstance(command_id, str) or not command_id:
@@ -176,7 +193,7 @@ class QmtCommandResultJournal:
             if client_order_id is None:
                 return CommandResultIngestResult(False, None, None)
 
-            begin_reconciling = result_status == "SHADOW_ACCEPTED" or (
+            begin_reconciling = result_status == "SHADOW_ACCEPTED" or execution_mode == "SIMULATION_CALIBRATION" or (
                 execution_mode == "LIVE_CANARY"
                 and result_status not in {"REJECTED_SAFETY_GATE", "REJECTED_EXPIRED"}
             )

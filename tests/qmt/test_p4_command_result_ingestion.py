@@ -97,7 +97,7 @@ def test_command_result_advances_sequence_without_faking_broker_state():
     assert host.read_model.healthy is True
 
 
-def test_simulation_dispatch_result_is_logged_but_never_sent_to_oms_sink():
+def test_simulation_dispatch_result_is_control_plane_only_when_sink_is_enabled():
     class Sink:
         def __init__(self):
             self.calls = []
@@ -131,10 +131,12 @@ def test_simulation_dispatch_result_is_logged_but_never_sent_to_oms_sink():
         )
     )
 
-    assert outcome.command_result_ingested is False
+    assert outcome.command_result_ingested is True
     assert outcome.evidence_ingested is False
     assert outcome.quarantined is False
-    assert sink.calls == []
+    assert len(sink.calls) == 1
+    assert sink.calls[0]["execution_mode"] == "SIMULATION_CALIBRATION"
+    assert sink.calls[0]["result_status"] == "SIMULATION_SUBMIT_CALL_RETURNED"
     assert host.read_model.view is not None
     assert host.read_model.view.sequence == 2
 
