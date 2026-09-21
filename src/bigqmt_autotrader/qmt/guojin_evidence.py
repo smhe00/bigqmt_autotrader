@@ -175,6 +175,18 @@ class GuojinSimEvidenceMapper:
         if payload.get("symbol") != identity.symbol:
             self._reject(event, event_type, row_index, "SYMBOL_MISMATCH")
             return None
+        if event.source == "active_query":
+            route_type = payload.get("route_account_type")
+            route_fingerprint = payload.get("route_account_fingerprint")
+            if route_type not in {"STOCK", "HUGANGTONG", "SHENGANGTONG"}:
+                self._reject(event, event_type, row_index, "MISSING_ROUTE_ACCOUNT_TYPE")
+                return None
+            if (
+                not isinstance(route_fingerprint, str)
+                or _ACCOUNT_FINGERPRINT_RE.fullmatch(route_fingerprint) is None
+            ):
+                self._reject(event, event_type, row_index, "MISSING_ROUTE_ACCOUNT_FINGERPRINT")
+                return None
         return identity
 
     def _map_order(
@@ -194,11 +206,6 @@ class GuojinSimEvidenceMapper:
         if submit != 51 or original != identity.quantity or filled is None:
             self._reject(event, "order", row_index, "UNCALIBRATED_ORDER_SHAPE")
             return None
-        if broker_order_id is not None and not self._bind_broker_order_id(
-            event, row_index, identity, broker_order_id
-        ):
-            return None
-
         evidence_type: BrokerEvidenceType
         requested_status: OrderStatus
         if status == 50:
@@ -233,6 +240,11 @@ class GuojinSimEvidenceMapper:
             self._reject(event, "order", row_index, "UNKNOWN_ORDER_STATUS")
             return None
 
+        if broker_order_id is not None and not self._bind_broker_order_id(
+            event, row_index, identity, broker_order_id
+        ):
+            return None
+
         return self._build(
             event,
             payload,
@@ -261,9 +273,6 @@ class GuojinSimEvidenceMapper:
         if broker_order_id is None or trade_id is None or quantity is None or quantity <= 0:
             self._reject(event, "deal", row_index, "INCOMPLETE_DEAL_IDENTITY")
             return None
-        if not self._bind_broker_order_id(event, row_index, identity, broker_order_id):
-            return None
-
         trade_key = (identity.broker_token, trade_id)
         previous = self._trades.get(trade_key)
         if previous is not None and previous != quantity:
@@ -277,6 +286,8 @@ class GuojinSimEvidenceMapper:
         )
         if cumulative > identity.quantity:
             self._reject(event, "deal", row_index, "CUMULATIVE_FILL_EXCEEDS_ORDER")
+            return None
+        if not self._bind_broker_order_id(event, row_index, identity, broker_order_id):
             return None
         self._trades.setdefault(trade_key, quantity)
         evidence_type = (
@@ -358,6 +369,14 @@ class GuojinSimEvidenceMapper:
                 f"qmt://guojin_sim/{event.session_id}/{event.sequence}{suffix}"
             ),
             raw_status=raw_status,
+            route_account_type=(
+                _text(payload, "route_account_type") if event.source == "active_query" else None
+            ),
+            route_account_fingerprint=(
+                _text(payload, "route_account_fingerprint")
+                if event.source == "active_query"
+                else None
+            ),
         )
 
     def _reject(

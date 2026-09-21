@@ -35,6 +35,7 @@ ALLOWED_DIRECT_CALLS = {
 ALLOWED_CONSTRUCTORS = {
     "EvidenceJournal": {
         ("oms/service.py", "__init__"),
+        ("qmt/guojin_sim_oms.py", "__init__"),
     },
 }
 

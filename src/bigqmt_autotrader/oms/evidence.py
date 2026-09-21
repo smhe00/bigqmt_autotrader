@@ -5,7 +5,12 @@ import json
 from dataclasses import dataclass
 from typing import Callable
 
-from bigqmt_autotrader.domain import InvalidTransition, OrderStatus, TransitionDisposition
+from bigqmt_autotrader.domain import (
+    InvalidTransition,
+    OrderStatus,
+    TransitionDisposition,
+    transition,
+)
 
 from .broker_evidence_v1 import BrokerEvidenceV1
 from .db import transaction
@@ -135,6 +140,26 @@ class EvidenceJournal:
                             status=current,
                             disposition=TransitionDisposition(key_row["result_disposition"]),
                         )
+                elif self._semantic_duplicate_exists(evidence):
+                    self._insert_key(
+                        fingerprint,
+                        evidence,
+                        True,
+                        TransitionDisposition.DUPLICATE_IGNORED.value,
+                        None,
+                        observed_at,
+                    )
+                    self._insert_observation(
+                        fingerprint, evidence, "SEMANTIC_DUPLICATE", payload_json, observed_at
+                    )
+                    result = EvidenceIngestResult(
+                        fingerprint=fingerprint,
+                        duplicate=True,
+                        status=self._current_status(
+                            evidence.account_fingerprint, evidence.client_order_id
+                        ),
+                        disposition=TransitionDisposition.DUPLICATE_IGNORED,
+                    )
                 else:
                     try:
                         outcome = self.repository.merge_broker_fact_in_tx(
@@ -210,6 +235,44 @@ class EvidenceJournal:
             (account_fingerprint, client_order_id),
         ).fetchall()
 
+    def _semantic_duplicate_exists(self, evidence: BrokerEvidenceV1) -> bool:
+        """Match one broker lifecycle fact across callback/query transports."""
+        current = self._current_status(
+            evidence.account_fingerprint, evidence.client_order_id
+        )
+        try:
+            lifecycle = transition(current, evidence.requested_status)
+        except InvalidTransition:
+            return False
+        if lifecycle.changed:
+            # The same broker fact may be needed again to resolve a later
+            # UNKNOWN/RECONCILING recovery state.  Do not suppress it merely
+            # because an older observation exists.
+            return False
+        row = self.conn.execute(
+            """
+            SELECT 1 FROM broker_evidence_observations
+            WHERE account_fingerprint=? AND client_order_id=?
+              AND evidence_type=? AND requested_status=? AND filled_quantity=?
+              AND COALESCE(broker_order_id, '')=COALESCE(?, '')
+              AND COALESCE(trade_id, '')=COALESCE(?, '')
+              AND COALESCE(broker_token, '')=COALESCE(?, '')
+              AND classification IN ('NEW', 'DUPLICATE', 'SEMANTIC_DUPLICATE')
+            LIMIT 1
+            """,
+            (
+                evidence.account_fingerprint,
+                evidence.client_order_id,
+                evidence.evidence_type.value,
+                evidence.requested_status.value,
+                evidence.filled_quantity,
+                evidence.broker_order_id,
+                evidence.trade_id,
+                evidence.broker_token,
+            ),
+        ).fetchone()
+        return row is not None
+
     def _current_status(self, account_fingerprint: str, client_order_id: str) -> OrderStatus:
         row = self.conn.execute(
             "SELECT status FROM broker_orders WHERE account_fingerprint=? AND client_order_id=?",
@@ -278,7 +341,8 @@ class EvidenceJournal:
                 filled_quantity, classification, payload_json, observed_at,
                 source_kind, mapper_profile, semantic_digest, broker_token,
                 order_ref, trade_id, raw_payload_ref, raw_status_json
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                , route_account_type, route_account_fingerprint
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fingerprint,
@@ -303,5 +367,7 @@ class EvidenceJournal:
                 None
                 if evidence.raw_status is None
                 else json.dumps(evidence.raw_status, sort_keys=True, separators=(",", ":")),
+                evidence.route_account_type,
+                evidence.route_account_fingerprint,
             ),
         )

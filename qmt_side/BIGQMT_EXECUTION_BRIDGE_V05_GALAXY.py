@@ -636,14 +636,47 @@ def read_snapshot(account_id=None, account_type=None, query_fn=None, emit=True):
         "query_errors": [],
     }
     keys = {"ACCOUNT": "account", "POSITION": "positions", "ORDER": "orders", "DEAL": "deals"}
+    route_fingerprint = _fingerprint(account_id, account_type)
     for data_type in QUERY_TYPES:
         try:
             rows = query(account_id, account_type, data_type.lower())
             if rows is None:
                 rows = []
-            snapshot[keys[data_type]] = [_NORMALIZERS[data_type](row) for row in list(rows)]
+            normalized = [_NORMALIZERS[data_type](row) for row in list(rows)]
+            if data_type in ("ORDER", "DEAL"):
+                for row in normalized:
+                    row["route_account_type"] = _text(account_type)
+                    row["route_account_fingerprint"] = route_fingerprint
+            snapshot[keys[data_type]] = normalized
         except Exception as exc:
             snapshot["query_errors"].append({"data_type": data_type, "error_type": type(exc).__name__})
+
+    # Guojin exposes one selected STOCK fund account while the QMT API can
+    # require an explicit linked account type for HGT/SGT execution queries.
+    # Preserve the queried route on every row; never infer it from a symbol.
+    for linked_type in sorted(_STATE.detected_account_types):
+        if linked_type == account_type or linked_type not in ("HUGANGTONG", "SHENGANGTONG"):
+            continue
+        linked_fingerprint = _fingerprint(account_id, linked_type)
+        for data_type in ("ORDER", "DEAL"):
+            try:
+                rows = query(account_id, linked_type, data_type.lower())
+                if rows is None:
+                    snapshot["query_errors"].append(
+                        {"data_type": data_type, "account_type": linked_type,
+                         "error_code": "QUERY_RETURNED_NONE"}
+                    )
+                    continue
+                normalized = [_NORMALIZERS[data_type](row) for row in list(rows)]
+                for row in normalized:
+                    row["route_account_type"] = linked_type
+                    row["route_account_fingerprint"] = linked_fingerprint
+                snapshot[keys[data_type]].extend(normalized)
+            except Exception as exc:
+                snapshot["query_errors"].append(
+                    {"data_type": data_type, "account_type": linked_type,
+                     "error_code": "QUERY_EXCEPTION", "error_type": type(exc).__name__}
+                )
     if snapshot["account"]:
         _remember_account_state(snapshot["account"][0])
     if emit:

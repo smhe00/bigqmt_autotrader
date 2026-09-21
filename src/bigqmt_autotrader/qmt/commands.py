@@ -83,6 +83,40 @@ def encode_command_frame(command: QmtCommand) -> bytes:
     return raw
 
 
+def decode_command_frame(raw: bytes) -> QmtCommand:
+    """Decode and fully validate one durable command frame.
+
+    Host recovery uses the same command contract as the publisher.  It never
+    learns order identity from callback payloads.
+    """
+    if not isinstance(raw, bytes) or not raw or len(raw) > MAX_COMMAND_FRAME_BYTES:
+        raise QmtCommandError("invalid command frame size")
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QmtCommandError("invalid command frame JSON") from exc
+    if not isinstance(body, dict) or body.get("command_transport_version") != COMMAND_TRANSPORT_VERSION:
+        raise QmtCommandError("unsupported command transport version")
+    value = body.get("command")
+    if not isinstance(value, dict) or value.get("command_protocol_version") != COMMAND_PROTOCOL_VERSION:
+        raise QmtCommandError("unsupported command protocol version")
+    try:
+        command = QmtCommand(
+            command_id=value["command_id"],
+            created_ms=value["created_ms"],
+            expires_ms=value["expires_ms"],
+            account_fingerprint=value["account_fingerprint"],
+            command_type=QmtCommandType(value["command_type"]),
+            client_order_id=value.get("client_order_id"),
+            broker_token=value.get("broker_token"),
+            payload=value["payload"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise QmtCommandError("invalid command frame fields") from exc
+    _validate_command(command)
+    return command
+
+
 class QmtCommandSpool:
     """Host-owned durable command publisher for the P4 QMT bridge.
 

@@ -61,6 +61,9 @@ def order_payload(token: str, **overrides) -> dict:
 
 
 def snapshot_payload(*, orders: list, deals: list) -> dict:
+    for row in orders + deals:
+        row.setdefault("route_account_type", "STOCK")
+        row.setdefault("route_account_fingerprint", FP)
     return {
         "account_fingerprint": FP,
         "account_type": "STOCK",
@@ -77,6 +80,18 @@ def mapper() -> tuple[GuojinSimEvidenceMapper, str]:
     return value, value.register_order(
         client_order_id=CID, symbol="510300.SH", quantity=100
     )
+
+
+def test_rejected_transient_row_cannot_poison_later_broker_order_identity():
+    value, token = mapper()
+    transient = order_payload(
+        token, broker_order_id="unsettled-id", remaining_quantity=0
+    )
+    assert value(event(1, "order", transient)) is None
+    settled = order_payload(token, broker_order_id="settled-id")
+    evidence = value(event(2, "order", settled))
+    assert evidence is not None
+    assert evidence.broker_order_id == "settled-id"
 
 
 @pytest.mark.parametrize(

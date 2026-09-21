@@ -222,7 +222,8 @@ def test_host_defaults_to_broker_neutral_spool_discovery() -> None:
         encoding="utf-8"
     )
     assert "galaxy" not in host_source.lower()
-    assert "guojin" not in host_source.lower()
+    assert "allow-live-canary" in host_source
+    assert "guojin_sim_oms_authorized" in host_source
 
 
 def test_simulation_instance_requires_explicit_host_authority(tmp_path: Path) -> None:

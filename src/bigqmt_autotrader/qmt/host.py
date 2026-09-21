@@ -9,6 +9,7 @@ from typing import Any
 
 from .archive import DailyArchiveResult, DailySpoolArchiver, SHANGHAI_TZ
 from .ingestion import QmtHostIngestion
+from .guojin_sim_oms import GuojinSimOmsRuntime, guojin_sim_oms_authorized
 from .instances import DEFAULT_SPOOL_BASE, QmtInstance, QmtInstanceError, discover_instances, load_instance
 from .receiver import IngressResult, LocalQmtReceiver, QmtIngressBuffer
 from .spool import FileSpoolReceiver
@@ -346,6 +347,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _build_ingestion(
+    instance: QmtInstance | None,
+    *,
+    allow_simulation_mutation: bool,
+) -> tuple[QmtHostIngestion, GuojinSimOmsRuntime | None]:
+    if not guojin_sim_oms_authorized(
+        instance, allow_simulation_mutation=allow_simulation_mutation
+    ):
+        return QmtHostIngestion(), None
+    assert instance is not None
+    runtime = GuojinSimOmsRuntime(instance)
+    return (
+        QmtHostIngestion(
+            evidence_sink=runtime,
+            evidence_mapper=runtime.mapper,
+            snapshot_evidence_mapper=runtime.mapper.map_snapshot,
+        ),
+        runtime,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _ACTIVE_INSTANCE_ID
     args = build_parser().parse_args(argv)
@@ -376,7 +398,10 @@ def main(argv: list[str] | None = None) -> int:
         expected_account_fingerprint=expected_account_fingerprint,
         expected_terminal_instance_id=instance.instance_id if instance is not None else None,
     )
-    ingestion = QmtHostIngestion()
+    ingestion, oms_runtime = _build_ingestion(
+        instance,
+        allow_simulation_mutation=args.allow_simulation_mutation,
+    )
     stats = {
         "events_seen": 0,
         "snapshots_seen": 0,
@@ -392,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     def on_event(result: IngressResult) -> None:
+        if oms_runtime is not None:
+            oms_runtime.refresh_identities()
         ingest_result = ingestion.handle(result)
         event_type = result.event.event_type
         stats["events_seen"] += 1
@@ -493,6 +520,8 @@ def main(argv: list[str] | None = None) -> int:
             "status_summary_mode": "change_driven_with_heartbeat",
             "status_summary_interval": args.status_summary_interval,
             "restart_replay": "coherent_current_session_from_latest_spool_tail",
+            "oms_evidence_enabled": oms_runtime is not None,
+            "oms_database": str(oms_runtime.database_path) if oms_runtime is not None else None,
         },
     )
 
@@ -529,6 +558,8 @@ def main(argv: list[str] | None = None) -> int:
     last_summary_payload = _status_summary_payload(stats, ingestion, pending=last_pending)
     try:
         while True:
+            if oms_runtime is not None:
+                oms_runtime.maintain()
             try:
                 result = spool.poll_once()
                 stats["spool_processed_total"] += result.processed
@@ -588,6 +619,9 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(args.poll_interval)
     except KeyboardInterrupt:
         _safe_status("stopping", {"reason": "keyboard_interrupt"})
+    finally:
+        if oms_runtime is not None:
+            oms_runtime.close()
     return 0
 
 

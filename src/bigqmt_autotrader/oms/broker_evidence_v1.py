@@ -61,6 +61,8 @@ def broker_evidence_semantic_digest(value: Mapping[str, Any]) -> str:
             "requested_status",
             "filled_quantity",
             "raw_status",
+            "route_account_type",
+            "route_account_fingerprint",
         )
     }
     encoded = _canonical_json(semantic).encode("utf-8")
@@ -87,6 +89,8 @@ class BrokerEvidenceV1:
     observed_at_ms: int
     raw_payload_ref: str
     raw_status: Mapping[str, str | int | None] | None = None
+    route_account_type: str | None = None
+    route_account_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if self.evidence_version != "1":
@@ -142,6 +146,13 @@ class BrokerEvidenceV1:
                 for value in self.raw_status.values()
             ):
                 raise TypeError("raw_status values must be string, integer, or null")
+        if (self.route_account_type is None) != (self.route_account_fingerprint is None):
+            raise ValueError("route account identity must be complete")
+        if self.route_account_type is not None:
+            if self.route_account_type not in {"STOCK", "HUGANGTONG", "SHENGANGTONG"}:
+                raise ValueError("unsupported route_account_type")
+            if not _SHA256_RE.fullmatch(self.route_account_fingerprint or ""):
+                raise ValueError("invalid route_account_fingerprint")
         if self.requested_status is not _STATUS_BY_TYPE[self.evidence_type]:
             raise ValueError("evidence_type and requested_status disagree")
         if self.source_kind in {
@@ -197,6 +208,9 @@ class BrokerEvidenceV1:
             value["semantic_digest"] = self.semantic_digest
         if self.raw_status is not None:
             value["raw_status"] = dict(self.raw_status)
+        if self.route_account_type is not None:
+            value["route_account_type"] = self.route_account_type
+            value["route_account_fingerprint"] = self.route_account_fingerprint
         return value
 
     @classmethod
