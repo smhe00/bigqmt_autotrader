@@ -22,26 +22,27 @@ bootstrap_refresh_main_before_work: true
 bootstrap_verify_head_before_write: true
 bootstrap_inspect_diff_from_audit_base: true
 
-handoff_seq: 13
-handoff_id: "P6-T004-I03-architect-pass-0013"
+handoff_seq: 14
+handoff_id: "P6-T005-I01-architect-to-agent-0014"
 
 phase: "P6"
-task_id: "P6-T004"
-iteration: "I03"
-task_key: "P6-T004-I03"
+task_id: "P6-T005"
+iteration: "I01"
+task_key: "P6-T005-I01"
 
-state: "ARCHITECT_PLANNING"
-owner: "architect"
+state: "AGENT_READY"
+owner: "agent"
 
-audit_base_commit: "e5f814895b500739b5f40ad172d5c4d296d05f39"
-task_file: "workflow/tasks/P6-T004-I03__multi-command-restart-identity.md"
-expected_report_file: "workflow/reports/P6-T004-I03__implementation-report.md"
-expected_review_file: "workflow/reviews/P6-T004-I03__architect-review.md"
+audit_base_commit: "cc04a99e18ac93b12e77f1083743258c29b5878a"
+task_file: "workflow/tasks/P6-T005-I01__guojin-sim-oms-passive-submit-cancel-runtime.md"
+expected_report_file: "workflow/reports/P6-T005-I01__implementation-report.md"
+expected_review_file: "workflow/reviews/P6-T005-I01__architect-review.md"
 
-report_status: "REVIEW_READY"
-review_status: "PASS"
+report_status: "AWAITING_AGENT"
+review_status: "AWAITING_REVIEW"
 
-authorized_next: []
+authorized_next:
+  - "P6-T005-I01"
 
 ordering:
   task_width: 3
