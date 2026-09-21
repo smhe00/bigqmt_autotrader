@@ -163,6 +163,7 @@ class OmsRepository:
         command_digest: str,
         created_ms: int,
         expires_ms: int,
+        allow_existing_order_from_dispatch: bool = False,
     ) -> bool:
         """Import one already-issued QMT submit into the durable OMS.
 
@@ -221,9 +222,36 @@ class OmsRepository:
                 (account_fingerprint, client_order_id),
             ).fetchone()
             if existing_order is not None:
-                raise QmtDurableIdentityConflict(
-                    "OMS order exists without matching durable QMT identity"
+                if not allow_existing_order_from_dispatch:
+                    raise QmtDurableIdentityConflict(
+                        "OMS order exists without matching durable QMT identity"
+                    )
+                self.conn.execute(
+                    """
+                    INSERT INTO qmt_durable_command_identities(
+                        command_id, account_fingerprint, qmt_session_id, client_order_id,
+                        broker_token, symbol, side, quantity, limit_price, command_state,
+                        command_digest, created_ms, expires_ms, imported_at
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    identity + (_utc_now(),),
                 )
+                current = self._get_status_in_tx(account_fingerprint, client_order_id)
+                self._insert_event(
+                    account_fingerprint,
+                    client_order_id,
+                    event_type="QMT_DURABLE_SUBMIT_LINKED_TO_OMS_DISPATCH",
+                    from_status=current,
+                    to_status=current,
+                    disposition=TransitionDisposition.APPLIED,
+                    evidence={
+                        "command_id": command_id,
+                        "qmt_session_id": qmt_session_id,
+                        "command_state": command_state,
+                        "broker_token": broker_token,
+                    },
+                )
+                return True
 
             created_at = datetime.fromtimestamp(created_ms / 1000.0, tz=timezone.utc).isoformat()
             expires_at = datetime.fromtimestamp(expires_ms / 1000.0, tz=timezone.utc).isoformat()

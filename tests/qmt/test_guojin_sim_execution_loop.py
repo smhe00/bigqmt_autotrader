@@ -389,3 +389,49 @@ def test_event_archiver_never_treats_command_history_as_archivable_event_spool(t
     archiver = DailySpoolArchiver(spool_root=tmp_path)
     assert archiver.discover_processed_days() == ()
     assert command_history.exists()
+
+
+def test_restart_restores_mapper_identity_from_planned_dispatch(tmp_path, monkeypatch):
+    runtime = GuojinSimOmsRuntime(instance(tmp_path))
+    order = intent("cid-restore-plan-identity")
+    try:
+        monkeypatch.setattr(
+            runtime, "_recover_dispatch",
+            lambda row: (_ for _ in ()).throw(RuntimeError("crash after plan commit")),
+        )
+        with pytest.raises(RuntimeError):
+            runtime.execute_intent(order, snapshot(), policy())
+    finally:
+        runtime.close()
+
+    restarted = GuojinSimOmsRuntime(instance(tmp_path))
+    try:
+        expected = restarted._build_submit_command(order).broker_token
+        assert expected in restarted.mapper._orders_by_token
+        assert restarted.mapper._orders_by_token[expected].client_order_id == order.client_order_id
+    finally:
+        restarted.close()
+
+
+def test_processed_oms_owned_dispatch_links_durable_identity_without_conflict(tmp_path):
+    runtime = GuojinSimOmsRuntime(instance(tmp_path))
+    order = intent("cid-owned-processed-link")
+    try:
+        result = runtime.execute_intent(order, snapshot(), policy())
+        inbox = runtime.command_spool.inbox / (result.command_id + ".json")
+        processed = runtime.command_spool.processed / inbox.name
+        inbox.replace(processed)
+    finally:
+        runtime.close()
+
+    restarted = GuojinSimOmsRuntime(instance(tmp_path))
+    try:
+        count = restarted.conn.execute(
+            """SELECT COUNT(*) FROM qmt_durable_command_identities
+               WHERE account_fingerprint=? AND client_order_id=?""",
+            (FP, order.client_order_id),
+        ).fetchone()[0]
+        assert count == 1
+        assert restarted.repository.get_status(FP, order.client_order_id) is OrderStatus.RECONCILING
+    finally:
+        restarted.close()

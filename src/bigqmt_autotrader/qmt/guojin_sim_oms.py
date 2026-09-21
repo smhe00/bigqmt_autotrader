@@ -89,6 +89,7 @@ class GuojinSimOmsRuntime:
         try:
             self.restore_persisted_identities()
             self.refresh_identities()
+            self._restore_dispatch_plan_identities()
             self._validate_dispatch_invariants()
             self.recover_dispatches()
         except BaseException:
@@ -218,9 +219,26 @@ class GuojinSimOmsRuntime:
                     (candidate["account_fingerprint"], candidate["client_order_id"]),
                 ).fetchone()
                 if prior_intent is not None:
-                    raise QmtDurableIdentityConflict(
-                        "OMS order exists without matching durable QMT identity"
-                    )
+                    dispatch = self.conn.execute(
+                        """SELECT * FROM qmt_execution_dispatches
+                           WHERE command_id=? AND account_fingerprint=?
+                             AND client_order_id=? AND command_type='SUBMIT_LIMIT'""",
+                        (
+                            candidate["command_id"],
+                            candidate["account_fingerprint"],
+                            candidate["client_order_id"],
+                        ),
+                    ).fetchone()
+                    if (
+                        dispatch is None
+                        or dispatch["qmt_session_id"] != candidate["qmt_session_id"]
+                        or dispatch["broker_token"] != candidate["broker_token"]
+                        or dispatch["frame_digest"] != candidate["command_digest"]
+                        or bytes(dispatch["frame_blob"]) != raw
+                    ):
+                        raise QmtDurableIdentityConflict(
+                            "OMS order exists without matching durable dispatch authority"
+                        )
                 continue
             fields = (
                 "command_id", "account_fingerprint", "qmt_session_id",
@@ -238,13 +256,61 @@ class GuojinSimOmsRuntime:
 
         imported = 0
         for candidate in candidates:
-            imported += int(self.repository.register_qmt_durable_submit(**candidate))
+            existing_order = self.conn.execute(
+                """SELECT 1 FROM order_intents
+                   WHERE account_fingerprint=? AND client_order_id=?""",
+                (candidate["account_fingerprint"], candidate["client_order_id"]),
+            ).fetchone()
+            imported += int(
+                self.repository.register_qmt_durable_submit(
+                    **candidate,
+                    allow_existing_order_from_dispatch=existing_order is not None,
+                )
+            )
             self.mapper.register_order(
                 client_order_id=candidate["client_order_id"],
                 symbol=candidate["symbol"],
                 quantity=candidate["quantity"],
             )
         return imported
+
+    def _restore_dispatch_plan_identities(self) -> int:
+        """Restore mapper identities from Host-owned immutable submit plans."""
+        rows = self.conn.execute(
+            """SELECT * FROM qmt_execution_dispatches
+               WHERE account_fingerprint=? AND qmt_session_id=?
+                 AND command_type='SUBMIT_LIMIT'
+                 AND dispatch_state != 'MANUAL_REVIEW'
+               ORDER BY created_ms, command_id""",
+            (self.instance.account_fingerprint, self.instance.session_id),
+        ).fetchall()
+        restored = 0
+        for row in rows:
+            raw = bytes(row["frame_blob"])
+            command = decode_command_frame(raw)
+            if (
+                row["frame_digest"] != self._digest(raw)
+                or command.command_id != row["command_id"]
+                or command.account_fingerprint != self.instance.account_fingerprint
+                or command.client_order_id != row["client_order_id"]
+                or command.broker_token != row["broker_token"]
+                or command.payload.get("simulation_calibration") is not True
+                or command.payload.get("expected_qmt_session_id") != self.instance.session_id
+            ):
+                raise QmtDurableIdentityConflict(
+                    "immutable dispatch plan cannot restore trusted mapper identity"
+                )
+            token = self.mapper.register_order(
+                client_order_id=command.client_order_id,
+                symbol=str(command.payload["symbol"]),
+                quantity=int(command.payload["quantity"]),
+            )
+            if token != command.broker_token:
+                raise QmtDurableIdentityConflict(
+                    "dispatch-plan mapper token differs from durable broker token"
+                )
+            restored += 1
+        return restored
 
     def ingest_broker_evidence(self, evidence):
         return self.evidence_journal.ingest(evidence)
