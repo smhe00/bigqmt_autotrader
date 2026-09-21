@@ -308,71 +308,122 @@ class OmsRepository:
             )
             return outcome.current
 
+    def prepare_submit_in_tx(self, account_fingerprint: str, client_order_id: str) -> None:
+        """Reserve one submit inside a caller-owned durable transaction."""
+        if not self.conn.in_transaction:
+            raise RuntimeError("prepare_submit_in_tx requires an active transaction")
+        self._guard_write_in_tx()
+        current = self._get_status_in_tx(account_fingerprint, client_order_id)
+        outcome = transition(current, OrderStatus.SUBMITTING)
+        if not outcome.changed:
+            raise SubmitAlreadyStarted(client_order_id)
+        cursor = self.conn.execute(
+            """
+            UPDATE broker_orders
+            SET status=?, submit_call_started=1, updated_at=?
+            WHERE account_fingerprint=? AND client_order_id=? AND submit_call_started=0
+            """,
+            (
+                OrderStatus.SUBMITTING.value,
+                _utc_now(),
+                account_fingerprint,
+                client_order_id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise SubmitAlreadyStarted(client_order_id)
+        self._insert_event(
+            account_fingerprint,
+            client_order_id,
+            event_type="SUBMIT_RESERVED",
+            from_status=current,
+            to_status=OrderStatus.SUBMITTING,
+            disposition=outcome.disposition,
+            evidence={"submit_call_started": True},
+        )
+
     def prepare_submit(self, account_fingerprint: str, client_order_id: str) -> None:
         """Commit SUBMITTING plus submit-call reservation before any side effect."""
         with transaction(self.conn):
-            self._guard_write_in_tx()
-            current = self._get_status_in_tx(account_fingerprint, client_order_id)
-            outcome = transition(current, OrderStatus.SUBMITTING)
-            if not outcome.changed:
-                raise SubmitAlreadyStarted(client_order_id)
-            cursor = self.conn.execute(
-                """
-                UPDATE broker_orders
-                SET status=?, submit_call_started=1, updated_at=?
-                WHERE account_fingerprint=? AND client_order_id=? AND submit_call_started=0
-                """,
-                (
-                    OrderStatus.SUBMITTING.value,
-                    _utc_now(),
-                    account_fingerprint,
-                    client_order_id,
-                ),
-            )
-            if cursor.rowcount != 1:
-                raise SubmitAlreadyStarted(client_order_id)
-            self._insert_event(
+            self.prepare_submit_in_tx(account_fingerprint, client_order_id)
+
+    def prepare_cancel_in_tx(self, account_fingerprint: str, client_order_id: str) -> None:
+        """Reserve one cancel inside a caller-owned durable transaction."""
+        if not self.conn.in_transaction:
+            raise RuntimeError("prepare_cancel_in_tx requires an active transaction")
+        self._guard_write_in_tx()
+        current = self._get_status_in_tx(account_fingerprint, client_order_id)
+        outcome = transition(current, OrderStatus.CANCEL_PENDING)
+        if not outcome.changed:
+            raise CancelAlreadyStarted(client_order_id)
+        cursor = self.conn.execute(
+            """
+            UPDATE broker_orders
+            SET status=?, cancel_call_started=1, cancel_outcome_resolved=0, updated_at=?
+            WHERE account_fingerprint=? AND client_order_id=? AND cancel_call_started=0
+            """,
+            (
+                OrderStatus.CANCEL_PENDING.value,
+                _utc_now(),
                 account_fingerprint,
                 client_order_id,
-                event_type="SUBMIT_RESERVED",
-                from_status=current,
-                to_status=OrderStatus.SUBMITTING,
-                disposition=outcome.disposition,
-                evidence={"submit_call_started": True},
-            )
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise CancelAlreadyStarted(client_order_id)
+        self._insert_event(
+            account_fingerprint,
+            client_order_id,
+            event_type="CANCEL_RESERVED",
+            from_status=current,
+            to_status=OrderStatus.CANCEL_PENDING,
+            disposition=outcome.disposition,
+            evidence={"cancel_call_started": True, "cancel_outcome_resolved": False},
+        )
 
     def prepare_cancel(self, account_fingerprint: str, client_order_id: str) -> None:
         """Commit CANCEL_PENDING plus cancel-call reservation before side effect."""
         with transaction(self.conn):
-            self._guard_write_in_tx()
-            current = self._get_status_in_tx(account_fingerprint, client_order_id)
-            outcome = transition(current, OrderStatus.CANCEL_PENDING)
-            if not outcome.changed:
-                raise CancelAlreadyStarted(client_order_id)
-            cursor = self.conn.execute(
-                """
-                UPDATE broker_orders
-                SET status=?, cancel_call_started=1, cancel_outcome_resolved=0, updated_at=?
-                WHERE account_fingerprint=? AND client_order_id=? AND cancel_call_started=0
-                """,
-                (
-                    OrderStatus.CANCEL_PENDING.value,
-                    _utc_now(),
-                    account_fingerprint,
-                    client_order_id,
-                ),
-            )
-            if cursor.rowcount != 1:
-                raise CancelAlreadyStarted(client_order_id)
-            self._insert_event(
-                account_fingerprint,
-                client_order_id,
-                event_type="CANCEL_RESERVED",
-                from_status=current,
-                to_status=OrderStatus.CANCEL_PENDING,
-                disposition=outcome.disposition,
-                evidence={"cancel_call_started": True, "cancel_outcome_resolved": False},
-            )
+            self.prepare_cancel_in_tx(account_fingerprint, client_order_id)
+
+    def mark_manual_review_in_tx(
+        self,
+        account_fingerprint: str,
+        client_order_id: str,
+        *,
+        event_type: str,
+        reason: str,
+        evidence: dict[str, Any] | None = None,
+        cancel_outcome_resolved: bool | None = None,
+    ) -> None:
+        """Force an impossible execution/recovery state into MANUAL_REVIEW."""
+        if not self.conn.in_transaction:
+            raise RuntimeError("mark_manual_review_in_tx requires an active transaction")
+        self._guard_write_in_tx()
+        context = self._get_order_context_in_tx(account_fingerprint, client_order_id)
+        current = OrderStatus(context["status"])
+        fields = ["status=?", "updated_at=?"]
+        values: list[Any] = [OrderStatus.MANUAL_REVIEW.value, _utc_now()]
+        if cancel_outcome_resolved is not None:
+            fields.append("cancel_outcome_resolved=?")
+            values.append(int(cancel_outcome_resolved))
+        values.extend([account_fingerprint, client_order_id])
+        self.conn.execute(
+            "UPDATE broker_orders SET " + ", ".join(fields)
+            + " WHERE account_fingerprint=? AND client_order_id=?",
+            tuple(values),
+        )
+        details = dict(evidence or {})
+        details["reason"] = reason
+        self._insert_event(
+            account_fingerprint,
+            client_order_id,
+            event_type=event_type,
+            from_status=current,
+            to_status=OrderStatus.MANUAL_REVIEW,
+            disposition=TransitionDisposition.APPLIED,
+            evidence=details,
+        )
 
     def transition_order(
         self,

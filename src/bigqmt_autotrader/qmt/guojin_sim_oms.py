@@ -89,6 +89,7 @@ class GuojinSimOmsRuntime:
         try:
             self.restore_persisted_identities()
             self.refresh_identities()
+            self._validate_dispatch_invariants()
             self.recover_dispatches()
         except BaseException:
             self.close()
@@ -321,16 +322,17 @@ class GuojinSimOmsRuntime:
                 status=status, command_id=None, dispatched=False, risk_evaluation=evaluation
             )
 
-        # The mapper can only learn this identity from our durable plan, never
-        # from a callback.  This makes m_strRemark a verified join key.
+        command = self._build_submit_command(intent)
+        row = self._reserve_and_persist_dispatch(
+            command, broker_order_id=None, cancel=False
+        )
+        # Mapper identity is learned only after the atomic reservation+plan
+        # transaction commits; callbacks never manufacture this join key.
         self.mapper.register_order(
             client_order_id=intent.client_order_id,
             symbol=intent.symbol,
             quantity=intent.quantity,
         )
-        self.repository.prepare_submit(intent.account_fingerprint, intent.client_order_id)
-        command = self._build_submit_command(intent)
-        row = self._persist_dispatch(command, broker_order_id=None)
         self._recover_dispatch(row)
         return GuojinSimExecutionResult(
             status=self.repository.get_status(intent.account_fingerprint, intent.client_order_id),
@@ -364,14 +366,101 @@ class GuojinSimOmsRuntime:
         broker_order_id = order["broker_order_id"]
         if not isinstance(broker_order_id, str) or not broker_order_id:
             raise RuntimeError("cancel requires trusted persistent broker_order_id")
-        self.repository.prepare_cancel(self.instance.account_fingerprint, client_order_id)
         command = self._build_cancel_command(client_order_id, broker_order_id)
-        row = self._persist_dispatch(command, broker_order_id=broker_order_id)
+        row = self._reserve_and_persist_dispatch(
+            command, broker_order_id=broker_order_id, cancel=True
+        )
         self._recover_dispatch(row)
         return GuojinSimExecutionResult(
             status=self.repository.get_status(self.instance.account_fingerprint, client_order_id),
             command_id=command.command_id, dispatched=True
         )
+
+    def _validate_dispatch_invariants(self) -> None:
+        """Fail closed on durable side-effect reservations with no matching plan."""
+        self.assert_leader()
+        rows = self.conn.execute(
+            """SELECT client_order_id, status, submit_call_started,
+                      cancel_call_started, cancel_outcome_resolved
+               FROM broker_orders
+               WHERE account_fingerprint=?""",
+            (self.instance.account_fingerprint,),
+        ).fetchall()
+        for row in rows:
+            client_order_id = row["client_order_id"]
+            status = OrderStatus(row["status"])
+            if status is OrderStatus.SUBMITTING and bool(row["submit_call_started"]):
+                dispatch = self._dispatch_for_order(client_order_id, "SUBMIT_LIMIT")
+                if dispatch is None or dispatch["qmt_session_id"] != self.instance.session_id:
+                    self._mark_invariant_manual_review(
+                        client_order_id,
+                        event_type="QMT_SUBMIT_RESERVATION_WITHOUT_DISPATCH",
+                        reason="submit reservation has no current-session immutable dispatch plan",
+                    )
+                    continue
+            if (
+                bool(row["cancel_call_started"])
+                and not bool(row["cancel_outcome_resolved"])
+                and status in {
+                    OrderStatus.ACKNOWLEDGED,
+                    OrderStatus.PARTIALLY_FILLED,
+                    OrderStatus.CANCEL_PENDING,
+                }
+            ):
+                dispatch = self._dispatch_for_order(client_order_id, "CANCEL_ORDER")
+                if dispatch is None or dispatch["qmt_session_id"] != self.instance.session_id:
+                    self._mark_invariant_manual_review(
+                        client_order_id,
+                        event_type="QMT_CANCEL_RESERVATION_WITHOUT_DISPATCH",
+                        reason="cancel reservation has no current-session immutable dispatch plan",
+                        cancel_outcome_resolved=True,
+                    )
+
+    def _mark_invariant_manual_review(
+        self,
+        client_order_id: str,
+        *,
+        event_type: str,
+        reason: str,
+        command_id: str | None = None,
+        cancel_outcome_resolved: bool | None = None,
+    ) -> None:
+        with transaction(self.conn):
+            self.repository.mark_manual_review_in_tx(
+                self.instance.account_fingerprint,
+                client_order_id,
+                event_type=event_type,
+                reason=reason,
+                evidence={"command_id": command_id} if command_id is not None else {},
+                cancel_outcome_resolved=cancel_outcome_resolved,
+            )
+
+    def _fail_dispatch_manual_review(
+        self,
+        row,
+        command: QmtCommand,
+        *,
+        event_type: str,
+        reason: str,
+    ) -> None:
+        with transaction(self.conn):
+            self.repository._guard_write_in_tx()
+            self.conn.execute(
+                """UPDATE qmt_execution_dispatches
+                   SET dispatch_state='MANUAL_REVIEW'
+                   WHERE command_id=?""",
+                (command.command_id,),
+            )
+            self.repository.mark_manual_review_in_tx(
+                command.account_fingerprint,
+                command.client_order_id,
+                event_type=event_type,
+                reason=reason,
+                evidence={"command_id": command.command_id, "dispatch_state": row["dispatch_state"]},
+                cancel_outcome_resolved=(
+                    True if command.command_type is QmtCommandType.CANCEL_ORDER else None
+                ),
+            )
 
     def recover_dispatches(self) -> int:
         """Complete only provably pre-publication plans; never blind-retry."""
@@ -441,40 +530,80 @@ class GuojinSimOmsRuntime:
             (self.instance.account_fingerprint, client_order_id, command_type),
         ).fetchone()
 
-    def _persist_dispatch(self, command: QmtCommand, *, broker_order_id: str | None):
+    def _persist_dispatch_in_tx(
+        self,
+        command: QmtCommand,
+        *,
+        broker_order_id: str | None,
+        raw: bytes | None = None,
+        digest: str | None = None,
+    ):
+        if not self.conn.in_transaction:
+            raise RuntimeError("_persist_dispatch_in_tx requires an active transaction")
+        self.repository._guard_write_in_tx()
+        raw = encode_command_frame(command) if raw is None else raw
+        digest = self._digest(raw) if digest is None else digest
+        existing = self.conn.execute(
+            "SELECT * FROM qmt_execution_dispatches WHERE command_id=?",
+            (command.command_id,),
+        ).fetchone()
+        if existing is not None:
+            if existing["frame_digest"] != digest or bytes(existing["frame_blob"]) != raw:
+                raise QmtDurableIdentityConflict("command identity has a conflicting frame")
+            return existing
+        self.conn.execute(
+            """INSERT INTO qmt_execution_dispatches(
+                   command_id, account_fingerprint, client_order_id, command_type,
+                   qmt_session_id, broker_token, broker_order_id, frame_digest, frame_blob,
+                   dispatch_state, created_ms, expires_ms, published_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'PLANNED', ?, ?, NULL)""",
+            (
+                command.command_id, command.account_fingerprint, command.client_order_id,
+                command.command_type.value, self.instance.session_id, command.broker_token,
+                broker_order_id, digest, raw, command.created_ms, command.expires_ms,
+            ),
+        )
+        self.repository._insert_event(
+            command.account_fingerprint, command.client_order_id,
+            event_type="QMT_DISPATCH_PLAN_COMMITTED", from_status=None,
+            to_status=self.repository._get_status_in_tx(
+                command.account_fingerprint, command.client_order_id
+            ),
+            disposition=TransitionDisposition.APPLIED,
+            evidence={"command_id": command.command_id, "frame_digest": digest,
+                      "command_type": command.command_type.value},
+        )
+        return self.conn.execute(
+            "SELECT * FROM qmt_execution_dispatches WHERE command_id=?",
+            (command.command_id,),
+        ).fetchone()
+
+    def _reserve_and_persist_dispatch(
+        self,
+        command: QmtCommand,
+        *,
+        broker_order_id: str | None,
+        cancel: bool,
+    ):
         raw = encode_command_frame(command)
         digest = self._digest(raw)
         with transaction(self.conn):
             self.repository._guard_write_in_tx()
-            existing = self.conn.execute(
-                "SELECT * FROM qmt_execution_dispatches WHERE command_id=?",
-                (command.command_id,),
-            ).fetchone()
-            if existing is not None:
-                if existing["frame_digest"] != digest or bytes(existing["frame_blob"]) != raw:
-                    raise QmtDurableIdentityConflict("command identity has a conflicting frame")
-                return existing
-            self.conn.execute(
-                """INSERT INTO qmt_execution_dispatches(
-                       command_id, account_fingerprint, client_order_id, command_type,
-                       qmt_session_id, broker_token, broker_order_id, frame_digest, frame_blob,
-                       dispatch_state, created_ms, expires_ms, published_at
-                   ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'PLANNED', ?, ?, NULL)""",
-                (
-                    command.command_id, command.account_fingerprint, command.client_order_id,
-                    command.command_type.value, self.instance.session_id, command.broker_token,
-                    broker_order_id, digest, raw, command.created_ms, command.expires_ms,
-                ),
+            if cancel:
+                self.repository.prepare_cancel_in_tx(
+                    command.account_fingerprint, command.client_order_id
+                )
+            else:
+                self.repository.prepare_submit_in_tx(
+                    command.account_fingerprint, command.client_order_id
+                )
+            row = self._persist_dispatch_in_tx(
+                command,
+                broker_order_id=broker_order_id,
+                raw=raw,
+                digest=digest,
             )
-            self.repository._insert_event(
-                command.account_fingerprint, command.client_order_id,
-                event_type="QMT_DISPATCH_PLAN_COMMITTED", from_status=None,
-                to_status=self.repository._get_status_in_tx(command.account_fingerprint, command.client_order_id),
-                disposition=TransitionDisposition.APPLIED,
-                evidence={"command_id": command.command_id, "frame_digest": digest,
-                          "command_type": command.command_type.value},
-            )
-        return self._dispatch_for_order(command.client_order_id, command.command_type.value)
+        return row
 
     def _set_dispatch_state(self, command_id: str, state: str) -> None:
         with transaction(self.conn):
@@ -488,30 +617,51 @@ class GuojinSimOmsRuntime:
 
     def _recover_dispatch(self, row) -> None:
         self.assert_leader()
-        command = decode_command_frame(bytes(row["frame_blob"]))
-        if command.account_fingerprint != self.instance.account_fingerprint:
-            raise QmtDurableIdentityConflict("dispatch account changed during recovery")
+        raw = bytes(row["frame_blob"])
+        command = decode_command_frame(raw)
+        if (
+            row["account_fingerprint"] != self.instance.account_fingerprint
+            or command.account_fingerprint != self.instance.account_fingerprint
+            or row["client_order_id"] != command.client_order_id
+            or row["command_id"] != command.command_id
+            or row["command_type"] != command.command_type.value
+            or row["qmt_session_id"] != self.instance.session_id
+            or command.payload.get("expected_qmt_session_id") != self.instance.session_id
+            or row["frame_digest"] != self._digest(raw)
+        ):
+            raise QmtDurableIdentityConflict("dispatch identity changed during recovery")
         located = self.command_spool.locate(command.command_id)
         state = row["dispatch_state"]
         if state == "PLANNED" and located is None:
-            # Only this exact pre-publication state has provable absence from
-            # every active spool state, so it is the sole automatic publish.
+            if command.expires_ms <= int(time.time() * 1000):
+                self._fail_dispatch_manual_review(
+                    row,
+                    command,
+                    event_type="QMT_DISPATCH_EXPIRED_BEFORE_PUBLICATION",
+                    reason="planned command expired before any durable spool publication",
+                )
+                return
+            # Command-state files are retained independently from the event
+            # archiver. For a PLANNED row, absence across every command state
+            # therefore proves that publication has not occurred.
             self.command_spool.publish(command)
             self._set_dispatch_state(command.command_id, "PUBLISHED")
             self._begin_reconciliation(command)
             return
         if located is None:
-            if state == "PUBLISHED":
-                self._set_dispatch_state(command.command_id, "MANUAL_REVIEW")
-                self.repository.transition_order(
-                    command.account_fingerprint, command.client_order_id,
-                    OrderStatus.MANUAL_REVIEW,
+            if state in {
+                "PUBLISHED", "OBSERVED_CLAIMED", "OBSERVED_PROCESSED",
+                "OBSERVED_REJECTED", "UNKNOWN",
+            }:
+                self._fail_dispatch_manual_review(
+                    row,
+                    command,
                     event_type="QMT_DISPATCH_HISTORY_AMBIGUOUS",
-                    evidence={"command_id": command.command_id, "policy": "no_auto_resubmit"},
+                    reason="previously published command is absent from retained command history",
                 )
             return
         observed, path = located
-        if path.read_bytes() != bytes(row["frame_blob"]):
+        if path.read_bytes() != raw:
             raise QmtDurableIdentityConflict("spool frame differs from durable dispatch plan")
         mapped = {
             "inbox": "PUBLISHED", "claimed": "OBSERVED_CLAIMED",
