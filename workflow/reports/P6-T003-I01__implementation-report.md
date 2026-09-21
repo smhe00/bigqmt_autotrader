@@ -14,6 +14,7 @@ review_target: workflow/reviews/P6-T003-I01__architect-review.md
 ## Result
 - Status: implementation and runtime validation complete; workflow handoff pending a pre-existing contract error in the P6-T002 Architect review.
 - Implementation commit: `c8b437a`.
+- Follow-up session-rollover guard and runtime report commit: `ae258e8`.
 - Base commit: `3fd8dc73df986922521d8da1bef3f7b7e75f20c9`.
 - Final handoff commit: pending contract repair; state remains `AGENT_READY`.
 
