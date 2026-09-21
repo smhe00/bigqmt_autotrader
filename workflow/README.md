@@ -28,6 +28,31 @@ workflow/control/WORKFLOW_STATE.yaml
 
 本目录专门承载 Architect ↔ Agent 的任务交接、执行报告和审计结果。长期设计、正式规范和项目状态仍放在 `docs/`；不得再把临时任务书、Agent implementation report 或 Architect review 混入 `docs/`。
 
+
+## Task granularity and anti-timeout rule
+
+为降低长任务超时、上下文漂移和“大包修改”审计难度，默认采用 **small-batch execution**：
+
+1. **一个 task / iteration 只解决一个可独立验收的问题或一个明确 invariant。**
+2. 不在同一 task 中同时做“架构重构 + runtime 验证 + formal 扩展 + 文档整理”；如果每一项都具有独立验收价值，应拆成连续 task/iteration。
+3. 一个 fix loop 若发现新的独立 blocker，当前 iteration 只处理原 blocker；新 blocker 进入下一个 `Ixx`，不得继续向当前任务追加范围。
+4. 默认代码修改应尽量限制在一个子系统、少量直接相关 product files、一个主 regression test surface；generated artifacts / matching workflow files 不计入这个软限制。
+5. 实现按小 checkpoint 推进：
+   ```text
+   narrow code change
+      -> targeted regression
+      -> git checkpoint
+      -> full CI/formal
+      -> report/handoff
+   ```
+6. runtime 验证若依赖真实市场窗口、GUI/QMT、本地环境或较长观察，应拆成独立后续 task，不与纯代码修复捆绑。
+7. full CI / TLC 仍是 Gate 要求，但它们只负责验收，不作为扩大实现 scope 的理由。
+8. Architect review 若发现新的独立 blocker，创建下一 `Ixx`；不把新问题继续塞入当前 iteration。
+
+每个 task 应能独立回答一个问题：
+
+> “这一项具体 invariant / bug 是否已经被修复并可验证？”
+
 ## Directory contract
 
 ```text

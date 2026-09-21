@@ -73,3 +73,18 @@ Run full repository verification and CI/TLC.
 ## Handoff
 
 Update only the matching implementation report plus workflow state. Do not edit Architect review.
+
+
+## Scope lock
+
+本 iteration 严格保持小粒度，只允许：
+
+1. 修复 `refresh_identities()` 中 per-candidate exact raw frame 绑定；
+2. 增加多历史 command restart regression；
+3. 增加 deliberate mismatch fail-closed regression；
+4. 运行现有完整 CI/TLC 作为验收。
+
+禁止在 I03 中顺带重构其它 OMS/QMT 路径、修改 runtime authority、增加新的 broker feature，
+或处理 review 中尚未形成 blocker 的其它想法。
+
+如果实现/复审发现新的独立问题，记录并创建 `P6-T004-I04`，不要扩大 I03。
