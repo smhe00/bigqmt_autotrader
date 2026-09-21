@@ -4,6 +4,8 @@ phase: P6
 task_id: P6-T002
 iteration: I01
 task_key: P6-T002-I01
+review_of: workflow/reports/P6-T002-I01__implementation-report.md
+task_file: workflow/tasks/P6-T002-I01__guojin-sim-market-open-e2e.md
 status: PASS
 owner: architect
 ---
