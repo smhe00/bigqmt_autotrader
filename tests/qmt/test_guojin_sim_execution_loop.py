@@ -438,3 +438,88 @@ def test_processed_oms_owned_dispatch_links_durable_identity_without_conflict(tm
         assert restarted.repository.get_status(FP, order.client_order_id) is OrderStatus.RECONCILING
     finally:
         restarted.close()
+
+
+def test_multi_command_restart_validates_each_candidate_against_its_own_frame(tmp_path):
+    runtime = GuojinSimOmsRuntime(instance(tmp_path))
+    first = intent("cid-multi-processed")
+    second = intent("cid-multi-unknown")
+    try:
+        r1 = runtime.execute_intent(first, snapshot(), policy())
+        r2 = runtime.execute_intent(second, snapshot(), policy())
+        p1 = runtime.command_spool.inbox / (r1.command_id + ".json")
+        p2 = runtime.command_spool.inbox / (r2.command_id + ".json")
+        p1.replace(runtime.command_spool.processed / p1.name)
+        p2.replace(runtime.command_spool.unknown / p2.name)
+        before = {
+            p.relative_to(tmp_path).as_posix()
+            for p in _command_paths(tmp_path)
+        }
+    finally:
+        runtime.close()
+
+    restarted = GuojinSimOmsRuntime(instance(tmp_path))
+    try:
+        after = {
+            p.relative_to(tmp_path).as_posix()
+            for p in _command_paths(tmp_path)
+        }
+        assert after == before
+        identities = restarted.conn.execute(
+            """SELECT client_order_id, COUNT(*) AS n
+               FROM qmt_durable_command_identities
+               WHERE account_fingerprint=?
+                 AND client_order_id IN (?, ?)
+               GROUP BY client_order_id
+               ORDER BY client_order_id""",
+            (FP, first.client_order_id, second.client_order_id),
+        ).fetchall()
+        assert [(row["client_order_id"], row["n"]) for row in identities] == [
+            (first.client_order_id, 1),
+            (second.client_order_id, 1),
+        ]
+        intents = restarted.conn.execute(
+            """SELECT client_order_id, COUNT(*) AS n
+               FROM order_intents
+               WHERE account_fingerprint=?
+                 AND client_order_id IN (?, ?)
+               GROUP BY client_order_id
+               ORDER BY client_order_id""",
+            (FP, first.client_order_id, second.client_order_id),
+        ).fetchall()
+        assert [(row["client_order_id"], row["n"]) for row in intents] == [
+            (first.client_order_id, 1),
+            (second.client_order_id, 1),
+        ]
+        token1 = restarted._build_submit_command(first).broker_token
+        token2 = restarted._build_submit_command(second).broker_token
+        assert restarted.mapper._orders_by_token[token1].client_order_id == first.client_order_id
+        assert restarted.mapper._orders_by_token[token2].client_order_id == second.client_order_id
+    finally:
+        restarted.close()
+
+
+def test_multi_command_restart_mismatched_dispatch_frame_fails_closed(tmp_path):
+    runtime = GuojinSimOmsRuntime(instance(tmp_path))
+    first = intent("cid-multi-good")
+    second = intent("cid-multi-bad")
+    try:
+        r1 = runtime.execute_intent(first, snapshot(), policy())
+        r2 = runtime.execute_intent(second, snapshot(), policy())
+        p1 = runtime.command_spool.inbox / (r1.command_id + ".json")
+        p2 = runtime.command_spool.inbox / (r2.command_id + ".json")
+        p1.replace(runtime.command_spool.processed / p1.name)
+        p2.replace(runtime.command_spool.processed / p2.name)
+        first_raw = (runtime.command_spool.processed / p1.name).read_bytes()
+        runtime.conn.execute(
+            """UPDATE qmt_execution_dispatches
+               SET frame_blob=?
+               WHERE command_id=?""",
+            (first_raw, r2.command_id),
+        )
+        runtime.conn.commit()
+    finally:
+        runtime.close()
+
+    with pytest.raises(Exception, match="durable dispatch authority|identity changed|immutable"):
+        GuojinSimOmsRuntime(instance(tmp_path))

@@ -130,6 +130,7 @@ class GuojinSimOmsRuntime:
 
     def refresh_identities(self) -> int:
         candidates = []
+        raw_by_command = {}
         by_client = {}
         by_command = {}
         validator = GuojinSimEvidenceMapper(
@@ -192,6 +193,7 @@ class GuojinSimOmsRuntime:
                     raise QmtDurableIdentityConflict("conflicting durable command identity")
                 by_client[command.client_order_id] = candidate
                 by_command[command.command_id] = candidate
+                raw_by_command[command.command_id] = raw
                 candidates.append(candidate)
 
         # Detect every file/OMS conflict before importing even the first new
@@ -234,7 +236,7 @@ class GuojinSimOmsRuntime:
                         or dispatch["qmt_session_id"] != candidate["qmt_session_id"]
                         or dispatch["broker_token"] != candidate["broker_token"]
                         or dispatch["frame_digest"] != candidate["command_digest"]
-                        or bytes(dispatch["frame_blob"]) != raw
+                        or bytes(dispatch["frame_blob"]) != raw_by_command[candidate["command_id"]]
                     ):
                         raise QmtDurableIdentityConflict(
                             "OMS order exists without matching durable dispatch authority"
