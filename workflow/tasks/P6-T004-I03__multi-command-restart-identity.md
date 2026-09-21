@@ -7,7 +7,7 @@ task_key: P6-T004-I03
 state: CHANGES_REQUIRED
 owner: agent
 audit_base_commit: e5f814895b500739b5f40ad172d5c4d296d05f39
-expected_report: workflow/reports/P6-T004-I03__multi-command-restart-identity.md
+expected_report: workflow/reports/P6-T004-I03__implementation-report.md
 expected_review: workflow/reviews/P6-T004-I03__architect-review.md
 ---
 
