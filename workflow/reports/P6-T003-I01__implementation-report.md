@@ -5,18 +5,18 @@ task_id: P6-T003
 iteration: I01
 task_key: P6-T003-I01
 reply_to: workflow/tasks/P6-T003-I01__guojin-sim-host-oms-integration.md
-status: AWAITING_AGENT
+status: REVIEW_READY
 owner: agent
 review_target: workflow/reviews/P6-T003-I01__architect-review.md
 ---
 # P6-T003-I01 Implementation Report
 
 ## Result
-- Status: implementation and runtime validation complete; workflow handoff pending a pre-existing contract error in the P6-T002 Architect review.
-- Implementation commit: `c8b437a`.
+- Status: `REVIEW_READY`.
+- Implementation commit: 070fa8f1661b908e42a710fa837b35379c230995
 - Follow-up session-rollover guard and runtime report commit: `ae258e8`.
 - Base commit: `3fd8dc73df986922521d8da1bef3f7b7e75f20c9`.
-- Final handoff commit: pending contract repair; state remains `AGENT_READY`.
+- Final commit: 070fa8f1661b908e42a710fa837b35379c230995
 
 ## Host/OMS integration
 The Host activates the evidence mapper and sink only for the manifest-pinned `guojin_sim` `SIMULATION_CALIBRATION` instance with `simulation_only=true`, its fixed account fingerprint/build, and the explicit `--allow-simulation-mutation` switch. Durable processed/unknown command frames are validated and imported into the existing OMS SQLite database at `D:\BigQMTData\spool\guojin_sim\host_oms.sqlite3`; persisted identities are re-registered across QMT session rollover. Conflicting identity batches fail before OMS import. The mapper never learns identity from callbacks. A later-discovered Host session-rollover guard now retains the first new-session event in the spool and exits with an explicit restart-required status instead of consuming it through an old-session OMS mapper.
@@ -36,7 +36,7 @@ On 2026-09-21, Python from `D:\gitee\miniQMT\.venv` with repository `src` on `PY
 - `python tools/verify_bridge_schema_contract.py`: PASS.
 - `python tools/verify_broker_evidence_contract.py`: PASS, 7200 cases.
 - `git diff --check`: PASS. No FSM transition changed, so TLC is not triggered.
-- `python tools/verify_workflow_contract.py`: **FAIL on pre-existing P6-T002 Architect review frontmatter** (`review_of mismatch`, `task_file mismatch`). The Agent did not alter that Architect-owned file or relax the validator.
+- `python tools/verify_workflow_contract.py`: **PASS** after the Architect-owned P6-T002 review metadata repair at `84aade5`; the Agent did not edit that review or relax the validator.
 
 ## Runtime validation
 Market-hours `guojin_sim` only:
@@ -67,7 +67,7 @@ Earlier transient/unsettled STOCK callback rows remained quarantined as designed
 No production authority was broadened. There were **zero** production `guojin`, Galaxy or generic mutations. No UNKNOWN command was blindly retried. The single initial HGT probe filesystem permission failure happened before a command file was written; absence of the command was checked before publishing it once.
 
 ## Deviations / blockers
-The workflow contract validator fails on `workflow/reviews/P6-T002-I01__architect-review.md` because its pre-existing `review_of` and `task_file` metadata do not match the contract. P6-T003 explicitly forbids Agent edits to Architect review files. Agent -> Architect handoff is withheld until that owner-owned metadata is repaired and the contract passes. The Host currently running for `guojin_sim` is PID 15060, pinned to the current session and running the new rollover guard. The simulator's price and trading-hours behavior should not be used to validate production order policy.
+The prior workflow-contract blocker was repaired by the Architect in `84aade5` and the contract now passes. The Host running for `guojin_sim` at the runtime check was PID 15060, pinned to the current session and running the new rollover guard. The simulator's price and trading-hours behavior should not be used to validate production order policy. No remaining task blocker is known.
 
 ## Handoff
-Pending the above Architect-owned workflow contract repair. The Agent will then use `tools/agent_workflow_handoff.py` and set `REVIEW_READY`; no next task or Architect review is created here.
+Prepared for Agent -> Architect handoff through `tools/agent_workflow_handoff.py`; no next task or Architect review is created here.
