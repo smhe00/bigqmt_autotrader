@@ -120,11 +120,10 @@ def test_planned_dispatch_recovers_only_when_exact_absence_is_provable(tmp_path)
             FP, order.client_order_id,
             evaluate_risk(order, snapshot(), policy(), now=datetime.now(timezone.utc)).decision
         )
-        runtime.mapper.register_order(client_order_id=order.client_order_id, symbol=order.symbol,
-                                      quantity=order.quantity)
-        runtime.repository.prepare_submit(FP, order.client_order_id)
         command = runtime._build_submit_command(order)
-        runtime._persist_dispatch(command, broker_order_id=None)
+        runtime._reserve_and_persist_dispatch(
+            command, broker_order_id=None, cancel=False
+        )
         assert _command_paths(tmp_path) == []
         runtime.recover_dispatches()
         assert len(_command_paths(tmp_path)) == 1
@@ -353,7 +352,7 @@ def test_expired_planned_submit_never_publishes_and_converges_manual_review(tmp_
             FP, order.client_order_id,
             evaluate_risk(order, snapshot(), policy(), now=datetime.now(timezone.utc)).decision,
         )
-        command = replace(runtime._build_submit_command(order), expires_ms=1)
+        command = replace(runtime._build_submit_command(order), created_ms=1, expires_ms=2)
         row = runtime._reserve_and_persist_dispatch(
             command, broker_order_id=None, cancel=False
         )
@@ -370,7 +369,11 @@ def test_expired_planned_cancel_never_publishes_and_converges_manual_review(tmp_
     try:
         runtime.execute_intent(order, snapshot(), policy())
         _ack(runtime, order)
-        command = replace(runtime._build_cancel_command(order.client_order_id, "9001"), expires_ms=1)
+        command = replace(
+            runtime._build_cancel_command(order.client_order_id, "9001"),
+            created_ms=1,
+            expires_ms=2,
+        )
         row = runtime._reserve_and_persist_dispatch(
             command, broker_order_id="9001", cancel=True
         )
