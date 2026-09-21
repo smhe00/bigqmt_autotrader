@@ -19,6 +19,20 @@ STATUS_PREFIX = "BIGQMT_HOST_STATUS="
 _ACTIVE_INSTANCE_ID: str | None = None
 
 
+class QmtOmsSessionRollover(RuntimeError):
+    def __init__(self, pinned_session_id: str, incoming_session_id: str) -> None:
+        self.pinned_session_id = pinned_session_id
+        self.incoming_session_id = incoming_session_id
+        super().__init__("QMT session changed while OMS identity mapper was pinned")
+
+
+def _require_current_oms_session(
+    incoming_session_id: str, runtime: GuojinSimOmsRuntime | None
+) -> None:
+    if runtime is not None and incoming_session_id != runtime.instance.session_id:
+        raise QmtOmsSessionRollover(runtime.instance.session_id, incoming_session_id)
+
+
 def _safe_status(status: str, payload: dict[str, Any]) -> None:
     if _ACTIVE_INSTANCE_ID is not None and "instance_id" not in payload:
         payload = {"instance_id": _ACTIVE_INSTANCE_ID, **payload}
@@ -417,6 +431,12 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     def on_event(result: IngressResult) -> None:
+        # The ingress read model may follow a QMT restart, but a durable OMS
+        # mapper is bound to one validated manifest/session.  Leave the new
+        # event in the spool and stop rather than processing it with stale
+        # command identities.  A fresh Host startup validates the new manifest
+        # and replays its coherent tail.
+        _require_current_oms_session(result.event.session_id, oms_runtime)
         if oms_runtime is not None:
             oms_runtime.refresh_identities()
         ingest_result = ingestion.handle(result)
@@ -527,6 +547,18 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         replay = spool.replay_processed_from_latest_clean_snapshot()
+    except QmtOmsSessionRollover as exc:
+        _safe_status(
+            "session_rollover_restart_required",
+            {
+                "pinned_session_id": exc.pinned_session_id,
+                "incoming_session_id": exc.incoming_session_id,
+                "event_retained": True,
+            },
+        )
+        if oms_runtime is not None:
+            oms_runtime.close()
+        return 2
     except Exception as exc:
         _safe_status(
             "recovery_replay_error",
@@ -570,6 +602,16 @@ def main(argv: list[str] | None = None) -> int:
                         "spool_quarantined",
                         {"count": result.quarantined, "pending": result.pending},
                     )
+            except QmtOmsSessionRollover as exc:
+                _safe_status(
+                    "session_rollover_restart_required",
+                    {
+                        "pinned_session_id": exc.pinned_session_id,
+                        "incoming_session_id": exc.incoming_session_id,
+                        "event_retained": True,
+                    },
+                )
+                return 2
             except Exception as exc:
                 _safe_status(
                     "spool_error",

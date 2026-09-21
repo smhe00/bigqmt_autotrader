@@ -12,9 +12,15 @@ from bigqmt_autotrader.qmt.guojin_sim_oms import (
     GuojinSimOmsRuntime,
     guojin_sim_oms_authorized,
 )
-from bigqmt_autotrader.qmt.host import _build_ingestion
+from bigqmt_autotrader.qmt.host import (
+    QmtOmsSessionRollover,
+    _build_ingestion,
+    _require_current_oms_session,
+)
 from bigqmt_autotrader.qmt.instances import QmtInstance
-from bigqmt_autotrader.qmt.protocol import QmtEvent
+from bigqmt_autotrader.qmt.protocol import QmtEvent, encode_transport_frame
+from bigqmt_autotrader.qmt.receiver import QmtIngressBuffer
+from bigqmt_autotrader.qmt.spool import FileSpoolReceiver
 
 
 FP = "sha256:ff266d673e28fbba5da4bfe2c68975f75b6a9fb5b89014503409b2b014ce0702"
@@ -179,6 +185,40 @@ def test_qmt_session_rollover_restores_trusted_oms_identity_without_command_repl
     assert restarted.ingest_broker_evidence(mapped).duplicate is True
     assert len(restarted.repository.list_events(FP, "cid-prior-session")) == 2
     restarted.close()
+
+
+def test_live_host_rollover_retains_new_session_event_for_clean_restart(tmp_path):
+    from dataclasses import replace
+
+    runtime = GuojinSimOmsRuntime(instance(tmp_path))
+    try:
+        receiver = FileSpoolReceiver(
+            QmtIngressBuffer(
+                expected_account_fingerprint=FP,
+                expected_terminal_instance_id="guojin_sim",
+            ),
+            spool_root=tmp_path,
+            on_event=lambda result: _require_current_oms_session(
+                result.event.session_id, runtime
+            ),
+        )
+        next_session_event = replace(
+            event(1, "order", order_payload("BQ" + "0" * 20, 50)),
+            session_id="next-qmt-session",
+        )
+        path = receiver.inbox / "next-session-order.json"
+        path.write_bytes(encode_transport_frame(next_session_event))
+
+        with pytest.raises(QmtOmsSessionRollover) as caught:
+            receiver.poll_once()
+        assert caught.value.pinned_session_id == SESSION
+        assert caught.value.incoming_session_id == "next-qmt-session"
+        assert path.exists()
+        assert not list(receiver.processed.glob("*.json"))
+        assert not list(receiver.quarantine.glob("*.json"))
+        assert not list(receiver.conflicts.glob("*.json"))
+    finally:
+        runtime.close()
 
 
 def test_conflicting_durable_identity_fails_closed(tmp_path):
