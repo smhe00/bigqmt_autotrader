@@ -44,7 +44,7 @@ PROTOCOL_VERSION = "0.2"
 TRANSPORT_VERSION = "1"
 COMMAND_PROTOCOL_VERSION = "0.1"
 COMMAND_TRANSPORT_VERSION = "1"
-BRIDGE_BUILD = "p5-simulation-calibration-7"
+BRIDGE_BUILD = "p5-simulation-calibration-8"
 READ_ONLY_ENABLED = True
 STATUS_PREFIX = "BIGQMT_RO_STATUS="
 ACCOUNT_CALLBACK_HEARTBEAT_SECONDS = 300.0
@@ -1505,6 +1505,45 @@ def instrument_probe_tick(ContextInfo):
 
 
 
+
+def _runtime_snapshot_tick_refresh(ContextInfo):
+    query = getattr(ContextInfo, "get_full_tick", None)
+    result = {
+        "method": "get_full_tick",
+        "attempted": 0,
+        "observed": 0,
+        "requested_at_ms": int(time.time() * 1000),
+    }
+    if not callable(query):
+        result["error"] = "GET_FULL_TICK_UNAVAILABLE"
+        payload = _publish_tick_capabilities(
+            "snapshot_tick_refresh_unavailable", final=False
+        )
+        result["published_observed_count"] = payload.get("observed_count", 0)
+        return result
+    for symbol in _SIMULATION_INSTRUMENT_CANDIDATES:
+        result["attempted"] += 1
+        try:
+            data = query([symbol])
+            _record_tick_evidence(symbol, data, source="snapshot_tick_refresh")
+            record = _tick_state().get(symbol, {})
+            evidence = record.get("evidence")
+            if (
+                isinstance(evidence, dict)
+                and evidence.get("exact_symbol") is True
+                and evidence.get("reported_symbol") == symbol
+            ):
+                result["observed"] += 1
+        except Exception as exc:
+            current = _tick_state().setdefault(symbol, {"symbol": symbol})
+            current["full_tick_error"] = "GET_FULL_TICK_EXCEPTION"
+            current["full_tick_error_type"] = type(exc).__name__
+    payload = _publish_tick_capabilities("snapshot_tick_refresh", final=False)
+    result["published_observed_count"] = payload.get("observed_count", 0)
+    return result
+
+
+
 def _simulation_order_symbol(value):
     value = _text(value)
     if not value:
@@ -1632,6 +1671,9 @@ def _process_claimed(claimed_path, name, ContextInfo):
         try:
             read_account_capabilities()
             read_snapshot()
+            refresh_tick = globals().get("_runtime_snapshot_tick_refresh")
+            if callable(refresh_tick):
+                refresh_tick(ContextInfo)
             flush_transport()
             result_status = "SNAPSHOT_EMITTED"
         except Exception as exc:

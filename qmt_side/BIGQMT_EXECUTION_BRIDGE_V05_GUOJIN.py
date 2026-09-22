@@ -1637,6 +1637,9 @@ def _process_claimed(claimed_path, name, ContextInfo):
         try:
             read_account_capabilities()
             read_snapshot()
+            refresh_tick = globals().get("_runtime_snapshot_tick_refresh")
+            if callable(refresh_tick):
+                refresh_tick(ContextInfo)
             flush_transport()
             result_status = "SNAPSHOT_EMITTED"
         except Exception as exc:

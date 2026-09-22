@@ -836,6 +836,46 @@ def _execute_order_command(command, ContextInfo):
     raise CommandError("unsupported live canary mutation command")
 '''
 
+SIMULATION_SNAPSHOT_TICK_REFRESH = '''def _runtime_snapshot_tick_refresh(ContextInfo):
+    query = getattr(ContextInfo, "get_full_tick", None)
+    result = {
+        "method": "get_full_tick",
+        "attempted": 0,
+        "observed": 0,
+        "requested_at_ms": int(time.time() * 1000),
+    }
+    if not callable(query):
+        result["error"] = "GET_FULL_TICK_UNAVAILABLE"
+        payload = _publish_tick_capabilities(
+            "snapshot_tick_refresh_unavailable", final=False
+        )
+        result["published_observed_count"] = payload.get("observed_count", 0)
+        return result
+    for symbol in _SIMULATION_INSTRUMENT_CANDIDATES:
+        result["attempted"] += 1
+        try:
+            data = query([symbol])
+            _record_tick_evidence(symbol, data, source="snapshot_tick_refresh")
+            record = _tick_state().get(symbol, {})
+            evidence = record.get("evidence")
+            if (
+                isinstance(evidence, dict)
+                and evidence.get("exact_symbol") is True
+                and evidence.get("reported_symbol") == symbol
+            ):
+                result["observed"] += 1
+        except Exception as exc:
+            current = _tick_state().setdefault(symbol, {"symbol": symbol})
+            current["full_tick_error"] = "GET_FULL_TICK_EXCEPTION"
+            current["full_tick_error_type"] = type(exc).__name__
+    payload = _publish_tick_capabilities("snapshot_tick_refresh", final=False)
+    result["published_observed_count"] = payload.get("observed_count", 0)
+    return result
+
+
+'''
+
+
 _LIVE_EXECUTOR_MARKER = "\ndef _live_canary_symbol"
 if LIVE_CANARY_EXECUTOR.count(_LIVE_EXECUTOR_MARKER) != 1:
     raise RuntimeError("live canary diagnostics marker must appear exactly once")
@@ -887,7 +927,7 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
     source = source.replace(TOKEN, instance_id)
     if profile == "simulation":
         replacements = {
-            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-7"',
+            'BRIDGE_BUILD = "p4-shadow-command-spool-5"': 'BRIDGE_BUILD = "p5-simulation-calibration-8"',
             'EXECUTION_MODE = "SHADOW"': 'EXECUTION_MODE = "SIMULATION_CALIBRATION"',
             'TRADING_ENABLED = False': 'TRADING_ENABLED = True',
             'LIVE_SUBMIT_ENABLED = False': 'LIVE_SUBMIT_ENABLED = True',
@@ -904,6 +944,7 @@ def rendered(instance_id: str, *, profile: str) -> bytes:
             SHADOW_EXECUTOR: (
                 SIMULATION_SECTOR_DISCOVERY
                 + SIMULATION_INSTRUMENT_DIAGNOSTICS
+                + SIMULATION_SNAPSHOT_TICK_REFRESH
                 + SIMULATION_EXECUTOR
             ),
         }
