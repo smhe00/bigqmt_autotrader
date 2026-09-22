@@ -22,26 +22,27 @@ bootstrap_refresh_main_before_work: true
 bootstrap_verify_head_before_write: true
 bootstrap_inspect_diff_from_audit_base: true
 
-handoff_seq: 23
-handoff_id: "P6-T008-I02-agent-to-architect-0023"
+handoff_seq: 24
+handoff_id: "P6-T008-I03-architect-to-agent-0024"
 
 phase: "P6"
 task_id: "P6-T008"
-iteration: "I02"
-task_key: "P6-T008-I02"
+iteration: "I03"
+task_key: "P6-T008-I03"
 
-state: "REVIEW_READY"
-owner: "architect"
+state: "AGENT_READY"
+owner: "agent"
 
-audit_base_commit: "86103970284d5314ac3434b7aba1d72f8d442afc"
-task_file: "workflow/tasks/P6-T008-I02__runtime-tick-freshness-refresh.md"
-expected_report_file: "workflow/reports/P6-T008-I02__implementation-report.md"
-expected_review_file: "workflow/reviews/P6-T008-I02__architect-review.md"
+audit_base_commit: "ca0b76992fa82e936ef8a690853761dcfd69f289"
+task_file: "workflow/tasks/P6-T008-I03__rerun-hgt-linked-fill-fresh-tick.md"
+expected_report_file: "workflow/reports/P6-T008-I03__implementation-report.md"
+expected_review_file: "workflow/reviews/P6-T008-I03__architect-review.md"
 
-report_status: "REVIEW_READY"
+report_status: "AWAITING_AGENT"
 review_status: "AWAITING_REVIEW"
 
-authorized_next: []
+authorized_next:
+  - "P6-T008-I03"
 
 ordering:
   task_width: 3
