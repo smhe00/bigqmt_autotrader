@@ -22,27 +22,26 @@ bootstrap_refresh_main_before_work: true
 bootstrap_verify_head_before_write: true
 bootstrap_inspect_diff_from_audit_base: true
 
-handoff_seq: 16
-handoff_id: "P6-T006-I01-architect-to-agent-0016"
+handoff_seq: 17
+handoff_id: "P6-T006-I01-agent-to-architect-0017"
 
 phase: "P6"
 task_id: "P6-T006"
 iteration: "I01"
 task_key: "P6-T006-I01"
 
-state: "AGENT_READY"
-owner: "agent"
+state: "REVIEW_READY"
+owner: "architect"
 
 audit_base_commit: "aa99bd38bf5e6a75dabde11a33ee2dccd10b18ef"
 task_file: "workflow/tasks/P6-T006-I01__guojin-sim-oms-marketable-fill-runtime.md"
 expected_report_file: "workflow/reports/P6-T006-I01__implementation-report.md"
 expected_review_file: "workflow/reviews/P6-T006-I01__architect-review.md"
 
-report_status: "AWAITING_AGENT"
+report_status: "REVIEW_READY"
 review_status: "AWAITING_REVIEW"
 
-authorized_next:
-  - "P6-T006-I01"
+authorized_next: []
 
 ordering:
   task_width: 3
