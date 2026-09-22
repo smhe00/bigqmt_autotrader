@@ -1041,6 +1041,53 @@ def _execute_order_command(command, ContextInfo):
     return "SHADOW_ACCEPTED", False
 
 
+def _runtime_snapshot_tick_refresh(ContextInfo):
+    candidates = globals().get("_SIMULATION_INSTRUMENT_CANDIDATES")
+    tick_state = globals().get("_tick_state")
+    record_tick = globals().get("_record_tick_evidence")
+    publish_tick = globals().get("_publish_tick_capabilities")
+    if (
+        not isinstance(candidates, tuple)
+        or not candidates
+        or not callable(tick_state)
+        or not callable(record_tick)
+        or not callable(publish_tick)
+    ):
+        return None
+    query = getattr(ContextInfo, "get_full_tick", None)
+    result = {
+        "method": "get_full_tick",
+        "attempted": 0,
+        "observed": 0,
+        "requested_at_ms": int(time.time() * 1000),
+    }
+    if not callable(query):
+        result["error"] = "GET_FULL_TICK_UNAVAILABLE"
+        payload = publish_tick("snapshot_tick_refresh_unavailable", final=False)
+        result["published_observed_count"] = payload.get("observed_count", 0)
+        return result
+    for symbol in candidates:
+        result["attempted"] += 1
+        try:
+            data = query([symbol])
+            record_tick(symbol, data, source="snapshot_tick_refresh")
+            record = tick_state().get(symbol, {})
+            evidence = record.get("evidence")
+            if (
+                isinstance(evidence, dict)
+                and evidence.get("exact_symbol") is True
+                and evidence.get("reported_symbol") == symbol
+            ):
+                result["observed"] += 1
+        except Exception as exc:
+            current = tick_state().setdefault(symbol, {"symbol": symbol})
+            current["full_tick_error"] = "GET_FULL_TICK_EXCEPTION"
+            current["full_tick_error_type"] = type(exc).__name__
+    payload = publish_tick("snapshot_tick_refresh", final=False)
+    result["published_observed_count"] = payload.get("observed_count", 0)
+    return result
+
+
 def _process_claimed(claimed_path, name, ContextInfo):
     try:
         command = _read_command_frame(claimed_path)

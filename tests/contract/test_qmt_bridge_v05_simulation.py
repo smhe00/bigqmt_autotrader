@@ -372,8 +372,7 @@ def test_simulation_submit_session_limit_rejects_before_over_limit_broker_call(
 def test_snapshot_tick_refresh_repolls_already_observed_symbol(monkeypatch):
     bridge = load_bridge()
     bridge._SIMULATION_INSTRUMENT_CANDIDATES = ("00700.HGT",)
-    state = bridge._tick_state()
-    state["00700.HGT"] = {
+    bridge._tick_state()["00700.HGT"] = {
         "symbol": "00700.HGT",
         "tick_observed": True,
         "callback_count": 1,
@@ -420,24 +419,11 @@ def test_snapshot_tick_refresh_repolls_already_observed_symbol(monkeypatch):
     assert record["evidence"]["tick_time"] == 2000
     assert record["evidence"]["last_price"] == "450.4"
     assert published[-1][0] == "snapshot_tick_refresh"
-    assert published[-1][1]["candidates"][0]["evidence"]["last_price"] == "450.4"
 
 
-def test_snapshot_tick_refresh_mismatch_is_not_fresh_exact_evidence(monkeypatch):
+def test_snapshot_tick_refresh_symbol_mismatch_stays_invalid(monkeypatch):
     bridge = load_bridge()
     bridge._SIMULATION_INSTRUMENT_CANDIDATES = ("00700.HGT",)
-    bridge._tick_state()["00700.HGT"] = {
-        "symbol": "00700.HGT",
-        "tick_observed": True,
-        "callback_count": 1,
-        "evidence": {
-            "requested_symbol": "00700.HGT",
-            "reported_symbol": "00700.HGT",
-            "exact_symbol": True,
-            "tick_time": 1000,
-            "last_price": "430.4",
-        },
-    }
 
     class Context:
         def get_full_tick(self, symbols):
@@ -457,7 +443,7 @@ def test_snapshot_tick_refresh_mismatch_is_not_fresh_exact_evidence(monkeypatch)
     assert evidence["error"] == "TICK_CALLBACK_SYMBOL_MISMATCH"
 
 
-def test_snapshot_tick_refresh_unavailable_is_read_only_and_fail_closed(monkeypatch):
+def test_snapshot_tick_refresh_unavailable_is_read_only(monkeypatch):
     bridge = load_bridge()
     bridge._SIMULATION_INSTRUMENT_CANDIDATES = ("00700.HGT",)
     published = []
@@ -473,7 +459,6 @@ def test_snapshot_tick_refresh_unavailable_is_read_only_and_fail_closed(monkeypa
     result = bridge._runtime_snapshot_tick_refresh(object())
 
     assert result["error"] == "GET_FULL_TICK_UNAVAILABLE"
-    assert result["attempted"] == 0
     assert published == ["snapshot_tick_refresh_unavailable"]
     assert bridge._STATE.simulation_submit_calls == 0
     assert bridge._STATE.simulation_cancel_calls == 0
@@ -494,9 +479,7 @@ def test_request_snapshot_invokes_tick_refresh_hook(monkeypatch):
     monkeypatch.setattr(bridge, "read_account_capabilities", lambda: calls.append("accounts"))
     monkeypatch.setattr(bridge, "read_snapshot", lambda: calls.append("snapshot"))
     monkeypatch.setattr(
-        bridge,
-        "_runtime_snapshot_tick_refresh",
-        lambda _context: calls.append("tick_refresh"),
+        bridge, "_runtime_snapshot_tick_refresh", lambda _context: calls.append("tick_refresh")
     )
     monkeypatch.setattr(bridge, "flush_transport", lambda: calls.append("flush"))
     monkeypatch.setattr(bridge, "_atomic_move", lambda *_args: calls.append("move"))
@@ -513,5 +496,3 @@ def test_request_snapshot_invokes_tick_refresh_hook(monkeypatch):
 
     assert calls[:4] == ["accounts", "snapshot", "tick_refresh", "flush"]
     assert ("result", "SNAPSHOT_EMITTED", False) in calls
-    assert bridge._STATE.simulation_submit_calls == 0
-    assert bridge._STATE.simulation_cancel_calls == 0

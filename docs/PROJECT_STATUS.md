@@ -291,7 +291,7 @@ in the 15:00 closing auction: broker order `5652`, trade `50043738`, 100 shares
 at `4.532`. Callback and active-query replay independently produced FULL_FILL.
 
 The generated `guojin_sim` V5 artifact is now build
-`p5-simulation-calibration-7`. Its submit gate supports explicit BUY/SELL and
+`p5-simulation-calibration-8`. Its submit gate supports explicit BUY/SELL and
 integer quantity `1..100` for six-digit `.SH`/`.SZ` securities and five-digit
 `.HK`/`.HGT`/`.SGT` securities on the same manifest-pinned `STOCK` simulation account, while retaining
 all simulation identity/session/token/price/fuse gates. This permits a bounded
@@ -409,7 +409,7 @@ This remains architecture direction only.
 
 ## 12. Current checkpoint
 
-**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 `p5-simulation-calibration-7` bounded simulation calibration PASS, including 20/20 read-only Stock Connect route evidence. Broker Evidence Runtime Conformance PASS. P6 `p6-guojin-live-canary-7` narrowed to one named one-shot LIVE_CANARY case (`00700.HGT BUY 100 @ 1.00 HKD`, fuse 1/1); Galaxy and generic deployments remain mutation-free.**
+**P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 `p5-simulation-calibration-8` bounded simulation calibration PASS, including 20/20 read-only Stock Connect route evidence. Broker Evidence Runtime Conformance PASS. P6 `p6-guojin-live-canary-7` narrowed to one named one-shot LIVE_CANARY case (`00700.HGT BUY 100 @ 1.00 HKD`, fuse 1/1); Galaxy and generic deployments remain mutation-free.**
 
 Next safety checkpoint:
 

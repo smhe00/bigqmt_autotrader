@@ -27,7 +27,7 @@
 
 ```text
 generic / galaxy = p4-shadow-command-spool-5       SHADOW, mutation-free
-guojin_sim      = p5-simulation-calibration-7      simulation-only calibration
+guojin_sim      = p5-simulation-calibration-8      simulation-only calibration
 guojin          = p6-guojin-live-canary-7          one submit case only: 00700.HGT BUY 100 @ 1.00 HKD; submit/cancel fuse = 1/1
 ```
 

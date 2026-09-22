@@ -272,7 +272,7 @@ def test_invariant_7_generic_and_galaxy_have_zero_mutation_surface():
 
 def test_invariant_8_guojin_sim_authority_is_unchanged():
     sim = load_artifact(GUOJIN_SIM)
-    assert sim.BRIDGE_BUILD == "p5-simulation-calibration-7"
+    assert sim.BRIDGE_BUILD == "p5-simulation-calibration-8"
     assert sim.EXECUTION_MODE == "SIMULATION_CALIBRATION"
     assert sim.TERMINAL_INSTANCE_ID == "guojin_sim"
     assert sim.SIMULATION_ONLY is True

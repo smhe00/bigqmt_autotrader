@@ -228,7 +228,7 @@ A TLC counterexample is a design/model/implementation defect until resolved. The
 - **Guojin simulation raw status mapper: PASS (`guojin_sim` only)**
 - **Production Guojin / Galaxy mapper: NOT IMPLEMENTED / NOT AUTHORIZED**
 - **Production live trading: NO**
-- **Guojin simulation deployment: `p5-simulation-calibration-7`, 20/20 read-only route evidence**
+- **Guojin simulation deployment: `p5-simulation-calibration-8`, 20/20 read-only route evidence**
 - **Guojin LIVE_CANARY: `p6-guojin-live-canary-7`; ONE NAMED CASE ONLY (`00700.HGT BUY 100 @ 1.00 HKD`), SUBMIT/CANCEL FUSE 1/1; GC001 NO LONGER AUTHORIZED; 511880 READ-ONLY PENDING A SEPARATE GATE**
 
 The Guojin simulation mapper is now implemented under the versioned

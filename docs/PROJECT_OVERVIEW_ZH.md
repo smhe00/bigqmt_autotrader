@@ -189,7 +189,7 @@ Galaxy Big QMT：
 该 mapper 不适用于 `guojin` 实盘，也不会通过自动发现启用。`galaxy` 仍无 broker
 status mapper。
 
-国金模拟 V5 build `p5-simulation-calibration-7` 已解除原先的 BUY-only / 必须 100
+国金模拟 V5 build `p5-simulation-calibration-8` 已解除原先的 BUY-only / 必须 100
 份限制：现在要求显式 `BUY` 或 `SELL`，数量为 `1..100`，证券代码为六位
 `.SH/.SZ` 或五位 `.HK/.HGT/.SGT`。国金港股通复用清单固定的 `STOCK` 模拟账号，交易市场
 不再被错误建模为第二个账户。BUY/SELL 分别映射 passorder opType `23/24`。账户指纹、当前
