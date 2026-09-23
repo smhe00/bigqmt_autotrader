@@ -4,7 +4,8 @@ from decimal import Decimal
 
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus, RiskReasonCode, Side
 from bigqmt_autotrader.drivers import SimulatedDriver
-from bigqmt_autotrader.oms import OfflineOms, OmsRepository, connect_database, initialize_database
+from bigqmt_autotrader.oms import OfflineOms, OmsRepository, connect_database, initialize_core_database
+from bigqmt_autotrader.service import RiskManagedOms
 from bigqmt_autotrader.risk import (
     AccountRiskSnapshot,
     RiskPolicy,
@@ -114,18 +115,19 @@ def _snapshot(*, mode=RuntimeMode.SIMULATION):
 
 def _stack(tmp_path):
     conn = connect_database(tmp_path / "oms.sqlite3")
-    initialize_database(conn)
+    initialize_core_database(conn)
     repo = OmsRepository(conn)
     driver = SimulatedDriver()
-    oms = OfflineOms(repo, driver, clock=lambda: NOW)
-    oms.recover()
+    core_oms = OfflineOms(repo, driver, clock=lambda: NOW)
+    core_oms.recover()
+    oms = RiskManagedOms(core_oms, _policy(), clock=lambda: NOW)
     return repo, driver, oms
 
 
 def test_public_oms_entry_evaluates_accepts_and_persists_risk_before_submit(tmp_path):
     repo, driver, oms = _stack(tmp_path)
 
-    result = oms.submit_intent(_intent(), _snapshot(), _policy())
+    result = oms.submit_intent(_intent(), _snapshot())
 
     assert result.status is OrderStatus.ACKNOWLEDGED
     assert result.risk_evaluation is not None
@@ -147,7 +149,7 @@ def test_public_oms_entry_rejects_before_submit_and_persists_primary_reason(tmp_
     repo, driver, oms = _stack(tmp_path)
     disabled = _snapshot(mode=RuntimeMode.DISABLED)
 
-    result = oms.submit_intent(_intent(), disabled, _policy())
+    result = oms.submit_intent(_intent(), disabled)
 
     assert result.status is OrderStatus.RISK_REJECTED
     assert result.risk_evaluation is not None
@@ -167,7 +169,7 @@ def test_live_named_mode_is_still_rejected_by_p2_default_policy(tmp_path):
     _, driver, oms = _stack(tmp_path)
     live_named = _snapshot(mode=RuntimeMode.LIVE_ARMED)
 
-    result = oms.submit_intent(_intent("cid-live-name"), live_named, _policy())
+    result = oms.submit_intent(_intent("cid-live-name"), live_named)
 
     assert result.status is OrderStatus.RISK_REJECTED
     assert result.risk_evaluation.decision.reason_code is RiskReasonCode.MODE_NOT_ARMED

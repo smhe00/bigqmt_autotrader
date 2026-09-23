@@ -6,6 +6,7 @@ import pytest
 
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus, Side
 from bigqmt_autotrader.qmt.archive import DailySpoolArchiver
+from bigqmt_autotrader.oms import core_execution_decision
 from bigqmt_autotrader.qmt.guojin_sim_oms import GuojinSimOmsRuntime
 from bigqmt_autotrader.qmt.instances import QmtInstance
 from bigqmt_autotrader.risk import (
@@ -16,7 +17,6 @@ from bigqmt_autotrader.risk import (
     SecurityRiskSnapshot,
     StrategyPolicy,
     StrategyRiskSnapshot,
-    evaluate_risk,
 )
 
 
@@ -88,10 +88,10 @@ def _command_paths(root):
 def test_guojin_sim_bypasses_generic_risk_rejection_and_dispatches(tmp_path):
     runtime = GuojinSimOmsRuntime(instance(tmp_path))
     try:
-        result = runtime.execute_intent(intent(), snapshot(RuntimeMode.DISABLED), policy())
-        assert result.risk_evaluation is not None
-        assert result.risk_evaluation.decision.accepted is True
-        assert result.risk_evaluation.decision.rule_version == "guojin-sim-accept-all-v1"
+        result = runtime.execute_intent(intent())
+        assert result.authorization is not None
+        assert result.authorization.accepted is True
+        assert result.authorization.rule_version == "guojin-sim-accept-all-v1"
         assert result.status is OrderStatus.RECONCILING
         assert result.command_id is not None
         assert len(_command_paths(tmp_path)) == 1
@@ -103,8 +103,8 @@ def test_submit_is_deterministic_and_repeated_execution_never_republishes(tmp_pa
     runtime = GuojinSimOmsRuntime(instance(tmp_path))
     try:
         order = intent()
-        first = runtime.execute_intent(order, snapshot(), policy())
-        second = runtime.execute_intent(order, snapshot(), policy())
+        first = runtime.execute_intent(order)
+        second = runtime.execute_intent(order)
         assert first.command_id == second.command_id
         assert first.dispatched is True
         assert second.dispatched is False
@@ -121,7 +121,7 @@ def test_planned_dispatch_recovers_only_when_exact_absence_is_provable(tmp_path)
         runtime.repository.create_intent(order)
         runtime.repository.record_risk_decision(
             FP, order.client_order_id,
-            evaluate_risk(order, snapshot(), policy(), now=datetime.now(timezone.utc)).decision
+            core_execution_decision(order, now=datetime.now(timezone.utc), rule_version="guojin-sim-accept-all-v1")
         )
         command = runtime._build_submit_command(order)
         runtime._reserve_and_persist_dispatch(
@@ -139,7 +139,7 @@ def test_cancel_is_exactly_once_and_terminal_cancel_is_noop(tmp_path):
     runtime = GuojinSimOmsRuntime(instance(tmp_path))
     try:
         order = intent("cid-cancel")
-        runtime.execute_intent(order, snapshot(), policy())
+        runtime.execute_intent(order)
         token = runtime.mapper.register_order(client_order_id=order.client_order_id,
                                               symbol=order.symbol, quantity=order.quantity)
         from bigqmt_autotrader.qmt.protocol import QmtEvent
@@ -209,7 +209,7 @@ def test_submit_reservation_and_plan_rollback_together_on_precommit_failure(tmp_
 
         monkeypatch.setattr(runtime, "_persist_dispatch_in_tx", fail)
         with pytest.raises(RuntimeError, match="fault after dispatch"):
-            runtime.execute_intent(order, snapshot(), policy())
+            runtime.execute_intent(order)
         row = runtime.repository.get_order_row(FP, order.client_order_id)
         assert OrderStatus(row["status"]) is OrderStatus.RISK_ACCEPTED
         assert row["submit_call_started"] == 0
@@ -228,7 +228,7 @@ def test_submit_atomic_commit_survives_crash_before_publish_and_recovers_once(tm
             lambda row: (_ for _ in ()).throw(RuntimeError("crash after commit")),
         )
         with pytest.raises(RuntimeError, match="crash after commit"):
-            runtime.execute_intent(order, snapshot(), policy())
+            runtime.execute_intent(order)
         row = runtime.repository.get_order_row(FP, order.client_order_id)
         assert OrderStatus(row["status"]) is OrderStatus.SUBMITTING
         dispatch = _dispatch_rows(runtime, order.client_order_id)
@@ -252,7 +252,7 @@ def test_startup_sweeps_fault_injected_submit_reservation_without_dispatch(tmp_p
         runtime.repository.create_intent(order)
         runtime.repository.record_risk_decision(
             FP, order.client_order_id,
-            evaluate_risk(order, snapshot(), policy(), now=datetime.now(timezone.utc)).decision,
+            core_execution_decision(order, now=datetime.now(timezone.utc), rule_version="guojin-sim-accept-all-v1"),
         )
         runtime.repository.prepare_submit(FP, order.client_order_id)
     finally:
@@ -270,7 +270,7 @@ def test_cancel_reservation_and_plan_rollback_together_on_precommit_failure(tmp_
     runtime = GuojinSimOmsRuntime(instance(tmp_path))
     order = intent("cid-cancel-atomic-rollback")
     try:
-        runtime.execute_intent(order, snapshot(), policy())
+        runtime.execute_intent(order)
         _ack(runtime, order)
         original = runtime._persist_dispatch_in_tx
 
@@ -293,7 +293,7 @@ def test_cancel_atomic_commit_survives_crash_before_publish_and_recovers_once(tm
     runtime = GuojinSimOmsRuntime(instance(tmp_path))
     order = intent("cid-cancel-after-commit")
     try:
-        runtime.execute_intent(order, snapshot(), policy())
+        runtime.execute_intent(order)
         _ack(runtime, order)
         original = runtime._recover_dispatch
         monkeypatch.setattr(
@@ -331,7 +331,7 @@ def test_startup_sweeps_fault_injected_cancel_reservation_without_dispatch(tmp_p
     runtime = GuojinSimOmsRuntime(instance(tmp_path))
     order = intent("cid-orphan-cancel")
     try:
-        runtime.execute_intent(order, snapshot(), policy())
+        runtime.execute_intent(order)
         _ack(runtime, order)
         runtime.repository.prepare_cancel(FP, order.client_order_id)
     finally:
@@ -353,7 +353,7 @@ def test_expired_planned_submit_never_publishes_and_converges_manual_review(tmp_
         runtime.repository.create_intent(order)
         runtime.repository.record_risk_decision(
             FP, order.client_order_id,
-            evaluate_risk(order, snapshot(), policy(), now=datetime.now(timezone.utc)).decision,
+            core_execution_decision(order, now=datetime.now(timezone.utc), rule_version="guojin-sim-accept-all-v1"),
         )
         command = replace(runtime._build_submit_command(order), created_ms=1, expires_ms=2)
         row = runtime._reserve_and_persist_dispatch(
@@ -370,7 +370,7 @@ def test_expired_planned_cancel_never_publishes_and_converges_manual_review(tmp_
     runtime = GuojinSimOmsRuntime(instance(tmp_path))
     order = intent("cid-expired-cancel")
     try:
-        runtime.execute_intent(order, snapshot(), policy())
+        runtime.execute_intent(order)
         _ack(runtime, order)
         command = replace(
             runtime._build_cancel_command(order.client_order_id, "9001"),
@@ -406,7 +406,7 @@ def test_restart_restores_mapper_identity_from_planned_dispatch(tmp_path, monkey
             lambda row: (_ for _ in ()).throw(RuntimeError("crash after plan commit")),
         )
         with pytest.raises(RuntimeError):
-            runtime.execute_intent(order, snapshot(), policy())
+            runtime.execute_intent(order)
     finally:
         runtime.close()
 
@@ -423,7 +423,7 @@ def test_processed_oms_owned_dispatch_links_durable_identity_without_conflict(tm
     runtime = GuojinSimOmsRuntime(instance(tmp_path))
     order = intent("cid-owned-processed-link")
     try:
-        result = runtime.execute_intent(order, snapshot(), policy())
+        result = runtime.execute_intent(order)
         inbox = runtime.command_spool.inbox / (result.command_id + ".json")
         processed = runtime.command_spool.processed / inbox.name
         inbox.replace(processed)
@@ -448,8 +448,8 @@ def test_multi_command_restart_validates_each_candidate_against_its_own_frame(tm
     first = intent("cid-multi-processed")
     second = intent("cid-multi-unknown")
     try:
-        r1 = runtime.execute_intent(first, snapshot(), policy())
-        r2 = runtime.execute_intent(second, snapshot(), policy())
+        r1 = runtime.execute_intent(first)
+        r2 = runtime.execute_intent(second)
         p1 = runtime.command_spool.inbox / (r1.command_id + ".json")
         p2 = runtime.command_spool.inbox / (r2.command_id + ".json")
         p1.replace(runtime.command_spool.processed / p1.name)
@@ -507,8 +507,8 @@ def test_multi_command_restart_mismatched_dispatch_frame_fails_closed(tmp_path):
     first = intent("cid-multi-good")
     second = intent("cid-multi-bad")
     try:
-        r1 = runtime.execute_intent(first, snapshot(), policy())
-        r2 = runtime.execute_intent(second, snapshot(), policy())
+        r1 = runtime.execute_intent(first)
+        r2 = runtime.execute_intent(second)
         p1 = runtime.command_spool.inbox / (r1.command_id + ".json")
         p2 = runtime.command_spool.inbox / (r2.command_id + ".json")
         p1.replace(runtime.command_spool.processed / p1.name)

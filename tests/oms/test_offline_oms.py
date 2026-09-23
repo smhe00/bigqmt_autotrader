@@ -17,7 +17,7 @@ from bigqmt_autotrader.oms import (
     OmsNotReconciled,
     OmsRepository,
     connect_database,
-    initialize_database,
+    initialize_core_database,
 )
 
 
@@ -51,7 +51,7 @@ def accept_decision():
 
 def make_stack(tmp_path, driver=None):
     conn = connect_database(tmp_path / "oms.sqlite3")
-    initialize_database(conn)
+    initialize_core_database(conn)
     repo = OmsRepository(conn)
     driver = driver or SimulatedDriver()
     oms = OfflineOms(repo, driver)

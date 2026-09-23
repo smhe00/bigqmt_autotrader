@@ -10,17 +10,15 @@ from bigqmt_autotrader.domain import (
     OrderIntent,
     OrderStatus,
     RiskDecision,
-    RiskReasonCode,
     TransitionDisposition,
 )
 from bigqmt_autotrader.oms.command_results import QmtCommandResultJournal
 from bigqmt_autotrader.oms.db import transaction
-from bigqmt_autotrader.oms.db import connect_database, initialize_database
+from bigqmt_autotrader.oms.authorization import core_execution_decision
+from bigqmt_autotrader.oms.db import connect_database, initialize_core_database
 from bigqmt_autotrader.oms.evidence import EvidenceJournal
 from bigqmt_autotrader.oms.leader import LeaderCoordinator
 from bigqmt_autotrader.oms.repository import OmsRepository, QmtDurableIdentityConflict
-from bigqmt_autotrader.risk import RiskEvaluation, RiskPolicy, RiskSnapshot, snapshot_hash
-
 from .commands import (
     QmtCommand,
     QmtCommandSpool,
@@ -46,36 +44,8 @@ class GuojinSimExecutionResult:
     status: OrderStatus
     command_id: str | None
     dispatched: bool
-    risk_evaluation: RiskEvaluation | None = None
+    authorization: RiskDecision | None = None
     terminal_noop: bool = False
-
-
-def _guojin_sim_accept_all_risk(
-    risk_snapshot: RiskSnapshot,
-    risk_policy: RiskPolicy,
-    *,
-    now: datetime,
-) -> RiskEvaluation:
-    """Simulation-only risk bypass for the strictly pinned guojin_sim runtime.
-
-    The typed RiskSnapshot/RiskPolicy inputs are retained for API compatibility
-    and audit hashing, but no policy finding may block a guojin_sim submit.
-    Production Guojin/Galaxy/generic runtimes never call this function.
-    """
-    if not isinstance(risk_snapshot, RiskSnapshot):
-        raise TypeError("risk_snapshot must be RiskSnapshot")
-    if not isinstance(risk_policy, RiskPolicy):
-        raise TypeError("risk_policy must be RiskPolicy")
-    if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
-        raise ValueError("now must be timezone-aware datetime")
-    decision = RiskDecision(
-        accepted=True,
-        reason_code=RiskReasonCode.OK,
-        rule_version="guojin-sim-accept-all-v1",
-        snapshot_hash=snapshot_hash(risk_snapshot),
-        decided_at=now,
-    )
-    return RiskEvaluation(decision=decision, findings=())
 
 
 def _deterministic_command_id(*parts: str) -> str:
@@ -99,7 +69,7 @@ class GuojinSimOmsRuntime:
         self.instance = instance
         self.database_path = instance.root / "host_oms.sqlite3"
         self.conn = connect_database(self.database_path)
-        initialize_database(self.conn)
+        initialize_core_database(self.conn)
         self.repository = OmsRepository(self.conn)
         self._leader = LeaderCoordinator(self.conn)
         self._lease_seconds = 30
@@ -391,16 +361,16 @@ class GuojinSimOmsRuntime:
     def execute_intent(
         self,
         intent: OrderIntent,
-        risk_snapshot: RiskSnapshot,
-        risk_policy: RiskPolicy,
     ) -> GuojinSimExecutionResult:
-        """Evaluate risk internally and dispatch one durable simulation submit."""
+        """Dispatch one durable simulation submit through Execution Core only."""
         self.assert_leader()
         self.maintain()
         if intent.account_fingerprint != self.instance.account_fingerprint:
             raise ValueError("intent account does not match the pinned simulator")
-        evaluation = _guojin_sim_accept_all_risk(
-            risk_snapshot, risk_policy, now=datetime.now(timezone.utc)
+        decision = core_execution_decision(
+            intent,
+            now=datetime.now(timezone.utc),
+            rule_version="guojin-sim-accept-all-v1",
         )
         existing = self._dispatch_for_order(intent.client_order_id, "SUBMIT_LIMIT")
         if existing is not None:
@@ -412,18 +382,13 @@ class GuojinSimOmsRuntime:
                 status=self.repository.get_status(intent.account_fingerprint, intent.client_order_id),
                 command_id=existing["command_id"],
                 dispatched=False,
-                risk_evaluation=evaluation,
+                authorization=decision,
             )
 
         self.repository.create_intent(intent)
         status = self.repository.record_risk_decision(
-            intent.account_fingerprint, intent.client_order_id, evaluation.decision
+            intent.account_fingerprint, intent.client_order_id, decision
         )
-        if not evaluation.decision.accepted:
-            return GuojinSimExecutionResult(
-                status=status, command_id=None, dispatched=False, risk_evaluation=evaluation
-            )
-
         command = self._build_submit_command(intent)
         row = self._reserve_and_persist_dispatch(
             command, broker_order_id=None, cancel=False
@@ -440,7 +405,7 @@ class GuojinSimOmsRuntime:
             status=self.repository.get_status(intent.account_fingerprint, intent.client_order_id),
             command_id=command.command_id,
             dispatched=True,
-            risk_evaluation=evaluation,
+            authorization=decision,
         )
 
     def cancel_intent(self, client_order_id: str) -> GuojinSimExecutionResult:

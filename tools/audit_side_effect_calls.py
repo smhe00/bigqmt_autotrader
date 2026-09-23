@@ -22,16 +22,16 @@ ALLOWED_ATTRIBUTE_CALLS = {
         ("oms/evidence.py", "ingest"),
     },
     "_submit_decided_intent": {
-        ("oms/service.py", "submit_intent"),
+        ("oms/service.py", "submit_authorized_intent"),
     },
 }
 
 ALLOWED_DIRECT_CALLS = {
     "evaluate_risk": {
-        ("oms/service.py", "submit_intent"),
         # Production service preflight coordinator is a pure decision boundary:
         # it may evaluate risk but has no OMS/QMT mutation dependency.
         ("service/coordinator.py", "evaluate_intent"),
+        ("service/risk_oms.py", "submit_intent"),
     },
 }
 

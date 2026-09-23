@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterator
 
 
+CORE_SCHEMA_VERSION = 8
 SUPPORTED_SCHEMA_VERSION = 11
 MIGRATION_PACKAGE = "bigqmt_autotrader.oms.migrations"
 
@@ -73,22 +74,49 @@ def _apply_migration(conn: sqlite3.Connection, version: int, sql: str) -> None:
         raise
 
 
-def initialize_database(conn: sqlite3.Connection) -> None:
-    """Bring the database to the newest supported forward-only schema.
-
-    Fail closed when the database was created by a newer binary. Downgrades are
-    never attempted automatically.
-    """
-    version = current_schema_version(conn)
+def _ensure_supported_version(version: int) -> None:
     if version > SUPPORTED_SCHEMA_VERSION:
         raise FutureSchemaVersion(
             f"database schema version {version} is newer than supported "
             f"version {SUPPORTED_SCHEMA_VERSION}"
         )
 
+
+def initialize_core_database(conn: sqlite3.Connection) -> None:
+    """Initialize only Execution Core schema migrations 1..8.
+
+    New Core-only databases stop at schema 8. Existing combined databases at
+    schema 9..11 remain readable for backward compatibility and are never
+    downgraded.
+    """
+    version = current_schema_version(conn)
+    _ensure_supported_version(version)
+    if version < CORE_SCHEMA_VERSION:
+        for target in range(version + 1, CORE_SCHEMA_VERSION + 1):
+            _apply_migration(conn, target, _migration_text(target))
+
+    rows = conn.execute(
+        "SELECT version FROM schema_meta WHERE version <= ? ORDER BY version",
+        (CORE_SCHEMA_VERSION,),
+    ).fetchall()
+    present = [int(row["version"]) for row in rows]
+    expected = list(range(1, CORE_SCHEMA_VERSION + 1))
+    if present != expected:
+        raise MigrationError(
+            f"core schema incomplete: expected versions {expected}, got {present}"
+        )
+
+
+def initialize_database(conn: sqlite3.Connection) -> None:
+    """Bring a Production Runtime database to the full schema.
+
+    Core-only callers should use initialize_core_database.
+    """
+    version = current_schema_version(conn)
+    _ensure_supported_version(version)
+
     for target in range(version + 1, SUPPORTED_SCHEMA_VERSION + 1):
-        sql = _migration_text(target)
-        _apply_migration(conn, target, sql)
+        _apply_migration(conn, target, _migration_text(target))
 
     final = current_schema_version(conn)
     if final != SUPPORTED_SCHEMA_VERSION:

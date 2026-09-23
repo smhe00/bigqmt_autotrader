@@ -1,9 +1,12 @@
+from .authorization import core_execution_decision, execution_intent_digest
 from .db import (
+    CORE_SCHEMA_VERSION,
     FutureSchemaVersion,
     MigrationError,
     SUPPORTED_SCHEMA_VERSION,
     connect_database,
     current_schema_version,
+    initialize_core_database,
     initialize_database,
 )
 from .command_results import (
@@ -47,6 +50,9 @@ from .qmt_bridge import (
 )
 
 __all__ = [
+    "CORE_SCHEMA_VERSION",
+    "core_execution_decision",
+    "execution_intent_digest",
     "CommandResultConflict",
     "CommandResultIngestResult",
     "QmtCommandResultJournal",
@@ -82,5 +88,6 @@ __all__ = [
     "current_schema_version",
     "evidence_fingerprint",
     "broker_evidence_semantic_digest",
+    "initialize_core_database",
     "initialize_database",
 ]

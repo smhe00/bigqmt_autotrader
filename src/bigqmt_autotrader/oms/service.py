@@ -11,8 +11,7 @@ from bigqmt_autotrader.drivers.simulated import (
     SimulatedDriver,
     SubmitOutcomeUnknown,
 )
-from bigqmt_autotrader.risk import RiskEvaluation, RiskPolicy, RiskSnapshot, evaluate_risk
-
+from .authorization import core_execution_decision
 from .broker_evidence_v1 import (
     BrokerEvidenceSourceKind,
     BrokerEvidenceType,
@@ -36,7 +35,7 @@ class RecoveryInvariantViolation(RuntimeError):
 class SubmitResult:
     status: OrderStatus
     broker_order_id: str | None = None
-    risk_evaluation: RiskEvaluation | None = None
+    risk_evaluation: object | None = None
 
 
 @dataclass(frozen=True)
@@ -46,12 +45,12 @@ class CancelResult:
 
 
 class OfflineOms:
-    """Single-machine OMS with P1 persistence and P2 pre-trade risk ownership.
+    """Single-machine Execution Core OMS.
 
     Construction acquires the SQLite-backed OMS leader lease. Every repository
     write, recovery operation, broker side effect and callback/evidence write is
-    fenced by the current lease token. Public order submission evaluates risk
-    inside the OMS; callers cannot supply an already-accepted RiskDecision.
+    fenced by the current lease token. Core submission does not import or own
+    Production Risk; a Runtime wrapper may supply a durable authorization.
     """
 
     def __init__(
@@ -331,28 +330,31 @@ class OfflineOms:
     def submit_intent(
         self,
         intent: OrderIntent,
-        risk_snapshot: RiskSnapshot,
-        risk_policy: RiskPolicy,
+        decision: RiskDecision | None = None,
     ) -> SubmitResult:
-        """Public submit path: risk is evaluated inside the OMS.
+        """Minimal Core submit path.
 
-        A caller supplies facts/policy, never an accepted RiskDecision. Leader and
-        startup-reconciliation gates are independently enforced by the OMS before
-        any risk decision can become durable execution authority.
+        With no external authorization, Core records a deterministic
+        execution-only authorization and proceeds. Production Runtime performs
+        policy evaluation above this layer and calls submit_authorized_intent.
         """
-        self.assert_leader()
-        if not self._reconciled:
-            raise OmsNotReconciled("startup reconciliation must complete before new intents")
-        evaluation = evaluate_risk(
-            intent,
-            risk_snapshot,
-            risk_policy,
-            now=self._now(),
-        )
+        authorization = decision or core_execution_decision(intent, now=self._now())
+        return self.submit_authorized_intent(intent, authorization)
+
+    def submit_authorized_intent(
+        self,
+        intent: OrderIntent,
+        decision: RiskDecision,
+        *,
+        risk_evaluation: object | None = None,
+    ) -> SubmitResult:
+        """Execute one already-authorized intent without owning policy logic."""
+        if not isinstance(decision, RiskDecision):
+            raise TypeError("decision must be RiskDecision")
         return self._submit_decided_intent(
             intent,
-            evaluation.decision,
-            risk_evaluation=evaluation,
+            decision,
+            risk_evaluation=risk_evaluation,
         )
 
     def _submit_decided_intent(
@@ -360,13 +362,9 @@ class OfflineOms:
         intent: OrderIntent,
         decision: RiskDecision,
         *,
-        risk_evaluation: RiskEvaluation | None = None,
+        risk_evaluation: object | None = None,
     ) -> SubmitResult:
-        """Internal/test hook after deterministic risk evaluation.
-
-        Production source code may call this method only from ``submit_intent``.
-        P1 tests use it to isolate persistence/recovery behavior from P2 rules.
-        """
+        """Durable execution hook after authorization is established."""
         self.assert_leader()
         if not self._reconciled:
             raise OmsNotReconciled("startup reconciliation must complete before new intents")
