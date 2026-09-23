@@ -180,6 +180,7 @@ def bootstrap_runtime_services(
         health=health,
         modes=modes,
         operations=operations,
+        alert_journal=alert_journal,
         telemetry=telemetry,
         supervisor=supervisor,
         qmt_market_data=qmt_market_data,
