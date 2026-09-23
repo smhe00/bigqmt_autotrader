@@ -30,6 +30,7 @@ from .deployment import (
     ReleaseManifest,
 )
 from .health_sync import RuntimeHealthSynchronizer, StrategyHealthRequirement
+from .lifecycle import RuntimeLifecycleController
 from .risk_runtime import RuntimeRiskAssembler
 from .supervisor import RuntimeSupervisor
 
@@ -45,6 +46,7 @@ class RuntimeServiceBundle:
     alert_journal: OperationsAlertJournal
     telemetry: OperationsTelemetry
     supervisor: RuntimeSupervisor
+    lifecycle: RuntimeLifecycleController
     qmt_market_data: QmtMarketDataAdapter
     health_sync: RuntimeHealthSynchronizer
     risk_assembler: RuntimeRiskAssembler
@@ -147,6 +149,11 @@ def bootstrap_runtime_services(
         telemetry=telemetry,
         health_max_age_seconds=health_max_age_seconds,
     )
+    lifecycle = RuntimeLifecycleController(
+        operations=operations,
+        telemetry=telemetry,
+        runtime_session_id=runtime_session_id,
+    )
     qmt_market_data = QmtMarketDataAdapter(
         market_data=market_data,
         expected_account_fingerprint=account_fingerprint,
@@ -183,6 +190,7 @@ def bootstrap_runtime_services(
         alert_journal=alert_journal,
         telemetry=telemetry,
         supervisor=supervisor,
+        lifecycle=lifecycle,
         qmt_market_data=qmt_market_data,
         health_sync=health_sync,
         risk_assembler=risk_assembler,

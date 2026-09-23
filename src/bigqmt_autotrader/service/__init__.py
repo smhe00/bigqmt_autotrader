@@ -21,6 +21,7 @@ from .deployment import (
     canonical_config_digest,
 )
 from .health_sync import RuntimeHealthSynchronizer, StrategyHealthRequirement
+from .lifecycle import RuntimeLifecycleController, RuntimeShutdownResult
 from .supervisor import RuntimeSupervisor, SupervisorCycleResult
 from .risk_runtime import (
     AccountState,
@@ -50,6 +51,8 @@ __all__ = [
     "ExecutionRuntimeCoordinator",
     "RuntimeIntentEvaluation",
     "RuntimeHealthSynchronizer",
+    "RuntimeLifecycleController",
+    "RuntimeShutdownResult",
     "StrategyHealthRequirement",
     "RuntimeRiskAssembler",
     "RuntimeSupervisor",
