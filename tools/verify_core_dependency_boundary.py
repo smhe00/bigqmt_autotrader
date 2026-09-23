@@ -28,7 +28,7 @@ def _resolve_import_from(path: Path, node: ast.ImportFrom) -> str | None:
     if node.level == 0:
         return node.module
     current = _module_for(path)
-    package_parts = current[:-1]
+    package_parts = current if path.name == "__init__.py" else current[:-1]
     up = node.level - 1
     if up > len(package_parts):
         return None
