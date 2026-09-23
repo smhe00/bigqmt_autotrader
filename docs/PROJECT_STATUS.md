@@ -13,7 +13,8 @@ Updated: 2026-09-19
 | Observed Galaxy QMT terminal | **QMT 2.1.26.1** |
 | P0 / G0 | **PASS** |
 | P1 Offline OMS | **PASS** |
-| P2 Risk engine | **PASS** |
+| P2 Risk engine | **PASS — Production Runtime layer** |
+| P7 Core / Runtime boundary | **PASS candidate — isolated API/schema + permanent CI dependency Gate** |
 | P3 Big QMT read-only | **PASS** |
 | P4 Big QMT execution bridge | **SHADOW DEPLOYMENT GATE PASS** |
 | P5 Guojin simulation mutation calibration | **BOUNDED PASS** |
@@ -407,7 +408,33 @@ Execution Bridge       -> account/order/deal/submit/cancel
 
 This remains architecture direction only.
 
-## 12. Current checkpoint
+## 12. Core / Runtime boundary
+
+Execution Core and Production Runtime are explicitly separated.
+
+Core roots:
+
+```text
+core / domain / drivers / oms / qmt
+```
+
+cannot import Runtime roots:
+
+```text
+risk / market_data / operations / service / strategy_api / runtime / web
+```
+
+Core-only databases stop at schema 8; full Runtime remains schema 11. Existing schema 9..11 combined databases remain Core-readable without downgrade.
+
+Permanent CI:
+
+```bash
+python tools/verify_core_dependency_boundary.py
+```
+
+Detailed design: [`CORE_RUNTIME_BOUNDARY_ZH.md`](CORE_RUNTIME_BOUNDARY_ZH.md).
+
+## 13. Current checkpoint
 
 **P0/P1/P2/P3 PASS. P4 SHADOW deployment PASS. P5 `p5-simulation-calibration-8` bounded simulation calibration PASS, including 20/20 read-only Stock Connect route evidence. Broker Evidence Runtime Conformance PASS. P6 `p6-guojin-live-canary-7` narrowed to one named one-shot LIVE_CANARY case (`00700.HGT BUY 100 @ 1.00 HKD`, fuse 1/1); Galaxy and generic deployments remain mutation-free.**
 

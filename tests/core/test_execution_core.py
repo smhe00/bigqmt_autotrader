@@ -74,3 +74,19 @@ def test_execution_core_restart_recovery_remains_available_without_runtime(tmp_p
         assert current_schema_version(second.conn) == 8
     finally:
         second.close()
+
+
+def test_core_can_open_existing_full_runtime_database_without_downgrade(tmp_path):
+    from bigqmt_autotrader.oms import connect_database, initialize_database
+
+    path = tmp_path / "combined.sqlite3"
+    conn = connect_database(path)
+    initialize_database(conn)
+    assert current_schema_version(conn) == 11
+    conn.close()
+
+    core = ExecutionCore.open(path, SimulatedDriver(), clock=lambda: NOW)
+    try:
+        assert current_schema_version(core.conn) == 11
+    finally:
+        core.close()

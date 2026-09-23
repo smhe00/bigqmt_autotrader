@@ -35,36 +35,26 @@ Big QMT 被定位为 **券商执行终端 / Broker Gateway**。复杂策略、OM
 
 `guojin_sim` 是 fingerprint-pinned 的模拟账户校准 artifact，只用于 simulation calibration，不能被解释成生产实盘授权。
 
-## 3. 核心架构
+## 3. 核心架构：Execution Core + Production Runtime
 
 ```text
-Market Data / Account State
-            |
-            v
-      Strategy Service
-      只产生 OrderIntent
-            |
-            v
-        Risk Engine
-      下单前风险判断
-            |
-            v
-           OMS
-  订单身份/状态/恢复/审计
-            |
-            v
-        Host Driver
-            |
-      BigQMT Bridge API v1
-            |
-            v
-    Execution Bridge (QMT)
-            |
-            v
-        Big QMT / Broker
+Production Runtime
+Risk / MarketData / Health / Operations / Telemetry
+Strategy heartbeat / Calendar / Deployment / Backup
+                    |
+                    v
+Execution Core
+OrderIntent / OMS / durable dispatch / recovery
+                    |
+                    v
+QMT Bridge / Broker
 ```
 
-Broker 的 ORDER / DEAL / query evidence 反向进入 Host，经过 mapper 和 replay-safe evidence ingestion 后再推动 OMS 状态。
+Execution Core 可以独立运行；Production Runtime 是可选上层。
+
+Core roots（`core/domain/drivers/oms/qmt`）由 CI 永久禁止反向 import Runtime roots（`risk/market_data/operations/service/strategy_api/runtime/web`）。
+
+详细设计见 [`CORE_RUNTIME_BOUNDARY_ZH.md`](CORE_RUNTIME_BOUNDARY_ZH.md)。
 
 ## 4. OMS 是什么
 
@@ -91,6 +81,8 @@ OMS 负责：
 策略不能直接调用 broker/QMT mutation API。
 
 ## 5. Risk Engine 是什么
+
+Risk Engine 现在明确属于 **Production Runtime**，不属于最小 Execution Core。
 
 Risk Engine 回答的是：
 
