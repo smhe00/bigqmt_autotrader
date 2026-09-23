@@ -15,7 +15,7 @@ from .models import (
 )
 
 
-_SUPPORTED_SUFFIXES = (".SH", ".SZ", ".BJ", ".HGT")
+_SUPPORTED_SUFFIXES = (".SH", ".SZ", ".BJ", ".HGT", ".SGT")
 
 
 def _require_aware_now(now: datetime) -> None:
@@ -307,7 +307,7 @@ def evaluate_risk(
             RiskLevel.ORDER,
             "ORDER_SECURITY_SUPPORTED",
             RiskReasonCode.INVALID_ORDER,
-            "security snapshot must match intent and use a supported A-share market suffix",
+            "security snapshot must match intent and use a supported market suffix",
         )
     if _is_stale(snapshot.security.observed_at, now, policy.market_max_age_seconds):
         reject(
