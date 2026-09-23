@@ -12,7 +12,7 @@ from bigqmt_autotrader.oms import (
 def test_fresh_database_migrates_to_supported_version(tmp_path):
     conn = connect_database(tmp_path / "fresh.sqlite3")
     initialize_database(conn)
-    assert current_schema_version(conn) == SUPPORTED_SCHEMA_VERSION == 9
+    assert current_schema_version(conn) == SUPPORTED_SCHEMA_VERSION == 10
     columns = {
         row["name"]
         for row in conn.execute("PRAGMA table_info(broker_orders)").fetchall()
@@ -31,6 +31,7 @@ def test_fresh_database_migrates_to_supported_version(tmp_path):
     assert "qmt_durable_command_identities" in tables
     assert "daily_risk_events" in tables
     assert "daily_risk_pnl_snapshots" in tables
+    assert "runtime_mode_transitions" in tables
     evidence_key_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(broker_evidence_keys)")
     }
@@ -58,7 +59,7 @@ def test_initialize_is_idempotent(tmp_path):
     initialize_database(conn)
     initialize_database(conn)
     rows = conn.execute("SELECT version FROM schema_meta ORDER BY version").fetchall()
-    assert [row["version"] for row in rows] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert [row["version"] for row in rows] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
 def test_future_schema_fails_closed(tmp_path):
@@ -89,3 +90,4 @@ def test_packaged_migrations_create_foreign_keys_and_indexes(tmp_path):
     assert "idx_daily_risk_events_account_date" in indexes
     assert "idx_daily_risk_events_strategy_date" in indexes
     assert "idx_daily_risk_pnl_account_date" in indexes
+    assert "idx_runtime_mode_transitions_session" in indexes
