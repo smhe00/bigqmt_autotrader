@@ -16,8 +16,30 @@ from .commands import broker_token_for
 from .protocol import QmtEvent
 
 
-GUOJIN_SIM_MAPPER_PROFILE = "qmt-guojin-sim-20260917-v1"
-GUOJIN_SIM_SOURCE = "qmt:guojin_sim"
+@dataclass(frozen=True)
+class GuojinMapperProfile:
+    name: str
+    source: str
+    terminal_instance_id: str
+    evidence_enabled: bool
+
+
+GUOJIN_SIM_PROFILE = GuojinMapperProfile(
+    name="qmt-guojin-sim-20260917-v1",
+    source="qmt:guojin_sim",
+    terminal_instance_id="guojin_sim",
+    evidence_enabled=True,
+)
+GUOJIN_PRODUCTION_PROFILE = GuojinMapperProfile(
+    name="qmt-guojin-prod-calibration-pending-v1",
+    source="qmt:guojin",
+    terminal_instance_id="guojin",
+    evidence_enabled=False,
+)
+GUOJIN_SIM_MAPPER_PROFILE = GUOJIN_SIM_PROFILE.name
+GUOJIN_SIM_SOURCE = GUOJIN_SIM_PROFILE.source
+GUOJIN_PRODUCTION_MAPPER_PROFILE = GUOJIN_PRODUCTION_PROFILE.name
+GUOJIN_PRODUCTION_SOURCE = GUOJIN_PRODUCTION_PROFILE.source
 _ACCOUNT_FINGERPRINT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -45,19 +67,26 @@ class _RegisteredOrder:
     broker_order_id: str | None = None
 
 
-class GuojinSimEvidenceMapper:
-    """Versioned Guojin-simulation raw fact to BrokerEvidenceV1 mapper.
+class GuojinEvidenceMapper:
+    """Profile-driven Guojin raw fact mapper with strict terminal identity.
 
-    The profile is intentionally pinned to the ``guojin_sim`` terminal.  It
-    accepts only identities explicitly registered from the durable OMS command
-    record and only the raw combinations calibrated on 2026-09-16/17.  It has
-    no order submission or cancellation capability.
+    A profile may be evidence-enabled only after its raw broker semantics have
+    been independently calibrated.  Observe-only profiles still validate
+    terminal/account/token/symbol identity but never emit BrokerEvidenceV1.
     """
 
-    def __init__(self, *, account_fingerprint: str) -> None:
+    def __init__(
+        self,
+        *,
+        account_fingerprint: str,
+        profile: GuojinMapperProfile,
+    ) -> None:
         if _ACCOUNT_FINGERPRINT_RE.fullmatch(account_fingerprint) is None:
             raise ValueError("account_fingerprint must be a sha256 fingerprint")
+        if not isinstance(profile, GuojinMapperProfile):
+            raise TypeError("profile must be GuojinMapperProfile")
         self.account_fingerprint = account_fingerprint
+        self.profile = profile
         self._orders_by_token: dict[str, _RegisteredOrder] = {}
         self._trades: dict[tuple[str, str], int] = {}
         self.rejections: list[GuojinMapperRejection] = []
@@ -140,6 +169,9 @@ class GuojinSimEvidenceMapper:
         identity = self._identity(event, event_type, row_index, payload)
         if identity is None:
             return None
+        if not self.profile.evidence_enabled:
+            self._reject(event, event_type, row_index, "PROFILE_EVIDENCE_DISABLED")
+            return None
         if event_type == "order":
             return self._map_order(event, payload, row_index, source_kind, identity)
         return self._map_deal(event, payload, row_index, source_kind, identity)
@@ -151,7 +183,7 @@ class GuojinSimEvidenceMapper:
         row_index: int | None,
         payload: Mapping[str, Any],
     ) -> _RegisteredOrder | None:
-        if event.terminal_instance_id != "guojin_sim":
+        if event.terminal_instance_id != self.profile.terminal_instance_id:
             self._reject(event, event_type, row_index, "TERMINAL_INSTANCE_MISMATCH")
             return None
         if event.account_fingerprint != self.account_fingerprint:
@@ -351,10 +383,10 @@ class GuojinSimEvidenceMapper:
         )
         suffix = "" if row_index is None else f"/{row_type}/{row_index}"
         return BrokerEvidenceV1.build(
-            source=GUOJIN_SIM_SOURCE,
+            source=self.profile.source,
             source_kind=source_kind,
             source_event_id=f"{event.session_id}:{event.sequence}{suffix}",
-            mapper_profile=GUOJIN_SIM_MAPPER_PROFILE,
+            mapper_profile=self.profile.name,
             account_fingerprint=event.account_fingerprint,
             client_order_id=identity.client_order_id,
             broker_token=identity.broker_token,
@@ -366,7 +398,7 @@ class GuojinSimEvidenceMapper:
             filled_quantity=filled_quantity,
             observed_at_ms=event.timestamp_ms,
             raw_payload_ref=(
-                f"qmt://guojin_sim/{event.session_id}/{event.sequence}{suffix}"
+                f"qmt://{self.profile.terminal_instance_id}/{event.session_id}/{event.sequence}{suffix}"
             ),
             raw_status=raw_status,
             route_account_type=(
@@ -394,6 +426,24 @@ class GuojinSimEvidenceMapper:
                 row_index=row_index,
                 reason=reason,
             )
+        )
+
+
+class GuojinSimEvidenceMapper(GuojinEvidenceMapper):
+    def __init__(self, *, account_fingerprint: str) -> None:
+        super().__init__(
+            account_fingerprint=account_fingerprint,
+            profile=GUOJIN_SIM_PROFILE,
+        )
+
+
+class GuojinProductionEvidenceMapper(GuojinEvidenceMapper):
+    """Observe-only production mapper until a later calibration Gate enables evidence."""
+
+    def __init__(self, *, account_fingerprint: str) -> None:
+        super().__init__(
+            account_fingerprint=account_fingerprint,
+            profile=GUOJIN_PRODUCTION_PROFILE,
         )
 
 
