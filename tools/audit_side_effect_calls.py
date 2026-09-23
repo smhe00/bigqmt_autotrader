@@ -17,6 +17,7 @@ ALLOWED_ATTRIBUTE_CALLS = {
     },
     "cancel_order": {
         ("oms/service.py", "cancel_order"),
+        ("core/facade.py", "cancel"),
     },
     "merge_broker_fact_in_tx": {
         ("oms/evidence.py", "ingest"),
