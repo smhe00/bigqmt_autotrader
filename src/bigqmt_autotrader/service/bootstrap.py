@@ -144,7 +144,6 @@ def bootstrap_runtime_services(
     telemetry = OperationsTelemetry(alert_journal)
     supervisor = RuntimeSupervisor(
         operations=operations,
-        alert_journal=alert_journal,
         telemetry=telemetry,
         health_max_age_seconds=health_max_age_seconds,
     )
