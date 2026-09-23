@@ -14,6 +14,7 @@ from bigqmt_autotrader.oms import (
 )
 from bigqmt_autotrader.operations import (
     HealthRegistry,
+    OperationsAlertJournal,
     OperationsControl,
     OperationsTelemetry,
     RuntimeModeController,
@@ -41,6 +42,7 @@ class RuntimeServiceBundle:
     health: HealthRegistry
     modes: RuntimeModeController
     operations: OperationsControl
+    alert_journal: OperationsAlertJournal
     telemetry: OperationsTelemetry
     supervisor: RuntimeSupervisor
     qmt_market_data: QmtMarketDataAdapter
@@ -138,9 +140,11 @@ def bootstrap_runtime_services(
         started_at=started_at,
     )
     operations = OperationsControl(modes=modes, health=health)
-    telemetry = OperationsTelemetry()
+    alert_journal = OperationsAlertJournal(conn)
+    telemetry = OperationsTelemetry(alert_journal)
     supervisor = RuntimeSupervisor(
         operations=operations,
+        alert_journal=alert_journal,
         telemetry=telemetry,
         health_max_age_seconds=health_max_age_seconds,
     )

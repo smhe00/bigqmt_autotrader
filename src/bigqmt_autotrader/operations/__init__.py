@@ -1,5 +1,11 @@
 """Human operations and fail-closed runtime safety controls."""
 
+from .alert_store import (
+    AlertEventConflict,
+    OperationsAlertJournal,
+    PersistedAlertState,
+    PersistedAlertStatus,
+)
 from .backup import (
     BackupVerificationError,
     DatabaseBackupResult,
@@ -29,6 +35,10 @@ from .mode import (
 )
 
 __all__ = [
+    "AlertEventConflict",
+    "OperationsAlertJournal",
+    "PersistedAlertState",
+    "PersistedAlertStatus",
     "BackupVerificationError",
     "DatabaseBackupResult",
     "create_database_backup",

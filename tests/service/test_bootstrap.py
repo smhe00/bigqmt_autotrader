@@ -113,6 +113,7 @@ def test_bootstrap_builds_all_services_but_starts_disabled(tmp_path):
     status = bundle.operations.status(now=NOW, max_age_seconds=5)
     assert status.mode is RuntimeMode.DISABLED
     assert not status.ready_for_mutation
+    assert bundle.alert_journal.active_alerts() == ()
     telemetry = bundle.telemetry.snapshot()
     assert telemetry.mode is RuntimeMode.DISABLED
     assert not telemetry.ready_for_mutation

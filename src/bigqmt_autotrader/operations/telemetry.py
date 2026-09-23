@@ -6,6 +6,7 @@ from enum import Enum
 
 from bigqmt_autotrader.risk import RuntimeMode
 
+from .alert_store import OperationsAlertJournal, PersistedAlertStatus
 from .health import HealthAlert, HealthSnapshot
 
 
@@ -52,14 +53,28 @@ class TelemetrySnapshot:
 
 
 class OperationsTelemetry:
-    """Ephemeral, replay-safe runtime metrics and alert state.
+    """Replay-safe runtime metrics with optional durable alert persistence.
 
-    Alerts are derived from authoritative runtime facts. They never create
-    trading authority and are intentionally reconstructed after Host restart.
+    Persisted alerts are operational visibility only. Host restart may restore
+    active alert display, but runtime mode and health authority still restart
+    fail-closed from DISABLED / not-ready.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, journal: OperationsAlertJournal | None = None) -> None:
+        if journal is not None and not isinstance(journal, OperationsAlertJournal):
+            raise TypeError("journal must be OperationsAlertJournal")
+        self._journal = journal
         self._alerts: dict[str, ActiveAlert] = {}
+        if journal is not None:
+            for item in journal.active_alerts():
+                self._alerts[item.key] = ActiveAlert(
+                    key=item.key,
+                    severity=AlertSeverity(item.severity),
+                    detail=item.detail,
+                    first_seen_at=item.first_seen_at,
+                    last_seen_at=item.last_seen_at,
+                    occurrences=item.occurrences,
+                )
         self._mode = RuntimeMode.DISABLED
         self._ready_for_mutation = False
         self._unknown_order_count = 0
@@ -87,7 +102,29 @@ class OperationsTelemetry:
         severity: AlertSeverity,
         detail: str,
         observed_at: datetime,
+        source: str,
     ) -> None:
+        if self._journal is not None:
+            state = self._journal.record_active(
+                key=key,
+                severity=severity.value,
+                detail=detail,
+                observed_at=observed_at,
+                source=source,
+            )
+            if state.status is PersistedAlertStatus.ACTIVE:
+                self._alerts[key] = ActiveAlert(
+                    key=state.key,
+                    severity=AlertSeverity(state.severity),
+                    detail=state.detail,
+                    first_seen_at=state.first_seen_at,
+                    last_seen_at=state.last_seen_at,
+                    occurrences=state.occurrences,
+                )
+            else:
+                self._alerts.pop(key, None)
+            return
+
         current = self._alerts.get(key)
         if current is not None and observed_at < current.last_seen_at:
             return
@@ -110,10 +147,36 @@ class OperationsTelemetry:
                 occurrences=1,
             )
 
-    def _resolve_prefix(self, prefix: str, keep: set[str]) -> None:
+    def _resolve(self, key: str, *, observed_at: datetime, source: str) -> None:
+        if self._journal is not None:
+            state = self._journal.record_resolved(
+                key=key,
+                observed_at=observed_at,
+                source=source,
+            )
+            if state is not None and state.status is PersistedAlertStatus.ACTIVE:
+                self._alerts[key] = ActiveAlert(
+                    key=state.key,
+                    severity=AlertSeverity(state.severity),
+                    detail=state.detail,
+                    first_seen_at=state.first_seen_at,
+                    last_seen_at=state.last_seen_at,
+                    occurrences=state.occurrences,
+                )
+                return
+        self._alerts.pop(key, None)
+
+    def _resolve_prefix(
+        self,
+        prefix: str,
+        keep: set[str],
+        *,
+        observed_at: datetime,
+        source: str,
+    ) -> None:
         for key in tuple(self._alerts):
             if key.startswith(prefix) and key not in keep:
-                del self._alerts[key]
+                self._resolve(key, observed_at=observed_at, source=source)
 
     def sync_health(self, snapshot: HealthSnapshot, *, observed_at: datetime) -> None:
         if not isinstance(snapshot, HealthSnapshot):
@@ -135,8 +198,14 @@ class OperationsTelemetry:
                 severity=AlertSeverity.ERROR,
                 detail=item.reason,
                 observed_at=observed_at,
+                source="health",
             )
-        self._resolve_prefix("health:", keep)
+        self._resolve_prefix(
+            "health:",
+            keep,
+            observed_at=observed_at,
+            source="health",
+        )
 
     def sync_mode(self, mode: RuntimeMode, *, observed_at: datetime) -> None:
         if not isinstance(mode, RuntimeMode):
@@ -152,9 +221,14 @@ class OperationsTelemetry:
                 severity=AlertSeverity.ERROR,
                 detail="runtime is HALTED",
                 observed_at=observed_at,
+                source="mode",
             )
         else:
-            self._alerts.pop("runtime:HALTED", None)
+            self._resolve(
+                "runtime:HALTED",
+                observed_at=observed_at,
+                source="mode",
+            )
 
     def sync_execution_ambiguity(
         self,
@@ -178,9 +252,14 @@ class OperationsTelemetry:
                 severity=AlertSeverity.ERROR,
                 detail=f"{unknown_order_count} unresolved UNKNOWN order(s)",
                 observed_at=observed_at,
+                source="execution",
             )
         else:
-            self._alerts.pop("execution:UNKNOWN", None)
+            self._resolve(
+                "execution:UNKNOWN",
+                observed_at=observed_at,
+                source="execution",
+            )
 
         if manual_review_count:
             self._upsert(
@@ -188,9 +267,14 @@ class OperationsTelemetry:
                 severity=AlertSeverity.ERROR,
                 detail=f"{manual_review_count} order(s) require manual review",
                 observed_at=observed_at,
+                source="execution",
             )
         else:
-            self._alerts.pop("execution:MANUAL_REVIEW", None)
+            self._resolve(
+                "execution:MANUAL_REVIEW",
+                observed_at=observed_at,
+                source="execution",
+            )
 
     def snapshot(self) -> TelemetrySnapshot:
         return TelemetrySnapshot(
