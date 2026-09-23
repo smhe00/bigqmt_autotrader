@@ -1,5 +1,6 @@
 """Production service assembly boundaries."""
 
+from .bootstrap import RuntimeServiceBundle, bootstrap_runtime_services
 from .calendar import (
     Market,
     SessionWindow,
@@ -29,6 +30,8 @@ from .risk_runtime import (
 
 __all__ = [
     "AccountState",
+    "RuntimeServiceBundle",
+    "bootstrap_runtime_services",
     "Market",
     "SessionWindow",
     "TradingCalendar",
