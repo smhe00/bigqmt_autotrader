@@ -1,3 +1,11 @@
+from .external_orders import (
+    ActiveBrokerOrderFact,
+    BrokerOrderOwnership,
+    ClassifiedActiveOrder,
+    ExternalOrderFactConflict,
+    ExternalOrderRiskClassifier,
+    ExternalOrderRiskSummary,
+)
 from .accounting import (
     DailyRiskFactConflict,
     DailyRiskLedger,
@@ -23,6 +31,12 @@ from .models import (
 
 __all__ = [
     "AccountRiskSnapshot",
+    "ActiveBrokerOrderFact",
+    "BrokerOrderOwnership",
+    "ClassifiedActiveOrder",
+    "ExternalOrderFactConflict",
+    "ExternalOrderRiskClassifier",
+    "ExternalOrderRiskSummary",
     "DailyRiskFactConflict",
     "DailyRiskLedger",
     "DailyRiskSnapshotUnavailable",

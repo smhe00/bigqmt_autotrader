@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -9,6 +9,7 @@ from bigqmt_autotrader.operations import RuntimeHealth
 from bigqmt_autotrader.risk import (
     AccountRiskSnapshot,
     DailyRiskLedger,
+    ExternalOrderRiskSummary,
     RiskPolicy,
     RiskSnapshot,
     RiskSnapshotBuilder,
@@ -79,6 +80,7 @@ class RuntimeRiskAssembler:
         market_open: bool,
         global_ambiguity_block: bool,
         blocked_symbols: frozenset[str],
+        external_orders: ExternalOrderRiskSummary | None = None,
         account: AccountState,
         strategy: StrategyState,
         security: SecurityRiskReference,
@@ -92,6 +94,10 @@ class RuntimeRiskAssembler:
             raise TypeError("mode must be RuntimeMode")
         if not isinstance(health, RuntimeHealth):
             raise TypeError("health must be RuntimeHealth")
+        if external_orders is None:
+            external_orders = ExternalOrderRiskSummary.empty()
+        if not isinstance(external_orders, ExternalOrderRiskSummary):
+            raise TypeError("external_orders must be ExternalOrderRiskSummary")
         if not isinstance(account, AccountState):
             raise TypeError("account must be AccountState")
         if not isinstance(strategy, StrategyState):
@@ -118,7 +124,7 @@ class RuntimeRiskAssembler:
         account_snapshot = AccountRiskSnapshot(
             account_fingerprint=account.account_fingerprint,
             available_cash=account.available_cash,
-            gross_exposure=account.gross_exposure,
+            gross_exposure=account.gross_exposure + external_orders.pending_buy_notional,
             daily_pnl=totals.daily_pnl,
             daily_turnover=totals.daily_turnover,
             daily_order_count=totals.daily_order_count,
@@ -139,6 +145,15 @@ class RuntimeRiskAssembler:
             heartbeat_at=heartbeat.observed_at,
         )
 
+        external_symbol_buy = external_orders.pending_buy_notional_for(security.symbol)
+        security_for_risk = replace(
+            security,
+            gross_exposure=security.gross_exposure + external_symbol_buy,
+        )
+        effective_blocked_symbols = frozenset(
+            set(blocked_symbols) | set(external_orders.blocked_symbols)
+        )
+
         return self._snapshot_builder.build(
             policy=policy,
             now=now,
@@ -150,8 +165,8 @@ class RuntimeRiskAssembler:
             qmt_healthy=health.qmt_healthy,
             market_open=market_open,
             global_ambiguity_block=global_ambiguity_block,
-            blocked_symbols=blocked_symbols,
+            blocked_symbols=effective_blocked_symbols,
             account=account_snapshot,
             strategy=strategy_snapshot,
-            security=security,
+            security=security_for_risk,
         )

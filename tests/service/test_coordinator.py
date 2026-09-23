@@ -12,7 +12,9 @@ from bigqmt_autotrader.operations import (
     RuntimeModeController,
 )
 from bigqmt_autotrader.risk import (
+    ActiveBrokerOrderFact,
     DailyRiskLedger,
+    ExternalOrderRiskClassifier,
     RiskPolicy,
     RuntimeMode,
     SecurityRiskReference,
@@ -254,3 +256,49 @@ def test_unhealthy_qmt_rejects_even_if_mode_was_previously_armed(tmp_path):
     assert not result.risk.decision.accepted
     assert result.risk.decision.reason_code is RiskReasonCode.DATA_STALE
     assert not result.operations.health.qmt_healthy
+
+
+def test_external_manual_order_blocks_symbol_and_counts_pending_buy_exposure(tmp_path):
+    _, operations, coordinator = setup(tmp_path)
+    operations.arm_simulation(
+        request_id="sim-external",
+        actor="test",
+        reason="arm",
+        now=NOW,
+        max_age_seconds=5,
+    )
+    external = ExternalOrderRiskClassifier(
+        registered_system_tokens=set()
+    ).classify(
+        [
+            ActiveBrokerOrderFact(
+                source_event_id="manual-order-1",
+                symbol="510300.SH",
+                side=Side.BUY,
+                quantity=100,
+                filled_quantity=0,
+                limit_price=Decimal("4.64"),
+                broker_token=None,
+                observed_at=NOW,
+            )
+        ]
+    )
+
+    result = coordinator.evaluate_intent(
+        intent(),
+        trading_date=DAY,
+        now=NOW,
+        market_open=True,
+        global_ambiguity_block=False,
+        blocked_symbols=frozenset(),
+        external_orders=external,
+        account=account(),
+        strategy=strategy(),
+        security=security(),
+    )
+
+    assert not result.risk.decision.accepted
+    assert result.risk.decision.reason_code is RiskReasonCode.UNKNOWN_ORDER
+    assert "510300.SH" in result.snapshot.blocked_symbols
+    assert result.snapshot.account.gross_exposure == Decimal("464.00")
+    assert result.snapshot.security.gross_exposure == Decimal("464.00")

@@ -6,6 +6,7 @@ from datetime import date, datetime
 from bigqmt_autotrader.domain import OrderIntent
 from bigqmt_autotrader.operations import OperationsControl, OperationsStatus
 from bigqmt_autotrader.risk import (
+    ExternalOrderRiskSummary,
     RiskEvaluation,
     RiskPolicy,
     RiskSnapshot,
@@ -65,6 +66,7 @@ class ExecutionRuntimeCoordinator:
         market_open: bool,
         global_ambiguity_block: bool,
         blocked_symbols: frozenset[str],
+        external_orders: ExternalOrderRiskSummary | None = None,
         account: AccountState,
         strategy: StrategyState,
         security: SecurityRiskReference,
@@ -84,6 +86,7 @@ class ExecutionRuntimeCoordinator:
             market_open=market_open,
             global_ambiguity_block=global_ambiguity_block,
             blocked_symbols=blocked_symbols,
+            external_orders=external_orders,
             account=account,
             strategy=strategy,
             security=security,
