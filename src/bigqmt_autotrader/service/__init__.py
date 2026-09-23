@@ -19,6 +19,7 @@ from .deployment import (
     ReleaseManifest,
     canonical_config_digest,
 )
+from .health_sync import RuntimeHealthSynchronizer, StrategyHealthRequirement
 from .risk_runtime import (
     AccountState,
     RuntimeRiskAssembler,
@@ -44,6 +45,8 @@ __all__ = [
     "canonical_config_digest",
     "ExecutionRuntimeCoordinator",
     "RuntimeIntentEvaluation",
+    "RuntimeHealthSynchronizer",
+    "StrategyHealthRequirement",
     "RuntimeRiskAssembler",
     "RuntimeRiskUnavailable",
     "StrategyState",
