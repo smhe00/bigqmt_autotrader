@@ -117,6 +117,14 @@ def test_bootstrap_builds_all_services_but_starts_disabled(tmp_path):
     assert telemetry.mode is RuntimeMode.DISABLED
     assert not telemetry.ready_for_mutation
     assert telemetry.active_alerts == ()
+    cycle = bundle.supervisor.tick(
+        now=NOW,
+        unknown_order_count=0,
+        manual_review_count=0,
+        halt_request_id="bootstrap-health-cycle",
+    )
+    assert not cycle.auto_halted
+    assert cycle.telemetry.mode is RuntimeMode.DISABLED
     assert bundle.market_data.symbols() == ()
     assert not hasattr(bundle.operations, "arm_live")
     assert not hasattr(bundle.operations, "arm_live_canary")

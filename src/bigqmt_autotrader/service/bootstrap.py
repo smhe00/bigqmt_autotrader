@@ -30,6 +30,7 @@ from .deployment import (
 )
 from .health_sync import RuntimeHealthSynchronizer, StrategyHealthRequirement
 from .risk_runtime import RuntimeRiskAssembler
+from .supervisor import RuntimeSupervisor
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class RuntimeServiceBundle:
     modes: RuntimeModeController
     operations: OperationsControl
     telemetry: OperationsTelemetry
+    supervisor: RuntimeSupervisor
     qmt_market_data: QmtMarketDataAdapter
     health_sync: RuntimeHealthSynchronizer
     risk_assembler: RuntimeRiskAssembler
@@ -137,6 +139,11 @@ def bootstrap_runtime_services(
     )
     operations = OperationsControl(modes=modes, health=health)
     telemetry = OperationsTelemetry()
+    supervisor = RuntimeSupervisor(
+        operations=operations,
+        telemetry=telemetry,
+        health_max_age_seconds=health_max_age_seconds,
+    )
     qmt_market_data = QmtMarketDataAdapter(
         market_data=market_data,
         expected_account_fingerprint=account_fingerprint,
@@ -171,6 +178,7 @@ def bootstrap_runtime_services(
         modes=modes,
         operations=operations,
         telemetry=telemetry,
+        supervisor=supervisor,
         qmt_market_data=qmt_market_data,
         health_sync=health_sync,
         risk_assembler=risk_assembler,
