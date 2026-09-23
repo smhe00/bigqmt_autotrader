@@ -1,5 +1,15 @@
 """Production service assembly boundaries."""
 
+from .calendar import (
+    Market,
+    SessionWindow,
+    TradingCalendar,
+    TradingCalendarError,
+    TradingDateUnknown,
+    TradingDaySchedule,
+    TradingSessionClosed,
+    TradingSessionStatus,
+)
 from .coordinator import ExecutionRuntimeCoordinator, RuntimeIntentEvaluation
 from .deployment import (
     DeploymentGuard,
@@ -18,6 +28,14 @@ from .risk_runtime import (
 
 __all__ = [
     "AccountState",
+    "Market",
+    "SessionWindow",
+    "TradingCalendar",
+    "TradingCalendarError",
+    "TradingDateUnknown",
+    "TradingDaySchedule",
+    "TradingSessionClosed",
+    "TradingSessionStatus",
     "DeploymentGuard",
     "DeploymentMismatch",
     "DeploymentValidation",
