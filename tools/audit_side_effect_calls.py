@@ -29,6 +29,9 @@ ALLOWED_ATTRIBUTE_CALLS = {
 ALLOWED_DIRECT_CALLS = {
     "evaluate_risk": {
         ("oms/service.py", "submit_intent"),
+        # Production service preflight coordinator is a pure decision boundary:
+        # it may evaluate risk but has no OMS/QMT mutation dependency.
+        ("service/coordinator.py", "evaluate_intent"),
     },
 }
 

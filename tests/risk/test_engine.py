@@ -336,6 +336,47 @@ def test_hgt_suffix_is_supported_when_explicitly_allowlisted():
     assert "ORDER_SECURITY_SUPPORTED" not in _rules(evaluation)
     assert evaluation.decision.accepted is True
 
+def test_sgt_suffix_is_supported_when_explicitly_allowlisted():
+    sgt = _intent(symbol="01810.SGT", limit_price=Decimal("26.60"))
+    sgt_security = replace(
+        _snapshot().security,
+        symbol="01810.SGT",
+        tick_size=Decimal("0.02"),
+        lower_price_limit=Decimal("1"),
+        upper_price_limit=Decimal("1000"),
+        reference_price=Decimal("26.60"),
+        gross_exposure=Decimal("0"),
+    )
+    sgt_strategy = replace(
+        _snapshot().strategy,
+        gross_exposure=Decimal("0"),
+        security_gross_exposure=Decimal("0"),
+    )
+    sgt_account = replace(
+        _snapshot().account,
+        gross_exposure=Decimal("0"),
+    )
+    sgt_policy = replace(
+        _policy(),
+        strategy=replace(
+            _policy().strategy,
+            allowed_symbols=frozenset({"01810.SGT"}),
+        ),
+    )
+    evaluation = evaluate_risk(
+        sgt,
+        _snapshot(
+            account=sgt_account,
+            strategy=sgt_strategy,
+            security=sgt_security,
+        ),
+        sgt_policy,
+        now=NOW,
+    )
+    assert "ORDER_SECURITY_SUPPORTED" not in _rules(evaluation)
+    assert evaluation.decision.accepted is True
+
+
 def test_tick_price_band_and_reference_deviation_rules():
     bad_tick = _intent(limit_price=Decimal("75.005"))
     evaluation = evaluate_risk(bad_tick, _snapshot(), _policy(), now=NOW)

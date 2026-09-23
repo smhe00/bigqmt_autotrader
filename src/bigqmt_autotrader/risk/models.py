@@ -15,6 +15,7 @@ class RuntimeMode(str, Enum):
     SIMULATION = "SIMULATION"
     LIVE_CANARY = "LIVE_CANARY"
     LIVE_ARMED = "LIVE_ARMED"
+    HALTED = "HALTED"
 
 
 class RiskLevel(str, Enum):
