@@ -14,6 +14,12 @@ from .health import (
     HealthRegistry,
     HealthSnapshot,
 )
+from .telemetry import (
+    ActiveAlert,
+    AlertSeverity,
+    OperationsTelemetry,
+    TelemetrySnapshot,
+)
 from .mode import (
     ModeTransitionConflict,
     ModeTransitionDenied,
@@ -34,6 +40,10 @@ __all__ = [
     "HealthObservation",
     "HealthRegistry",
     "HealthSnapshot",
+    "ActiveAlert",
+    "AlertSeverity",
+    "OperationsTelemetry",
+    "TelemetrySnapshot",
     "ModeTransitionConflict",
     "ModeTransitionDenied",
     "ModeTransitionError",
