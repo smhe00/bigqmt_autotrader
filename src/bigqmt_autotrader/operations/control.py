@@ -6,12 +6,13 @@ from datetime import datetime
 from bigqmt_autotrader.risk import RuntimeMode
 
 from .health import HealthAlert, HealthRegistry
-from .mode import ModeTransitionDenied, RuntimeModeController
+from .mode import ModeTransitionDenied, RuntimeHealth, RuntimeModeController
 
 
 @dataclass(frozen=True)
 class OperationsStatus:
     mode: RuntimeMode
+    health: RuntimeHealth
     ready_for_mutation: bool
     alerts: tuple[HealthAlert, ...]
 
@@ -40,6 +41,7 @@ class OperationsControl:
         snapshot = self._health.snapshot(now=now, max_age_seconds=max_age_seconds)
         return OperationsStatus(
             mode=self._modes.mode,
+            health=snapshot.runtime,
             ready_for_mutation=snapshot.runtime.ready_for_mutation,
             alerts=snapshot.alerts,
         )
