@@ -315,6 +315,27 @@ def test_security_identity_suffix_and_ambiguity_rules():
     assert "ORDER_SYMBOL_AMBIGUITY" in _rules(evaluation)
 
 
+def test_hgt_suffix_is_supported_when_explicitly_allowlisted():
+    hgt = _intent(symbol="00700.HGT", limit_price=Decimal("451.8"))
+    hgt_security = replace(
+        _snapshot().security,
+        symbol="00700.HGT",
+        tick_size=Decimal("0.2"),
+        lower_price_limit=Decimal("1"),
+        upper_price_limit=Decimal("1000"),
+        reference_price=Decimal("451.8"),
+    )
+    hgt_policy = replace(
+        _policy(),
+        strategy=replace(
+            _policy().strategy,
+            allowed_symbols=frozenset({"00700.HGT"}),
+        ),
+    )
+    evaluation = evaluate_risk(hgt, _snapshot(security=hgt_security), hgt_policy, now=NOW)
+    assert "ORDER_SECURITY_SUPPORTED" not in _rules(evaluation)
+    assert evaluation.decision.accepted is True
+
 def test_tick_price_band_and_reference_deviation_rules():
     bad_tick = _intent(limit_price=Decimal("75.005"))
     evaluation = evaluate_risk(bad_tick, _snapshot(), _policy(), now=NOW)

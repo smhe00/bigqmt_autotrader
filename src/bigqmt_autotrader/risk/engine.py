@@ -15,7 +15,7 @@ from .models import (
 )
 
 
-_SUPPORTED_SUFFIXES = (".SH", ".SZ", ".BJ")
+_SUPPORTED_SUFFIXES = (".SH", ".SZ", ".BJ", ".HGT")
 
 
 def _require_aware_now(now: datetime) -> None:
