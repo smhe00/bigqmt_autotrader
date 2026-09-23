@@ -85,13 +85,16 @@ def _command_paths(root):
     return list((root / "commands").glob("*/*.json"))
 
 
-def test_risk_reject_persists_zero_simulation_commands(tmp_path):
+def test_guojin_sim_bypasses_generic_risk_rejection_and_dispatches(tmp_path):
     runtime = GuojinSimOmsRuntime(instance(tmp_path))
     try:
         result = runtime.execute_intent(intent(), snapshot(RuntimeMode.DISABLED), policy())
-        assert result.status is OrderStatus.RISK_REJECTED
-        assert result.command_id is None
-        assert _command_paths(tmp_path) == []
+        assert result.risk_evaluation is not None
+        assert result.risk_evaluation.decision.accepted is True
+        assert result.risk_evaluation.decision.rule_version == "guojin-sim-accept-all-v1"
+        assert result.status is OrderStatus.RECONCILING
+        assert result.command_id is not None
+        assert len(_command_paths(tmp_path)) == 1
     finally:
         runtime.close()
 

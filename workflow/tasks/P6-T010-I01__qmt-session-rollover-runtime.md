@@ -4,8 +4,8 @@ phase: P6
 task_id: P6-T010
 iteration: I01
 task_key: P6-T010-I01
-state: PLANNED
-owner: architect
+state: AGENT_READY
+owner: agent
 audit_base_commit: d3fb18ed45f4ff2ac0b68db396301999288bb0b1
 expected_report: workflow/reports/P6-T010-I01__implementation-report.md
 expected_review: workflow/reviews/P6-T010-I01__architect-review.md

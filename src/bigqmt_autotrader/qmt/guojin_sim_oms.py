@@ -6,14 +6,20 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from bigqmt_autotrader.domain import OrderIntent, OrderStatus, TransitionDisposition
+from bigqmt_autotrader.domain import (
+    OrderIntent,
+    OrderStatus,
+    RiskDecision,
+    RiskReasonCode,
+    TransitionDisposition,
+)
 from bigqmt_autotrader.oms.command_results import QmtCommandResultJournal
 from bigqmt_autotrader.oms.db import transaction
 from bigqmt_autotrader.oms.db import connect_database, initialize_database
 from bigqmt_autotrader.oms.evidence import EvidenceJournal
 from bigqmt_autotrader.oms.leader import LeaderCoordinator
 from bigqmt_autotrader.oms.repository import OmsRepository, QmtDurableIdentityConflict
-from bigqmt_autotrader.risk import RiskEvaluation, RiskPolicy, RiskSnapshot, evaluate_risk
+from bigqmt_autotrader.risk import RiskEvaluation, RiskPolicy, RiskSnapshot, snapshot_hash
 
 from .commands import (
     QmtCommand,
@@ -42,6 +48,34 @@ class GuojinSimExecutionResult:
     dispatched: bool
     risk_evaluation: RiskEvaluation | None = None
     terminal_noop: bool = False
+
+
+def _guojin_sim_accept_all_risk(
+    risk_snapshot: RiskSnapshot,
+    risk_policy: RiskPolicy,
+    *,
+    now: datetime,
+) -> RiskEvaluation:
+    """Simulation-only risk bypass for the strictly pinned guojin_sim runtime.
+
+    The typed RiskSnapshot/RiskPolicy inputs are retained for API compatibility
+    and audit hashing, but no policy finding may block a guojin_sim submit.
+    Production Guojin/Galaxy/generic runtimes never call this function.
+    """
+    if not isinstance(risk_snapshot, RiskSnapshot):
+        raise TypeError("risk_snapshot must be RiskSnapshot")
+    if not isinstance(risk_policy, RiskPolicy):
+        raise TypeError("risk_policy must be RiskPolicy")
+    if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware datetime")
+    decision = RiskDecision(
+        accepted=True,
+        reason_code=RiskReasonCode.OK,
+        rule_version="guojin-sim-accept-all-v1",
+        snapshot_hash=snapshot_hash(risk_snapshot),
+        decided_at=now,
+    )
+    return RiskEvaluation(decision=decision, findings=())
 
 
 def _deterministic_command_id(*parts: str) -> str:
@@ -365,8 +399,8 @@ class GuojinSimOmsRuntime:
         self.maintain()
         if intent.account_fingerprint != self.instance.account_fingerprint:
             raise ValueError("intent account does not match the pinned simulator")
-        evaluation = evaluate_risk(
-            intent, risk_snapshot, risk_policy, now=datetime.now(timezone.utc)
+        evaluation = _guojin_sim_accept_all_risk(
+            risk_snapshot, risk_policy, now=datetime.now(timezone.utc)
         )
         existing = self._dispatch_for_order(intent.client_order_id, "SUBMIT_LIMIT")
         if existing is not None:

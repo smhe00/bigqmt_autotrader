@@ -6,20 +6,25 @@ iteration: I01
 task_key: P6-T009-I01
 review_of: workflow/reports/P6-T009-I01__implementation-report.md
 task_file: workflow/tasks/P6-T009-I01__hgt-passive-cancel-runtime.md
-status: AWAITING_REVIEW
+status: BLOCKED
 owner: architect
 ---
 
 # P6-T009-I01 Architect Review
 
 ## Gate verdict
-AWAITING_REVIEW
 
-## Evidence audit
-Architect: independently inspect runtime identity, lifecycle, mutation accounting and actual diffs.
+**BLOCKED — simulation inventory prerequisite only**
+
+Fresh exact 00700.HGT tick and HUGANGTONG route evidence were healthy, but active-query inventory was quantity=0 / sellable_quantity=0. The authorized scenario required a passive SELL 100 and prohibited provisioning inventory or changing the scenario.
 
 ## Safety audit
-Architect: verify zero unauthorized production/Galaxy/generic mutation.
+
+- guojin_sim submit = 0
+- guojin_sim cancel = 0
+- production Guojin/Galaxy/generic mutation = 0
+- no blind retry or fabricated risk state
 
 ## Decision
-Architect: PASS / CHANGES_REQUIRED / BLOCKED / USER_ESCALATION.
+
+The HGT passive-cancel invariant remains untested, not failed. Preserve this task as environment-blocked. Do not consume market time provisioning inventory under this Gate. Continue the independent pre-staged runtime queue.
