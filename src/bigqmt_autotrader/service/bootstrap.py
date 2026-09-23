@@ -15,6 +15,7 @@ from bigqmt_autotrader.oms import (
 from bigqmt_autotrader.operations import (
     HealthRegistry,
     OperationsControl,
+    OperationsTelemetry,
     RuntimeModeController,
 )
 from bigqmt_autotrader.risk import DailyRiskLedger, RiskPolicy
@@ -39,6 +40,7 @@ class RuntimeServiceBundle:
     health: HealthRegistry
     modes: RuntimeModeController
     operations: OperationsControl
+    telemetry: OperationsTelemetry
     qmt_market_data: QmtMarketDataAdapter
     health_sync: RuntimeHealthSynchronizer
     risk_assembler: RuntimeRiskAssembler
@@ -134,6 +136,7 @@ def bootstrap_runtime_services(
         started_at=started_at,
     )
     operations = OperationsControl(modes=modes, health=health)
+    telemetry = OperationsTelemetry()
     qmt_market_data = QmtMarketDataAdapter(
         market_data=market_data,
         expected_account_fingerprint=account_fingerprint,
@@ -167,6 +170,7 @@ def bootstrap_runtime_services(
         health=health,
         modes=modes,
         operations=operations,
+        telemetry=telemetry,
         qmt_market_data=qmt_market_data,
         health_sync=health_sync,
         risk_assembler=risk_assembler,
