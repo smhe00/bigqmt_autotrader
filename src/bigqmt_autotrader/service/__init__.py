@@ -1,3 +1,4 @@
+from .risk_oms import RiskManagedOms
 """Production service assembly boundaries."""
 
 from .bootstrap import RuntimeServiceBundle, bootstrap_runtime_services
@@ -54,6 +55,7 @@ __all__ = [
     "RuntimeLifecycleController",
     "RuntimeShutdownResult",
     "StrategyHealthRequirement",
+    "RiskManagedOms",
     "RuntimeRiskAssembler",
     "RuntimeSupervisor",
     "SupervisorCycleResult",

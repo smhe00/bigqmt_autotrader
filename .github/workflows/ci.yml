@@ -33,7 +33,8 @@ jobs:
             tools/verify_workflow_contract.py \
             tools/scaffold_workflow_handoff.py \
             tools/agent_workflow_handoff.py \
-            tools/architect_workflow_verdict.py
+            tools/architect_workflow_verdict.py \
+            tools/verify_core_dependency_boundary.py
           python tools/scaffold_workflow_handoff.py --help >/dev/null
           python tools/agent_workflow_handoff.py --help >/dev/null
           python tools/architect_workflow_verdict.py --help >/dev/null
@@ -47,6 +48,8 @@ jobs:
         run: python tools/verify_bridge_schema_contract.py
       - name: Broker Evidence contract / schema conformance
         run: python tools/verify_broker_evidence_contract.py
+      - name: Verify Core / Runtime dependency boundary
+        run: python tools/verify_core_dependency_boundary.py
       - name: Audit broker side-effect call surface
         run: python tools/audit_side_effect_calls.py
       - name: Verify standalone QMT deployment files

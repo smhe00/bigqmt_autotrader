@@ -37,44 +37,36 @@ P6 独立 Gate 固定的 LIVE_CANARY 单一案例调用面。GC001 是已完成�
 
 `guojin_sim` 是 fingerprint-pinned 的 simulation calibration artifact。它能调用受限模拟账户 submit/cancel API，但**不构成生产实盘授权**。
 
-## 架构
+## 架构：Execution Core + Production Runtime
+
+系统现在明确拆成两层：
 
 ```text
-Market / Account State
-        |
-        v
-    Strategy
-  emits OrderIntent
-        |
-        v
-    Risk Engine
-        |
-        v
-       OMS
- identity/state/recovery/audit
-        |
-        v
-      Host
-        |
- BigQMT Bridge API v1
-        |
-        v
- Execution Bridge (QMT)
-        |
-        v
- Big QMT / Broker
-
-ORDER / DEAL / active query
-        |
-        v
-broker-specific mapper        ← 下一实现 Gate
-        |
-        v
-Broker Evidence Contract v1   ← 已封版
-        |
-        v
-EvidenceReplay -> OMS FSM
+Production Runtime                         optional
+Risk / MarketData / Health / Operations
+Telemetry / Strategy / Calendar / Backup
+                  |
+                  v
+Execution Core                             minimal
+OrderIntent / OMS / durable dispatch
+exactly-once / evidence / recovery
+                  |
+                  v
+QMT Bridge / Broker
 ```
+
+只需要可靠下单时，可直接使用 `bigqmt_autotrader.core`，不需要 Risk、行情、告警或策略运行时。
+
+完整生产平台使用 `bigqmt_autotrader.runtime`，并在 Core 上层组合 Risk 与运维能力。
+
+永久规则：
+
+```text
+Production Runtime -> Execution Core
+Execution Core -X-> Production Runtime
+```
+
+详细边界见 [`docs/CORE_RUNTIME_BOUNDARY_ZH.md`](docs/CORE_RUNTIME_BOUNDARY_ZH.md)。
 
 ### OMS
 
@@ -82,7 +74,9 @@ OMS（Order Management System）负责订单的 durable identity、生命周期�
 
 ### Risk Engine
 
-Risk Engine 在 broker side effect 前执行 fail-closed 风险判断。策略不能直接调用 QMT/broker mutation API。
+Risk Engine 属于 **Production Runtime**，不再内嵌于 Core OMS。
+
+Production Runtime 在 broker side effect 前执行 fail-closed 风险判断，再把已授权的 intent 交给 Execution Core。Core-only 使用不需要 Risk Engine。
 
 ## BigQMT Bridge API v1
 
@@ -209,6 +203,7 @@ python tools/verify_fsm_exhaustive.py
 python tools/verify_bridge_protocol_exhaustive.py
 python tools/verify_bridge_schema_contract.py
 python tools/verify_broker_evidence_contract.py
+python tools/verify_core_dependency_boundary.py
 ```
 
 项目状态见 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
