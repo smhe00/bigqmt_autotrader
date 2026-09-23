@@ -1,6 +1,14 @@
 """Production service assembly boundaries."""
 
 from .coordinator import ExecutionRuntimeCoordinator, RuntimeIntentEvaluation
+from .deployment import (
+    DeploymentGuard,
+    DeploymentMismatch,
+    DeploymentValidation,
+    ObservedDeployment,
+    ReleaseManifest,
+    canonical_config_digest,
+)
 from .risk_runtime import (
     AccountState,
     RuntimeRiskAssembler,
@@ -10,6 +18,12 @@ from .risk_runtime import (
 
 __all__ = [
     "AccountState",
+    "DeploymentGuard",
+    "DeploymentMismatch",
+    "DeploymentValidation",
+    "ObservedDeployment",
+    "ReleaseManifest",
+    "canonical_config_digest",
     "ExecutionRuntimeCoordinator",
     "RuntimeIntentEvaluation",
     "RuntimeRiskAssembler",
