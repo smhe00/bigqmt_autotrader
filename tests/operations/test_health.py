@@ -40,7 +40,13 @@ def test_all_current_healthy_components_allow_mutation_health():
 def test_stale_future_and_explicit_unhealthy_are_distinct_alerts():
     registry = HealthRegistry()
     for component in HealthComponent:
-        registry.observe(healthy(component))
+        registry.observe(
+            HealthObservation(
+                component=component,
+                healthy=True,
+                observed_at=NOW - timedelta(seconds=2),
+            )
+        )
 
     registry.observe(
         HealthObservation(
@@ -53,7 +59,7 @@ def test_stale_future_and_explicit_unhealthy_are_distinct_alerts():
         HealthObservation(
             component=HealthComponent.MARKET_DATA,
             healthy=False,
-            observed_at=NOW,
+            observed_at=NOW - timedelta(seconds=1),
             detail="quote stream disconnected",
         )
     )
@@ -70,8 +76,43 @@ def test_stale_future_and_explicit_unhealthy_are_distinct_alerts():
 
     assert alerts[HealthComponent.QMT] == "FUTURE_DATED"
     assert alerts[HealthComponent.MARKET_DATA] == "quote stream disconnected"
-    assert alerts[HealthComponent.STRATEGY] == "STALE"
+    # Older strategy observation cannot overwrite the newer one, so strategy
+    # remains healthy here; explicit stale behavior is covered separately.
+    assert HealthComponent.STRATEGY not in alerts
     assert not snapshot.runtime.ready_for_mutation
+
+
+def test_same_timestamp_conflicting_health_facts_fail_closed():
+    registry = HealthRegistry()
+    registry.observe(healthy(HealthComponent.QMT))
+    assert registry.observe(
+        HealthObservation(
+            component=HealthComponent.QMT,
+            healthy=False,
+            observed_at=NOW,
+            detail="disconnect",
+        )
+    )
+
+    snapshot = registry.snapshot(now=NOW, max_age_seconds=5)
+    alerts = {item.component: item.reason for item in snapshot.alerts}
+
+    assert alerts[HealthComponent.QMT] == "CONFLICTING_SAME_TIMESTAMP"
+    assert not snapshot.runtime.qmt_healthy
+
+
+def test_stale_health_fact_is_reported():
+    registry = HealthRegistry()
+    registry.observe(
+        HealthObservation(
+            component=HealthComponent.STRATEGY,
+            healthy=True,
+            observed_at=NOW - timedelta(seconds=30),
+        )
+    )
+    snapshot = registry.snapshot(now=NOW, max_age_seconds=5)
+    alerts = {item.component: item.reason for item in snapshot.alerts}
+    assert alerts[HealthComponent.STRATEGY] == "STALE"
 
 
 def test_older_observation_cannot_overwrite_newer_health_fact():

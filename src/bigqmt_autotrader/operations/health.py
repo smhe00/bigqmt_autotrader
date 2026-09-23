@@ -64,10 +64,19 @@ class HealthRegistry:
         if not isinstance(observation, HealthObservation):
             raise TypeError("observation must be HealthObservation")
         previous = self._observations.get(observation.component)
-        if previous is not None and observation.observed_at <= previous.observed_at:
-            if observation == previous:
+        if previous is not None:
+            if observation.observed_at < previous.observed_at:
                 return False
-            return False
+            if observation.observed_at == previous.observed_at:
+                if observation == previous:
+                    return False
+                self._observations[observation.component] = HealthObservation(
+                    component=observation.component,
+                    healthy=False,
+                    observed_at=observation.observed_at,
+                    detail="CONFLICTING_SAME_TIMESTAMP",
+                )
+                return True
         self._observations[observation.component] = observation
         return True
 
