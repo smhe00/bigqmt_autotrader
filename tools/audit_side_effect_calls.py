@@ -33,6 +33,9 @@ ALLOWED_DIRECT_CALLS = {
         # public typed execution API.  It evaluates risk itself; callers never
         # supply an accepted decision.
         ("qmt/guojin_sim_oms.py", "execute_intent"),
+        # Production service preflight coordinator is a pure decision boundary:
+        # it may evaluate risk but has no OMS/QMT mutation dependency.
+        ("service/coordinator.py", "evaluate_intent"),
     },
 }
 
