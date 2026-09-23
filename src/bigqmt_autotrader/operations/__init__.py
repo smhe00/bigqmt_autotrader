@@ -1,5 +1,6 @@
 """Human operations and fail-closed runtime safety controls."""
 
+from .control import OperationsControl, OperationsStatus
 from .health import (
     HealthAlert,
     HealthComponent,
@@ -16,6 +17,8 @@ from .mode import (
 )
 
 __all__ = [
+    "OperationsControl",
+    "OperationsStatus",
     "HealthAlert",
     "HealthComponent",
     "HealthObservation",
