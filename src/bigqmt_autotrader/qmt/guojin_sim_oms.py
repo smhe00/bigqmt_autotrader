@@ -30,7 +30,7 @@ from .instances import QmtInstance
 AUTHORIZED_GUOJIN_SIM_FINGERPRINT = (
     "sha256:ff266d673e28fbba5da4bfe2c68975f75b6a9fb5b89014503409b2b014ce0702"
 )
-AUTHORIZED_GUOJIN_SIM_BUILD = "p5-simulation-calibration-7"
+AUTHORIZED_GUOJIN_SIM_BUILD = "p5-simulation-calibration-8"
 
 
 @dataclass(frozen=True)

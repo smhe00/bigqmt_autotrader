@@ -28,7 +28,7 @@ def instance(root):
     return QmtInstance(
         instance_id="guojin_sim", root=root, session_id=SESSION,
         account_fingerprint=FP, account_type="STOCK",
-        bridge_build="p5-simulation-calibration-7", created_ms=1_800_000_000_000,
+        bridge_build="p5-simulation-calibration-8", created_ms=1_800_000_000_000,
         execution_mode="SIMULATION_CALIBRATION", trading_enabled=True,
         live_submit=True, live_cancel=True, simulation_only=True,
     )

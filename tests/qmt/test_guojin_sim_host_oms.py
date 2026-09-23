@@ -34,7 +34,7 @@ def instance(root: Path, **overrides) -> QmtInstance:
         session_id=SESSION,
         account_fingerprint=FP,
         account_type="STOCK",
-        bridge_build="p5-simulation-calibration-7",
+        bridge_build="p5-simulation-calibration-8",
         created_ms=1_800_000_000_000,
         execution_mode="SIMULATION_CALIBRATION",
         trading_enabled=True,
@@ -116,6 +116,7 @@ def order_payload(token: str, status: int, *, broker_id: str = "9001") -> dict:
          "live_submit": False, "live_cancel": False, "simulation_only": False},
         {"simulation_only": False},
         {"bridge_build": "untrusted-build"},
+        {"bridge_build": "p5-simulation-calibration-7"},
         {"account_fingerprint": "sha256:" + "a" * 64},
     ],
 )
