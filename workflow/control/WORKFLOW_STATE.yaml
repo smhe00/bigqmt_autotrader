@@ -22,27 +22,26 @@ bootstrap_refresh_main_before_work: true
 bootstrap_verify_head_before_write: true
 bootstrap_inspect_diff_from_audit_base: true
 
-handoff_seq: 40
-handoff_id: "P6-T013-I01-architect-to-agent-0040"
+handoff_seq: 41
+handoff_id: "P6-T013-I01-agent-to-architect-0041"
 
 phase: "P6"
 task_id: "P6-T013"
 iteration: "I01"
 task_key: "P6-T013-I01"
 
-state: "AGENT_READY"
-owner: "agent"
+state: "REVIEW_READY"
+owner: "architect"
 
 audit_base_commit: "0b5e111f7b1f77f08445cbdf8c0d8e394e60cd96"
 task_file: "workflow/tasks/P6-T013-I01__windows-backup-fsync.md"
 expected_report_file: "workflow/reports/P6-T013-I01__implementation-report.md"
 expected_review_file: "workflow/reviews/P6-T013-I01__architect-review.md"
 
-report_status: "AWAITING_AGENT"
+report_status: "REVIEW_READY"
 review_status: "AWAITING_REVIEW"
 
-authorized_next:
-  - "P6-T013-I01"
+authorized_next: []
 ordering:
   task_width: 3
   iteration_width: 2
