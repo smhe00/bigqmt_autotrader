@@ -85,7 +85,7 @@ def current_core_schema_version(conn: sqlite3.Connection) -> int:
     return int(row["version"])
 
 
-def _migration_text(package: str, version: int) -> str:
+def _migration_text(version: int, package: str = MIGRATION_PACKAGE) -> str:
     name = f"{version:04d}_initial.sql" if version == 1 else f"{version:04d}.sql"
     try:
         return resources.files(package).joinpath(name).read_text(encoding="utf-8")
@@ -97,10 +97,9 @@ def _migration_text(package: str, version: int) -> str:
 
 def _apply_migration(
     conn: sqlite3.Connection,
-    *,
     version: int,
     sql: str,
-    meta_table: str,
+    meta_table: str = "schema_meta",
 ) -> None:
     if meta_table not in {"schema_meta", "core_schema_meta"}:
         raise ValueError("unsupported migration metadata table")
@@ -218,9 +217,9 @@ def initialize_core_database(conn: sqlite3.Connection) -> None:
         else:
             _apply_migration(
                 conn,
-                version=CORE_SCHEMA_VERSION,
-                sql=_migration_text(CORE_MIGRATION_PACKAGE, CORE_SCHEMA_VERSION),
-                meta_table="core_schema_meta",
+                CORE_SCHEMA_VERSION,
+                _migration_text(CORE_SCHEMA_VERSION, CORE_MIGRATION_PACKAGE),
+                "core_schema_meta",
             )
 
     final = current_core_schema_version(conn)
@@ -253,12 +252,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     _ensure_supported_version(version)
 
     for target in range(version + 1, SUPPORTED_SCHEMA_VERSION + 1):
-        _apply_migration(
-            conn,
-            version=target,
-            sql=_migration_text(MIGRATION_PACKAGE, target),
-            meta_table="schema_meta",
-        )
+        _apply_migration(conn, target, _migration_text(target))
 
     final = current_schema_version(conn)
     if final != SUPPORTED_SCHEMA_VERSION:
