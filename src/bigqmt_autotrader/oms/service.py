@@ -155,10 +155,10 @@ class OfflineOms:
             )
         observed_at_ms = int(self._now().timestamp() * 1000)
         return self._evidence_journal.ingest(BrokerEvidenceV1.build(
-            source="simulated-driver-active-query",
+            source="execution-driver-active-query",
             source_kind=BrokerEvidenceSourceKind.ACTIVE_ORDER_QUERY,
             source_event_id=self.session_id + ":" + reason + ":" + client_order_id,
-            mapper_profile="simulated-driver-query-v1",
+            mapper_profile="execution-driver-query-v1",
             account_fingerprint=account_fingerprint,
             client_order_id=client_order_id,
             broker_token=None,
@@ -169,7 +169,7 @@ class OfflineOms:
             requested_status=query_evidence.status,
             filled_quantity=query_evidence.filled_quantity,
             observed_at_ms=observed_at_ms,
-            raw_payload_ref="simulated://active-order-query/" + client_order_id,
+            raw_payload_ref="driver://active-order-query/" + client_order_id,
             raw_status=None,
         ))
 

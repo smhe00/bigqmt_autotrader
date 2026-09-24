@@ -18,6 +18,22 @@ jobs:
       - name: Test
         run: pytest -q
 
+  core-v1-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Core-only tests
+        run: pytest -q tests/core
+      - name: Core dependency boundary
+        run: python tools/verify_core_dependency_boundary.py
+      - name: Core v1 release contract
+        run: python tools/verify_core_v1_release.py
+
   formal-verification:
     runs-on: ubuntu-latest
     steps:
@@ -34,7 +50,8 @@ jobs:
             tools/scaffold_workflow_handoff.py \
             tools/agent_workflow_handoff.py \
             tools/architect_workflow_verdict.py \
-            tools/verify_core_dependency_boundary.py
+            tools/verify_core_dependency_boundary.py \
+            tools/verify_core_v1_release.py
           python tools/scaffold_workflow_handoff.py --help >/dev/null
           python tools/agent_workflow_handoff.py --help >/dev/null
           python tools/architect_workflow_verdict.py --help >/dev/null

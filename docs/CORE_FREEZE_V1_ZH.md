@@ -27,7 +27,7 @@ Freeze 的目标不是禁止一切修改，而是冻结以下可观察契约：
 
 ## 2. Frozen Core candidate
 
-Core v1 candidate 由以下部分组成：
+Core v1 冻结边界由以下部分组成：
 
 ```text
 src/bigqmt_autotrader/core/
@@ -85,7 +85,7 @@ src/bigqmt_autotrader/web/
 - F004：QMT durable identity 逻辑迁出 `OmsRepository`；
 - F004：Core / QMT 使用独立 schema lineage。
 
-## 5. Core v1 Public API candidate
+## 5. Core v1 Public API
 
 冻结入口：
 
@@ -142,7 +142,9 @@ Core OMS 仅依赖 broker-neutral Protocol，不依赖 SimulatedDriver/QMT。
 冻结 Public API、独立 Core schema v1 snapshot、关键行为 golden scenarios。
 
 ### F005 — Release Gate
-Core-only import/install/test + Core formal subset + compatibility checks 全绿后，才允许 tag `core-v1.0.0`。
+已固化独立 `core-v1-release` CI job：Core-only tests + dependency boundary + release contract。
+Core formal subset 由 `contracts/core/v1/formal_models.json` 锁定，并要求主 CI 持续执行。
+所有 Gate 全绿后，release identity 为 `core-v1.0.0`。
 
 ## 8. Change Policy
 
@@ -170,3 +172,16 @@ Core-only import/install/test + Core formal subset + compatibility checks 全绿
 - identity / exactly-once / recovery invariant 变化；
 - Core schema 变化；
 - BrokerEvidence v1 breaking change。
+
+## 9. Freeze 后维护规则
+
+`contracts/core/v1/` 是 Core v1 的机器可读冻结契约。CI 会阻止：
+
+- Public API export 漂移；
+- OrderIntent / OrderStatus contract 漂移；
+- Core schema 表/列漂移；
+- Core import QMT / Driver / Runtime / Risk / Operations 等扩展层；
+- Core-only import 隐式加载扩展；
+- Core formal model 从 CI 中消失。
+
+Core v1 的修改默认按补丁版本处理；只有保持上述 contract 完全兼容才允许进入 1.0.x。

@@ -396,7 +396,7 @@ class OmsRepository:
             evidence=details,
         )
 
-    def record_command_reconciliation_in_tx(
+    def record_execution_reconciliation_in_tx(
         self,
         account_fingerprint: str,
         client_order_id: str,
@@ -407,12 +407,12 @@ class OmsRepository:
     ):
         """Record execution-plane evidence without inventing a broker fact.
 
-        A SHADOW command result may move an ambiguous order from UNKNOWN to
+        An execution adapter may move an ambiguous order from UNKNOWN to
         RECONCILING, but it can never select ACKNOWLEDGED or another broker
         lifecycle state. The caller owns the surrounding write transaction.
         """
         if not self.conn.in_transaction:
-            raise RuntimeError("record_command_reconciliation_in_tx requires an active transaction")
+            raise RuntimeError("record_execution_reconciliation_in_tx requires an active transaction")
         self._guard_write_in_tx()
         current = self._get_status_in_tx(account_fingerprint, client_order_id)
         target = current

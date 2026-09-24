@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "release": "core-v1.0.0",
+  "status": "RELEASE_CANDIDATE",
+  "contracts": [
+    "contracts/core/v1/inventory.json",
+    "contracts/core/v1/public_api.json",
+    "contracts/core/v1/schema.json",
+    "contracts/core/v1/formal_models.json"
+  ],
+  "required_ci_jobs": [
+    "test",
+    "core-v1-release",
+    "formal-verification"
+  ],
+  "compatibility": {
+    "historical_combined_schema_min": 7,
+    "historical_combined_schema_max": 11,
+    "qmt_is_extension": true,
+    "production_risk_is_extension": true
+  }
+}

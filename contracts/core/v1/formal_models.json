@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "contract": "execution-core-formal-v1",
+  "models": [
+    {
+      "module": "OrderFSM",
+      "config": "OrderFSM.cfg"
+    },
+    {
+      "module": "SubmitProtocol",
+      "config": "SubmitProtocol.cfg"
+    },
+    {
+      "module": "LeaderLease",
+      "config": "LeaderLease.cfg"
+    },
+    {
+      "module": "EvidenceReplay",
+      "config": "EvidenceReplay.cfg"
+    },
+    {
+      "module": "PreSubmitRecovery",
+      "config": "PreSubmitRecovery.cfg"
+    },
+    {
+      "module": "BrokerEvidenceBoundary",
+      "config": "BrokerEvidenceBoundary.cfg"
+    },
+    {
+      "module": "BrokerEvidenceContract",
+      "config": "BrokerEvidenceContract.cfg"
+    }
+  ]
+}

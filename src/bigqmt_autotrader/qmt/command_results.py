@@ -197,7 +197,7 @@ class QmtCommandResultJournal:
                 execution_mode == "LIVE_CANARY"
                 and result_status not in {"REJECTED_SAFETY_GATE", "REJECTED_EXPIRED"}
             )
-            outcome = self.repository.record_command_reconciliation_in_tx(
+            outcome = self.repository.record_execution_reconciliation_in_tx(
                 account_fingerprint,
                 client_order_id,
                 event_type="QMT_COMMAND_RESULT_" + result_status,
