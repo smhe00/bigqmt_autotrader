@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "src" / "bigqmt_autotrader"
 
-CORE_ROOTS = frozenset({"core", "domain", "drivers", "oms", "qmt"})
+CORE_ROOTS = frozenset({"core", "domain", "drivers", "oms", "ports", "qmt"})
 RUNTIME_ROOTS = frozenset(
     {"risk", "market_data", "operations", "service", "strategy_api", "runtime", "web"}
 )

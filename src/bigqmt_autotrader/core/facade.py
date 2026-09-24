@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from bigqmt_autotrader.domain import OrderIntent
+from bigqmt_autotrader.ports import ExecutionDriver
 from bigqmt_autotrader.oms import (
     CancelResult,
     OfflineOms,
@@ -27,7 +28,7 @@ class ExecutionCore:
     def open(
         cls,
         database_path: str | Path,
-        driver,
+        driver: ExecutionDriver,
         *,
         clock: Callable[[], datetime] | None = None,
         leader_lease_seconds: int = 30,

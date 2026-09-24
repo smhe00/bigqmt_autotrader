@@ -4,14 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus
-
-
-class SubmitOutcomeUnknown(RuntimeError):
-    pass
-
-
-class CancelOutcomeUnknown(RuntimeError):
-    pass
+from bigqmt_autotrader.ports import CancelOutcomeUnknown, SubmitOutcomeUnknown
 
 
 class SimulatedProcessCrash(BaseException):

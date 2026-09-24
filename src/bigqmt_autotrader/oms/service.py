@@ -6,9 +6,10 @@ from typing import Callable, Mapping
 from uuid import uuid4
 
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus, RiskDecision
-from bigqmt_autotrader.drivers.simulated import (
+from bigqmt_autotrader.ports import (
+    BrokerOrderObservation,
     CancelOutcomeUnknown,
-    SimulatedDriver,
+    ExecutionDriver,
     SubmitOutcomeUnknown,
 )
 from .authorization import core_execution_decision
@@ -56,7 +57,7 @@ class OfflineOms:
     def __init__(
         self,
         repository: OmsRepository,
-        driver: SimulatedDriver,
+        driver: ExecutionDriver,
         *,
         leader_lease_seconds: int = 30,
         clock: Callable[[], datetime] | None = None,
@@ -142,7 +143,7 @@ class OfflineOms:
         self,
         account_fingerprint: str,
         client_order_id: str,
-        query_evidence,
+        query_evidence: BrokerOrderObservation,
         *,
         reason: str,
     ) -> EvidenceIngestResult:

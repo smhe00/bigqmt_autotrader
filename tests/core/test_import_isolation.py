@@ -8,6 +8,7 @@ import sys
 import bigqmt_autotrader.core
 
 forbidden = {
+    "bigqmt_autotrader.drivers",
     "bigqmt_autotrader.risk",
     "bigqmt_autotrader.market_data",
     "bigqmt_autotrader.operations",
