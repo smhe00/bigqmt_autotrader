@@ -118,7 +118,7 @@ def _latest_bridge_ready(root: Path) -> QmtEvent:
             key=lambda item: item[0],
             reverse=True,
         ):
-            if last_timestamp_ms <= best_timestamp:
+            if last_timestamp_ms < best_timestamp:
                 break
             archived_ready = _read_archive_bridge_ready(archive_path, manifest)
             ready_events.extend(archived_ready)
