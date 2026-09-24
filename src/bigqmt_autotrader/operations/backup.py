@@ -56,6 +56,36 @@ def _sha256_file(path: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def _sync_backup_file(path: Path) -> None:
+    """Flush a completed backup through a Windows-compatible descriptor."""
+    with path.open("r+b") as handle:
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _sync_parent_directory(
+    directory: Path,
+    *,
+    platform: str | None = None,
+) -> bool:
+    """Sync published directory metadata where ordinary directory fds exist.
+
+    Windows does not support opening a directory with ``os.open`` for fsync.
+    The backup file itself is flushed before the atomic replace; POSIX keeps
+    the additional directory-metadata durability barrier.
+    """
+    platform = os.name if platform is None else platform
+    if platform == "nt":
+        return False
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    directory_fd = os.open(str(directory), flags)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+    return True
+
+
 def verify_database_backup(
     path: str | Path,
     *,
@@ -111,14 +141,9 @@ def create_database_backup(
         target.close()
         target = None
 
-        with temporary.open("rb") as handle:
-            os.fsync(handle.fileno())
+        _sync_backup_file(temporary)
         os.replace(temporary, destination_path)
-        directory_fd = os.open(str(destination_path.parent), os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _sync_parent_directory(destination_path.parent)
     except BaseException:
         if target is not None:
             target.close()
