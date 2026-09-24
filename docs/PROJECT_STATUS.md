@@ -14,7 +14,8 @@ Updated: 2026-09-19
 | P0 / G0 | **PASS** |
 | P1 Offline OMS | **PASS** |
 | P2 Risk engine | **PASS — Production Runtime layer** |
-| P7 Core / Runtime boundary | **PASS candidate — isolated API/schema + permanent CI dependency Gate** |
+| P7 Core / Runtime boundary | **PASS — isolated API/schema + permanent CI dependency Gate** |
+| P7.1 Operational Core boundary | **PASS candidate — Runtime uses Core public API only** |
 | P3 Big QMT read-only | **PASS** |
 | P4 Big QMT execution bridge | **SHADOW DEPLOYMENT GATE PASS** |
 | P5 Guojin simulation mutation calibration | **BOUNDED PASS** |
@@ -430,7 +431,10 @@ Permanent CI:
 
 ```bash
 python tools/verify_core_dependency_boundary.py
+python tools/verify_runtime_core_boundary.py
 ```
+
+P7.1 additionally prohibits Runtime roots from importing `oms/`, `qmt/` or `drivers/` implementation modules directly. Runtime execution coupling must go through `bigqmt_autotrader.core.ExecutionPort` and other top-level Core public contracts.
 
 Detailed design: [`CORE_RUNTIME_BOUNDARY_ZH.md`](CORE_RUNTIME_BOUNDARY_ZH.md).
 

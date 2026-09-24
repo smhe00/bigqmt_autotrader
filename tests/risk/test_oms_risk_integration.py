@@ -1,3 +1,4 @@
+import pytest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -176,3 +177,18 @@ def test_live_named_mode_is_still_rejected_by_p2_default_policy(tmp_path):
     assert result.status is OrderStatus.RISK_REJECTED
     assert result.risk_evaluation.decision.reason_code is RiskReasonCode.MODE_NOT_ARMED
     assert driver.submit_call_count("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cid-live-name") == 0
+
+
+def test_runtime_risk_adapter_rejects_direct_offline_oms_implementation(tmp_path):
+    conn = connect_database(tmp_path / "direct-oms.sqlite3")
+    initialize_core_database(conn)
+    repo = OmsRepository(conn)
+    driver = SimulatedDriver()
+    core_oms = OfflineOms(repo, driver, clock=lambda: NOW)
+    core_oms.recover()
+    try:
+        with pytest.raises(TypeError, match="ExecutionPort"):
+            RiskManagedOms(core_oms, _policy(), clock=lambda: NOW)
+    finally:
+        core_oms.close()
+        conn.close()
