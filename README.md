@@ -62,8 +62,9 @@ QMT Bridge / Broker
 永久规则：
 
 ```text
-Production Runtime -> Execution Core
+Production Runtime -> Execution Core public API
 Execution Core -X-> Production Runtime
+Runtime -X-> OMS/QMT implementation internals
 ```
 
 详细边界见 [`docs/CORE_RUNTIME_BOUNDARY_ZH.md`](docs/CORE_RUNTIME_BOUNDARY_ZH.md)。
@@ -204,6 +205,7 @@ python tools/verify_bridge_protocol_exhaustive.py
 python tools/verify_bridge_schema_contract.py
 python tools/verify_broker_evidence_contract.py
 python tools/verify_core_dependency_boundary.py
+python tools/verify_runtime_core_boundary.py
 ```
 
 项目状态见 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。

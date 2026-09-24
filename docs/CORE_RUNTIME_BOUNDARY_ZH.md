@@ -170,3 +170,96 @@ Core/Runtime 隔离必须同时满足：
 以后 Execution Core 修改应非常谨慎，主要围绕执行正确性和 broker lifecycle；Production Runtime 可以快速迭代，但只能依赖 Core。
 
 目标是：即使上层 Runtime 继续增长，最小可靠下单系统仍保持小、稳定、可独立测试、可独立使用。
+
+
+## 10. P7.1 Operational Core Boundary
+
+P7 解决了目录和依赖方向；P7.1 进一步把**运行时入口**收口到 Core public API。
+
+Production Runtime 现在不得直接 import：
+
+```text
+bigqmt_autotrader.oms
+bigqmt_autotrader.qmt
+bigqmt_autotrader.drivers
+```
+
+执行、QMT ingress 和数据库版本信息必须从：
+
+```python
+from bigqmt_autotrader.core import ...
+```
+
+取得。
+
+### ExecutionPort
+
+Runtime 不再要求具体的 `OfflineOms`，而是依赖稳定协议：
+
+```text
+ExecutionPort
+  recover()
+  submit()
+  submit_authorized()
+  cancel()
+  status()
+  ingest_evidence()
+  close()
+```
+
+`ExecutionCore` 实现该协议。
+
+因此 Production Runtime 的 Risk 层只知道“有一个可执行端口”，不再知道 OMS repository、QMT spool 或具体执行实现。
+
+### Runtime 所需的 QMT contract
+
+MarketData/Health 仍然需要读取 QMT ingress facts，但不再 import `qmt.protocol` / `qmt.receiver`。
+
+Core public API 统一公开：
+
+```text
+QmtEvent
+IngressResult
+IngressDisposition
+```
+
+这样 QMT 实现路径可以变化，而 Runtime 只依赖稳定 contract。
+
+### 数据库部署检查
+
+Production Runtime 的 deployment preflight 不再直接读取 `oms.db`。
+
+它通过 Core public API 使用：
+
+```text
+RUNTIME_SCHEMA_VERSION
+database_schema_version()
+```
+
+### 永久 CI Gate
+
+新增：
+
+```bash
+python tools/verify_runtime_core_boundary.py
+```
+
+该 Gate 扫描所有 Runtime roots：
+
+```text
+risk / market_data / operations / service / strategy_api / runtime / web
+```
+
+并禁止：
+
+1. 直接 import `oms/`；
+2. 直接 import `qmt/`；
+3. 直接 import `drivers/`；
+4. 绕过顶层 API 去 import `core.facade`、`core.contracts` 等私有 Core 模块。
+
+因此现在形成双向永久约束：
+
+```text
+Core -X-> Runtime
+Runtime -> Core public API only
+```
