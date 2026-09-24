@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+import gzip
+import hashlib
 import json
 from pathlib import Path
 
@@ -13,6 +16,79 @@ from bigqmt_autotrader.qmt.receiver import QmtIngressBuffer, QmtIngressIdentityE
 
 
 FINGERPRINT = "sha256:" + "a" * 64
+SHANGHAI_TZ = timezone(timedelta(hours=8))
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _archive_ready_event(root: Path, *, raw_override: bytes | None = None) -> tuple[Path, Path, Path]:
+    ready_path = root / "inbox" / "ready.json"
+    source_raw = ready_path.read_bytes()
+    event = QmtEvent.from_mapping(json.loads(source_raw)["event"])
+    ready_path.unlink()
+    raw = source_raw if raw_override is None else raw_override
+    raw_line = raw if raw.endswith(b"\n") else raw + b"\n"
+    day = datetime.fromtimestamp(event.timestamp_ms / 1000.0, tz=SHANGHAI_TZ).date().isoformat()
+    archive_dir = root / "archive"
+    checkpoint_dir = root / "checkpoints"
+    archive_dir.mkdir()
+    checkpoint_dir.mkdir()
+    archive_path = archive_dir / f"{day}_events.jsonl.gz"
+    with open(archive_path, "wb") as raw_handle:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw_handle, mtime=0) as zipped:
+            zipped.write(raw_line)
+    archive_hash = _sha256(archive_path)
+    manifest = {
+        "archive_format_version": "1",
+        "trading_day": day,
+        "account_fingerprint": FINGERPRINT,
+        "event_count": 1,
+        "first_timestamp_ms": event.timestamp_ms,
+        "last_timestamp_ms": event.timestamp_ms,
+        "archive_filename": archive_path.name,
+        "archive_sha256": archive_hash,
+        "event_stream_sha256": hashlib.sha256(raw_line).hexdigest(),
+    }
+    manifest_path = archive_dir / f"{day}_manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    checkpoint = {
+        "status": "COMMITTED",
+        "trading_day": day,
+        "archive_filename": archive_path.name,
+        "archive_sha256": archive_hash,
+        "manifest_filename": manifest_path.name,
+        "manifest_sha256": _sha256(manifest_path),
+        "event_count": 1,
+    }
+    checkpoint_path = checkpoint_dir / f"{day}.json"
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+    return archive_path, manifest_path, checkpoint_path
+
+
+def _rewrite_archive_metadata(
+    archive_path: Path,
+    manifest_path: Path,
+    checkpoint_path: Path,
+    *,
+    manifest_updates: dict[str, object] | None = None,
+) -> None:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["archive_sha256"] = _sha256(archive_path)
+    if manifest_updates:
+        manifest.update(manifest_updates)
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    checkpoint["archive_sha256"] = _sha256(archive_path)
+    checkpoint["manifest_sha256"] = _sha256(manifest_path)
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
 
 
 def _write_instance(base: Path, instance_id: str = "terminal_01") -> Path:
@@ -185,6 +261,71 @@ def test_bridge_ready_session_and_instance_must_match_manifest(tmp_path: Path) -
     (root / "instance.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(QmtInstanceError, match="bridge_ready"):
+        load_instance(tmp_path, "terminal_01")
+
+
+def test_current_session_bridge_ready_is_loaded_from_committed_archive(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    _archive_ready_event(root)
+
+    instance = load_instance(tmp_path, "terminal_01")
+
+    assert instance.session_id == "session-01"
+
+
+def test_newer_loose_bridge_ready_wins_over_archived_current_session(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    _archive_ready_event(root)
+    newer = {
+        "protocol_version": "0.2",
+        "terminal_instance_id": "terminal_01",
+        "session_id": "newer-session",
+        "sequence": 1,
+        "timestamp_ms": 1_700_000_000_101,
+        "event_type": "bridge_ready",
+        "source": "init",
+        "account_fingerprint": FINGERPRINT,
+        "account_type": "STOCK",
+        "payload": {"capabilities": {}},
+    }
+    (root / "inbox" / "newer-ready.json").write_bytes(encode_transport_frame(newer))
+
+    with pytest.raises(QmtInstanceError, match="latest bridge_ready session mismatch"):
+        load_instance(tmp_path, "terminal_01")
+
+
+def test_corrupt_committed_readiness_archive_fails_closed(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    archive_path, _manifest_path, _checkpoint_path = _archive_ready_event(root)
+    archive_path.write_bytes(b"not-a-gzip")
+
+    with pytest.raises(QmtInstanceError, match="archive hash mismatch"):
+        load_instance(tmp_path, "terminal_01")
+
+
+def test_malformed_archived_readiness_frame_fails_closed(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    archive_path, manifest_path, checkpoint_path = _archive_ready_event(
+        root,
+        raw_override=b'not-json\n',
+    )
+    _rewrite_archive_metadata(archive_path, manifest_path, checkpoint_path)
+
+    with pytest.raises(QmtInstanceError, match="archive payload is invalid"):
+        load_instance(tmp_path, "terminal_01")
+
+
+def test_archive_manifest_pair_mismatch_fails_closed(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    archive_path, manifest_path, checkpoint_path = _archive_ready_event(root)
+    _rewrite_archive_metadata(
+        archive_path,
+        manifest_path,
+        checkpoint_path,
+        manifest_updates={"archive_filename": "other_events.jsonl.gz"},
+    )
+
+    with pytest.raises(QmtInstanceError, match="manifest/checkpoint mismatch"):
         load_instance(tmp_path, "terminal_01")
 
 
