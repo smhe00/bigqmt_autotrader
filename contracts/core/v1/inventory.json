@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "contract": "execution-core-v1-candidate",
+  "baseline_commit": "8a39198381393008d5e65bb060a74984391431fd",
+  "frozen_core_candidate": {
+    "roots": [
+      "src/bigqmt_autotrader/core",
+      "src/bigqmt_autotrader/domain"
+    ],
+    "files": [
+      "src/bigqmt_autotrader/oms/authorization.py",
+      "src/bigqmt_autotrader/oms/broker_evidence_v1.py",
+      "src/bigqmt_autotrader/oms/db.py",
+      "src/bigqmt_autotrader/oms/evidence.py",
+      "src/bigqmt_autotrader/oms/leader.py",
+      "src/bigqmt_autotrader/oms/repository.py",
+      "src/bigqmt_autotrader/oms/service.py"
+    ],
+    "migrations": [
+      "src/bigqmt_autotrader/oms/migrations/0001_initial.sql",
+      "src/bigqmt_autotrader/oms/migrations/0002.sql",
+      "src/bigqmt_autotrader/oms/migrations/0003.sql",
+      "src/bigqmt_autotrader/oms/migrations/0004.sql",
+      "src/bigqmt_autotrader/oms/migrations/0005.sql",
+      "src/bigqmt_autotrader/oms/migrations/0006.sql",
+      "src/bigqmt_autotrader/oms/migrations/0007.sql",
+      "src/bigqmt_autotrader/oms/migrations/0008.sql"
+    ]
+  },
+  "adapter_or_extension": {
+    "roots": [
+      "src/bigqmt_autotrader/qmt",
+      "src/bigqmt_autotrader/risk",
+      "src/bigqmt_autotrader/market_data",
+      "src/bigqmt_autotrader/operations",
+      "src/bigqmt_autotrader/service",
+      "src/bigqmt_autotrader/strategy_api",
+      "src/bigqmt_autotrader/runtime",
+      "src/bigqmt_autotrader/web"
+    ],
+    "files": [
+      "src/bigqmt_autotrader/drivers/qmt_shadow.py",
+      "src/bigqmt_autotrader/drivers/simulated.py",
+      "src/bigqmt_autotrader/oms/qmt_bridge.py",
+      "src/bigqmt_autotrader/oms/command_results.py"
+    ],
+    "runtime_migrations": [
+      "src/bigqmt_autotrader/oms/migrations/0009.sql",
+      "src/bigqmt_autotrader/oms/migrations/0010.sql",
+      "src/bigqmt_autotrader/oms/migrations/0011.sql"
+    ]
+  },
+  "required_refactors": [
+    "oms/service.py must depend on a broker-neutral execution port, not SimulatedDriver",
+    "QMT command-result ingestion must leave the frozen OMS service surface",
+    "oms/command_results.py must not make Core depend on qmt.commands",
+    "qmt must be removed from CORE_ROOTS in the dependency gate",
+    "drivers must not be treated wholesale as Core"
+  ],
+  "core_schema_version": 8,
+  "public_api_candidate": [
+    "CORE_SCHEMA_VERSION",
+    "ExecutionCore",
+    "OrderIntent",
+    "OrderStatus",
+    "Side"
+  ]
+}
