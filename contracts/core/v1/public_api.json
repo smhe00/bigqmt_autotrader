@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "contract": "execution-core-public-api-v1",
+  "exports": [
+    "CORE_SCHEMA_VERSION",
+    "BrokerOrderObservation",
+    "CancelOutcomeUnknown",
+    "ExecutionCore",
+    "ExecutionDriver",
+    "OrderIntent",
+    "OrderStatus",
+    "Side",
+    "SubmitOutcomeUnknown",
+    "initialize_core_database"
+  ],
+  "order_intent_fields": [
+    "client_order_id",
+    "strategy_id",
+    "strategy_version",
+    "account_fingerprint",
+    "symbol",
+    "side",
+    "quantity",
+    "limit_price",
+    "created_at",
+    "expires_at",
+    "signal_id",
+    "reason_code",
+    "order_type"
+  ],
+  "order_status_values": [
+    "CREATED",
+    "RISK_REJECTED",
+    "RISK_ACCEPTED",
+    "ABORTED",
+    "SUBMITTING",
+    "ACKNOWLEDGED",
+    "PARTIALLY_FILLED",
+    "FILLED",
+    "CANCEL_PENDING",
+    "CANCELLED",
+    "REJECTED",
+    "UNKNOWN",
+    "RECONCILING",
+    "MANUAL_REVIEW"
+  ],
+  "execution_core_methods": [
+    "open",
+    "recover",
+    "submit",
+    "cancel",
+    "close"
+  ]
+}

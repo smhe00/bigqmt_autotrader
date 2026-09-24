@@ -15,10 +15,10 @@ from bigqmt_autotrader.domain import (
 from .command_results import QmtCommandResultJournal
 from bigqmt_autotrader.oms.db import transaction
 from bigqmt_autotrader.oms.authorization import core_execution_decision
-from bigqmt_autotrader.oms.db import connect_database, initialize_core_database
+from bigqmt_autotrader.oms.db import connect_database
 from bigqmt_autotrader.oms.evidence import EvidenceJournal
 from bigqmt_autotrader.oms.leader import LeaderCoordinator
-from bigqmt_autotrader.oms.repository import OmsRepository, QmtDurableIdentityConflict
+from bigqmt_autotrader.oms.repository import OmsRepository
 from .commands import (
     QmtCommand,
     QmtCommandSpool,
@@ -27,7 +27,9 @@ from .commands import (
     decode_command_frame,
     encode_command_frame,
 )
+from .durable_identity import QmtDurableIdentityConflict, register_qmt_durable_submit
 from .guojin_evidence import GuojinSimEvidenceMapper
+from .schema import initialize_qmt_database
 from .instances import QmtInstance
 
 
@@ -69,7 +71,7 @@ class GuojinSimOmsRuntime:
         self.instance = instance
         self.database_path = instance.root / "host_oms.sqlite3"
         self.conn = connect_database(self.database_path)
-        initialize_core_database(self.conn)
+        initialize_qmt_database(self.conn)
         self.repository = OmsRepository(self.conn)
         self._leader = LeaderCoordinator(self.conn)
         self._lease_seconds = 30
@@ -268,7 +270,8 @@ class GuojinSimOmsRuntime:
                 (candidate["account_fingerprint"], candidate["client_order_id"]),
             ).fetchone()
             imported += int(
-                self.repository.register_qmt_durable_submit(
+                register_qmt_durable_submit(
+                    self.repository,
                     **candidate,
                     allow_existing_order_from_dispatch=existing_order is not None,
                 )

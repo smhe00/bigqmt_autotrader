@@ -40,18 +40,12 @@ src/bigqmt_autotrader/oms/
   leader.py
   repository.py
   service.py
-src/bigqmt_autotrader/oms/migrations/
+src/bigqmt_autotrader/ports/
+src/bigqmt_autotrader/oms/core_migrations/
   0001_initial.sql
-  0002.sql
-  0003.sql
-  0004.sql
-  0005.sql
-  0006.sql
-  0007.sql
-  0008.sql
 ```
 
-`oms/__init__.py` 只能导出 Core public/internal surface；QMT-specific export 必须在 F003 前移出。
+`oms/__init__.py` 只导出 broker-neutral Core surface；QMT command-result glue 已迁入 `qmt/`。
 
 ## 3. Adapter / Extension，不属于 Frozen Core
 
@@ -61,8 +55,10 @@ src/bigqmt_autotrader/oms/migrations/
 src/bigqmt_autotrader/qmt/
 src/bigqmt_autotrader/drivers/qmt_shadow.py
 src/bigqmt_autotrader/drivers/simulated.py
-src/bigqmt_autotrader/oms/qmt_bridge.py
-src/bigqmt_autotrader/oms/command_results.py
+src/bigqmt_autotrader/qmt/oms_bridge.py
+src/bigqmt_autotrader/qmt/command_results.py
+src/bigqmt_autotrader/qmt/durable_identity.py
+src/bigqmt_autotrader/qmt/migrations/
 src/bigqmt_autotrader/risk/
 src/bigqmt_autotrader/market_data/
 src/bigqmt_autotrader/operations/
@@ -77,19 +73,17 @@ src/bigqmt_autotrader/web/
 - QMT 是 Core 的 adapter/consumer，不是 Core 本体；
 - broker-specific raw status / route / terminal discovery 不得进入 Core；
 - simulation driver 属于测试/reference adapter；
-- migrations 9..11 属于 Runtime/历史 combined DB 兼容层，不属于 Core schema v1。
+- 原有 `oms/migrations/0001..0011` 仅保留为历史 combined DB 兼容线；
+- 新 Core-only DB 使用独立 `core_schema_meta` + `oms/core_migrations`；
+- QMT 使用独立 `qmt_schema_meta` + `qmt/migrations`。
 
-## 4. 当前必须消除的边界穿透
+## 4. 已完成的边界收敛
 
-Freeze 前必须修复以下现状：
-
-1. `oms/service.py` 直接依赖 `drivers.simulated.SimulatedDriver` 及其异常类型；
-2. `oms/service.py` 仍含 QMT command-result ingestion；
-3. `oms/command_results.py` 依赖 `qmt.commands.broker_token_for`；
-4. `oms/qmt_bridge.py` 位于 OMS namespace，但语义属于 QMT adapter；
-5. 当前 `verify_core_dependency_boundary.py` 将整个 `qmt/` 与 `drivers/` 视为 Core root，边界过宽。
-
-F002/F003 必须将这些依赖改为 broker-neutral port，并让 `qmt/` 只能依赖 Core、不能被 Core 反向依赖。
+- F002：OMS 改为依赖 broker-neutral `ExecutionDriver` Protocol；
+- F003：QMT command-result journal/sink 已迁出 OMS；
+- F003：`qmt/` 与 `drivers/` 已从 Core dependency roots 移除，并成为 Core forbidden imports；
+- F004：QMT durable identity 逻辑迁出 `OmsRepository`；
+- F004：Core / QMT 使用独立 schema lineage。
 
 ## 5. Core v1 Public API candidate
 
@@ -120,13 +114,14 @@ core.close()
 ## 6. Core schema v1
 
 ```text
-Core schema v1 = SQLite schema 8
+Core schema v1 = independent Core schema version 1
 ```
 
 Freeze 后：
 
-- Core v1.x 新建数据库必须停在 schema 8；
-- schema 9..11 可作为 historical combined DB 的兼容 superset；
+- Core v1.x 新建数据库只创建 broker-neutral Core 表，禁止创建 `qmt_*` 表；
+- historical combined schema 7..11 可在验证 Core shape 后原地采用为 Core v1；
+- historical combined schema 11 继续由原 legacy migrator 维护，不做 downgrade；
 - Core v1.x 不允许新增必须表/列；
 - 需要改变持久化 contract 时进入新的 Core major version review。
 
@@ -144,7 +139,7 @@ Core OMS 仅依赖 broker-neutral Protocol，不依赖 SimulatedDriver/QMT。
 `qmt/` 和 QMT-specific glue 从 Core dependency root 移出；CI 强制 Core -> QMT 为非法。
 
 ### F004 — API / Schema / Golden Contract
-冻结 Public API、schema 8 snapshot、关键行为 golden scenarios。
+冻结 Public API、独立 Core schema v1 snapshot、关键行为 golden scenarios。
 
 ### F005 — Release Gate
 Core-only import/install/test + Core formal subset + compatibility checks 全绿后，才允许 tag `core-v1.0.0`。

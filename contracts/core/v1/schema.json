@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "contract": "execution-core-schema-v1",
+  "core_schema_version": 1,
+  "forbidden_table_prefixes": [
+    "qmt_"
+  ],
+  "tables": {
+    "order_intents": [
+      "account_fingerprint",
+      "client_order_id",
+      "strategy_id",
+      "strategy_version",
+      "symbol",
+      "side",
+      "order_type",
+      "quantity",
+      "limit_price",
+      "created_at",
+      "expires_at",
+      "signal_id",
+      "reason_code"
+    ],
+    "broker_orders": [
+      "account_fingerprint",
+      "client_order_id",
+      "status",
+      "broker_order_id",
+      "filled_quantity",
+      "submit_call_started",
+      "cancel_call_started",
+      "cancel_outcome_resolved",
+      "updated_at"
+    ],
+    "risk_decisions": [
+      "account_fingerprint",
+      "client_order_id",
+      "accepted",
+      "reason_code",
+      "rule_version",
+      "snapshot_hash",
+      "decided_at"
+    ],
+    "order_events": [
+      "event_id",
+      "account_fingerprint",
+      "client_order_id",
+      "event_type",
+      "from_status",
+      "to_status",
+      "disposition",
+      "evidence_json",
+      "created_at"
+    ],
+    "runtime_sessions": [
+      "session_id",
+      "started_at",
+      "reconciled_at"
+    ],
+    "oms_leader": [
+      "singleton",
+      "session_id",
+      "lease_token",
+      "epoch",
+      "acquired_at",
+      "heartbeat_at",
+      "expires_at"
+    ],
+    "broker_evidence_keys": [
+      "fingerprint",
+      "source",
+      "source_event_id",
+      "accepted",
+      "result_disposition",
+      "conflict_reason",
+      "first_observed_at",
+      "account_fingerprint",
+      "semantic_digest"
+    ],
+    "broker_evidence_observations": [
+      "observation_id",
+      "fingerprint",
+      "source",
+      "source_event_id",
+      "account_fingerprint",
+      "client_order_id",
+      "evidence_type",
+      "broker_order_id",
+      "requested_status",
+      "filled_quantity",
+      "classification",
+      "payload_json",
+      "observed_at",
+      "source_kind",
+      "mapper_profile",
+      "semantic_digest",
+      "broker_token",
+      "order_ref",
+      "trade_id",
+      "raw_payload_ref",
+      "raw_status_json",
+      "route_account_type",
+      "route_account_fingerprint"
+    ]
+  }
+}

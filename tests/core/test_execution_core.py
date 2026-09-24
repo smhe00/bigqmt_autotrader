@@ -4,7 +4,7 @@ from decimal import Decimal
 from bigqmt_autotrader.core import CORE_SCHEMA_VERSION, ExecutionCore
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus, Side
 from bigqmt_autotrader.drivers import SimulatedDriver
-from bigqmt_autotrader.oms import current_schema_version
+from bigqmt_autotrader.oms import current_core_schema_version, current_schema_version
 
 
 FP = "sha256:" + "a" * 64
@@ -36,7 +36,7 @@ def test_execution_core_uses_only_core_schema_and_submits_without_runtime(tmp_pa
         clock=lambda: NOW,
     )
     try:
-        assert current_schema_version(core.conn) == CORE_SCHEMA_VERSION == 8
+        assert current_core_schema_version(core.conn) == CORE_SCHEMA_VERSION == 1
         core.recover()
         result = core.submit(intent())
         assert result.status is OrderStatus.ACKNOWLEDGED
@@ -49,6 +49,7 @@ def test_execution_core_uses_only_core_schema_and_submits_without_runtime(tmp_pa
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
+        assert not any(name.startswith("qmt_") for name in tables)
         assert "daily_risk_events" not in tables
         assert "runtime_mode_transitions" not in tables
         assert "operations_alert_events" not in tables
@@ -71,7 +72,7 @@ def test_execution_core_restart_recovery_remains_available_without_runtime(tmp_p
     )
     try:
         second.recover()
-        assert current_schema_version(second.conn) == 8
+        assert current_core_schema_version(second.conn) == 1
     finally:
         second.close()
 
@@ -88,5 +89,6 @@ def test_core_can_open_existing_full_runtime_database_without_downgrade(tmp_path
     core = ExecutionCore.open(path, SimulatedDriver(), clock=lambda: NOW)
     try:
         assert current_schema_version(core.conn) == 11
+        assert current_core_schema_version(core.conn) == 1
     finally:
         core.close()

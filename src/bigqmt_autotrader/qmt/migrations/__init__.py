@@ -1,0 +1,1 @@
+"""QMT extension schema migrations."""

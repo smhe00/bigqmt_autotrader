@@ -24,6 +24,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "bigqmt_autotrader.oms.migrations" = ["*.sql"]
+"bigqmt_autotrader.oms.core_migrations" = ["*.sql"]
+"bigqmt_autotrader.qmt.migrations" = ["*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

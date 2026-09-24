@@ -9,7 +9,7 @@ import pytest
 
 from bigqmt_autotrader.domain import OrderStatus
 from bigqmt_autotrader.oms.leader import OmsLeaderLost
-from bigqmt_autotrader.oms.repository import QmtDurableIdentityConflict
+from bigqmt_autotrader.qmt.durable_identity import QmtDurableIdentityConflict
 from bigqmt_autotrader.qmt.commands import QmtCommandSpool
 from bigqmt_autotrader.qmt.guojin_sim_oms import (
     GuojinSimOmsRuntime,
