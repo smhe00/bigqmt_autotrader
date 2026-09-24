@@ -22,26 +22,27 @@ bootstrap_refresh_main_before_work: true
 bootstrap_verify_head_before_write: true
 bootstrap_inspect_diff_from_audit_base: true
 
-handoff_seq: 36
-handoff_id: "P6-T011-I03-agent-to-architect-0036"
+handoff_seq: 37
+handoff_id: "P6-T012-I01-architect-to-agent-0037"
 
 phase: "P6"
-task_id: "P6-T011"
-iteration: "I03"
-task_key: "P6-T011-I03"
+task_id: "P6-T012"
+iteration: "I01"
+task_key: "P6-T012-I01"
 
-state: "REVIEW_READY"
-owner: "architect"
+state: "AGENT_READY"
+owner: "agent"
 
-audit_base_commit: "114ee09ebb7702cdad72ebb16308e44d4a197e5c"
-task_file: "workflow/tasks/P6-T011-I03__sgt-linked-fill-core-api.md"
-expected_report_file: "workflow/reports/P6-T011-I03__implementation-report.md"
-expected_review_file: "workflow/reviews/P6-T011-I03__architect-review.md"
+audit_base_commit: "b190904e6bfdf383c975a635360198e33b529c8c"
+task_file: "workflow/tasks/P6-T012-I01__host-replay-leader-heartbeat.md"
+expected_report_file: "workflow/reports/P6-T012-I01__implementation-report.md"
+expected_review_file: "workflow/reviews/P6-T012-I01__architect-review.md"
 
-report_status: "REVIEW_READY"
+report_status: "AWAITING_AGENT"
 review_status: "AWAITING_REVIEW"
 
-authorized_next: []
+authorized_next:
+  - "P6-T012-I01"
 
 ordering:
   task_width: 3
