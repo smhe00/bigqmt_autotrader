@@ -12,12 +12,12 @@ from bigqmt_autotrader.domain import (
 from bigqmt_autotrader.drivers import SimulatedDriver
 from bigqmt_autotrader.oms import (
     OfflineOms,
-    OmsQmtCommandResultSink,
     OmsRepository,
     connect_database,
     initialize_database,
 )
 from bigqmt_autotrader.qmt import (
+    OmsQmtCommandResultSink,
     QmtHostIngestion,
     QmtIngressBuffer,
     broker_token_for,

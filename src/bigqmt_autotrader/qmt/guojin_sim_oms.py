@@ -12,7 +12,7 @@ from bigqmt_autotrader.domain import (
     RiskDecision,
     TransitionDisposition,
 )
-from bigqmt_autotrader.oms.command_results import QmtCommandResultJournal
+from .command_results import QmtCommandResultJournal
 from bigqmt_autotrader.oms.db import transaction
 from bigqmt_autotrader.oms.authorization import core_execution_decision
 from bigqmt_autotrader.oms.db import connect_database, initialize_core_database

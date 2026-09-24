@@ -11,14 +11,15 @@ from bigqmt_autotrader.domain import (
 )
 from bigqmt_autotrader.drivers import QmtShadowDriver
 from bigqmt_autotrader.oms import (
-    CommandResultConflict,
     OfflineOms,
-    OmsQmtCommandResultSink,
     OmsRepository,
     connect_database,
     initialize_database,
 )
 from bigqmt_autotrader.qmt import (
+    CommandResultConflict,
+    OmsQmtCommandResultSink,
+    QmtCommandResultJournal,
     QmtCommandSpool,
     QmtHostIngestion,
     QmtIngressBuffer,
@@ -224,7 +225,8 @@ def test_shadow_command_result_is_durably_joined_to_oms_reconciliation_without_a
     event_types = [row["event_type"] for row in repo.list_events(FP, "cid-001")]
     assert "QMT_COMMAND_RESULT_SHADOW_ACCEPTED" in event_types
 
-    duplicate = oms.ingest_qmt_command_result(
+    journal = QmtCommandResultJournal(repo, write_guard=oms.assert_leader)
+    duplicate = journal.ingest(
         qmt_session_id="session-p4",
         qmt_sequence=2,
         account_fingerprint=FP,
@@ -235,7 +237,7 @@ def test_shadow_command_result_is_durably_joined_to_oms_reconciliation_without_a
     assert len(conn.execute("SELECT * FROM qmt_command_results").fetchall()) == 1
 
     with pytest.raises(CommandResultConflict):
-        oms.ingest_qmt_command_result(
+        journal.ingest(
             qmt_session_id="session-p4",
             qmt_sequence=2,
             account_fingerprint=FP,

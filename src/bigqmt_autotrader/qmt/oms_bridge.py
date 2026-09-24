@@ -6,8 +6,8 @@ from typing import Any, Mapping
 
 from bigqmt_autotrader.domain import OrderStatus, TransitionDisposition
 
-from .service import OfflineOms
-from .command_results import CommandResultConflict
+from bigqmt_autotrader.oms.service import OfflineOms
+from .command_results import CommandResultConflict, QmtCommandResultJournal
 
 
 class QmtCommandResultInvariantViolation(RuntimeError):
@@ -68,6 +68,10 @@ class OmsQmtCommandResultSink:
 
     def __init__(self, oms: OfflineOms) -> None:
         self.oms = oms
+        self._journal = QmtCommandResultJournal(
+            oms.repository,
+            write_guard=oms.assert_leader,
+        )
 
     def ingest_execution_command_result(
         self,
@@ -136,7 +140,7 @@ class OmsQmtCommandResultSink:
             }
         )
         try:
-            journal_result = self.oms.ingest_qmt_command_result(
+            journal_result = self._journal.ingest(
                 qmt_session_id=session_id,
                 qmt_sequence=sequence,
                 account_fingerprint=account_fingerprint,
