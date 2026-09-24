@@ -24,7 +24,9 @@ QMT / Broker raw ORDER, DEAL, active query
 
 OMS 只消费 `BrokerEvidence v1`，不直接理解国金、银河、MiniQMT 或其他券商的原始 `status_code`。
 
-本契约当前只冻结**协议、语义和安全边界**。券商专用 mapper 仍是下一阶段实现工作，不在本 Gate 中完成。
+本契约只冻结**协议、语义和安全边界**，不自动授权任何券商 mapper。国金模拟
+`qmt-guojin-sim-20260917-v1` 已在独立 Gate 中校准并仅适用于 `guojin_sim`；生产国金和
+银河仍须各自独立校准与授权。
 
 ## 2. 与 BigQMT Bridge API v1 的关系
 

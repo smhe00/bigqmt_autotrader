@@ -1,296 +1,104 @@
 # bigqmt_autotrader 中文总览
 
-更新：2026-09-19
+更新：2026-09-25
 
 ## 1. 项目目标
 
-`bigqmt_autotrader` 的目标不是做一个“会调用 QMT 下单函数的脚本”，而是做一个面向个人账户、可恢复、可审计、默认 fail-closed 的自动交易执行平台。
+本项目不是“封装一个 QMT 下单函数”，而是一个可恢复、可审计、默认 fail-closed 的个人
+自动交易执行平台。Big QMT 是券商 Gateway；Host 保存 durable identity、OMS、风险、恢复和
+审计状态。QMT 内置 Python 3.6 只运行薄 Bridge，Host 使用 Python 3.12。
 
-Big QMT 被定位为 **券商执行终端 / Broker Gateway**。复杂策略、OMS、风险控制、数据库和分析运行在外部 Host（Python 3.12）；QMT 内置 Python 3.6 只保留薄的 Bridge。
+## 2. 当前状态
 
-当前第一生产目标仍然刻意收窄为：
+- `core-v1.0.0` 已冻结，机器契约在 `contracts/core/v1/`。
+- P0–P3 PASS；P4 SHADOW 部署 PASS；P5 国金模拟受限校准 PASS。
+- P6 T001–T015 的最终迭代覆盖 Host/OMS 集成、单 writer、crash window、submit/cancel、
+  fill、重启、HGT/SGT、session rollover、leader heartbeat、Windows fsync 与 archive
+  discovery，均已有最终 PASS 审查。
+- 通用生产实盘仍为 **NO**。Galaxy/generic 没有 broker mutation surface。
+- `guojin_sim` build `p5-simulation-calibration-8` 只能做 fingerprint-pinned、
+  `simulation_only=true` 的模拟校准。
+- `guojin` build `p6-guojin-live-canary-7` 只保留固定的单案例 LIVE_CANARY，
+  不是通用 LIVE。
 
-- A 股普通现金账户；
-- 普通现货证券；
-- LIMIT 买卖；
-- 低频 / 分钟级策略；
-- 单 OMS writer；
-- durable reconciliation；
-- 明确的人为授权边界。
+精确部署矩阵和当前 checkpoint 见 [PROJECT_STATUS.md](PROJECT_STATUS.md)。
 
-## 2. 当前 Gate 状态
-
-| 阶段 | 状态 |
-| --- | --- |
-| P0 / G0 领域模型 | **PASS** |
-| P1 Offline OMS | **PASS** |
-| P2 Risk Engine | **PASS** |
-| P3 Big QMT read-only | **PASS** |
-| P4 SHADOW execution bridge | **DEPLOYMENT GATE PASS** |
-| P5 国金模拟账户 submit/cancel/fill 校准 | **BOUNDED CALIBRATION PASS** |
-| Production live trading | **NO** |
-| 国金 LIVE_CANARY | **`p6-guojin-live-canary-7`：仅授权单一案例 `00700.HGT BUY 100 @ 1.00 HKD`，submit/cancel fuse = 1/1；GC001 历史案例不再授权，511880 仅为只读诊断候选，待有效交易窗口** |
-
-`galaxy` 与通用 production artifact 仍然在源代码级禁用 broker mutation；`guojin` 仅保留 P6 独立 Gate 下的 fingerprint-pinned LIVE_CANARY surface，不代表通用实盘授权。
-
-`guojin_sim` 是 fingerprint-pinned 的模拟账户校准 artifact，只用于 simulation calibration，不能被解释成生产实盘授权。
-
-## 3. 核心架构：Execution Core + Production Runtime
+## 3. 两层架构
 
 ```text
-Production Runtime
-Risk / MarketData / Health / Operations / Telemetry
-Strategy heartbeat / Calendar / Deployment / Backup
-                    |
-                    v
-Execution Core
-OrderIntent / OMS / durable dispatch / recovery
-                    |
-                    v
-QMT Bridge / Broker
+Production Runtime (可选扩展)
+Risk / Market Data / Operations / Strategy / Service
+                         |
+                         v
+Execution Core v1 (冻结)
+OrderIntent / OMS / identity / evidence / recovery / fencing
+                         |
+                         v
+QMT adapter / file spool / Broker
 ```
 
-Execution Core 可以独立运行；Production Runtime 是可选上层。
+Core 的冻结边界是 `core/`、`domain/`、`ports/`、指定 OMS 文件和
+`oms/core_migrations/0001_initial.sql`。QMT、driver、Risk 和 Runtime 都是 Extension。
+Core 不能反向 import Extension；CI 永久检查此规则。
 
-Core roots（`core/domain/drivers/oms/qmt`）由 CI 永久禁止反向 import Runtime roots（`risk/market_data/operations/service/strategy_api/runtime/web`）。
+## 4. OMS 与 BrokerEvidence
 
-详细设计见 [`CORE_RUNTIME_BOUNDARY_ZH.md`](CORE_RUNTIME_BOUNDARY_ZH.md)。
+OMS 负责 `client_order_id`、persist-before-side-effect、submit/cancel reservation、订单
+状态机、UNKNOWN/reconciliation、重启恢复、duplicate/conflict、single-writer 与 fencing。
 
-## 4. OMS 是什么
-
-OMS = Order Management System。
-
-它回答的是：
-
-> 一张订单从创建、风险通过、提交、券商确认、部分成交、成交、撤单、异常到恢复，整个生命周期怎样可靠管理？
-
-OMS 负责：
-
-- `client_order_id` 唯一性；
-- durable order state；
-- persist-before-side-effect；
-- submit/cancel reservation；
-- broker order ID；
-- UNKNOWN / RECONCILING；
-- callback/query reconciliation；
-- crash/restart recovery；
-- duplicate evidence 去重；
-- audit trail；
-- single-writer/fencing。
-
-策略不能直接调用 broker/QMT mutation API。
-
-## 5. Risk Engine 是什么
-
-Risk Engine 现在明确属于 **Production Runtime**，不属于最小 Execution Core。
-
-Risk Engine 回答的是：
-
-> 这张 OrderIntent 当前是否允许进入执行路径？
-
-它位于策略和 OMS broker side-effect 之间，采用 fail-closed 规则。
-
-当前风险模型覆盖 Global → Account → Strategy → Security/Order 的确定性优先级，并且 P2 authority policy 只允许 `SIMULATION` eligibility；配置本身不能把系统切到生产 live。
-
-## 6. Execution Bridge 做什么
-
-Execution Bridge 是 QMT 侧薄适配器，职责限定为：
-
-- ACCOUNT / POSITION / ORDER / DEAL query；
-- callback；
-- snapshot；
-- Host command consumption；
-- broker token identity；
-- 在被明确授权的 simulation artifact 中调用受限 submit/cancel；
-- durable local spool。
-
-它不承载：
-
-- 策略；
-- Risk Engine；
-- OMS；
-- ML；
-- 数据分析；
-- 复杂数据库；
-- 自动扩大交易权限。
-
-## 7. Host 与 Bridge 的标准契约
-
-Host↔Bridge 已正式定义为：
-
-**BigQMT Bridge API v1**
-
-中文规范：
-
-- [`BRIDGE_API_V1_ZH.md`](BRIDGE_API_V1_ZH.md)
-
-API v1 包含：
-
-- instance discovery / handshake；
-- Command Protocol 0.1；
-- Event Protocol 0.2；
-- File Transport 1；
-- JSON Schema；
-- TLA+/TLC safety model；
-- Python conformance / static audit。
-
-关键原则：
+控制面成功不等于券商事实：
 
 ```text
-SHADOW_ACCEPTED != broker ACK
+SHADOW_ACCEPTED / command_result / submit return / cancel return
+    != broker ACK
 ```
 
-`command_result` 是 control-plane 信息，不能直接把 OMS 推成 `ACKNOWLEDGED/FILLED/CANCELLED`。
+ORDER/DEAL/callback/query 原始数据必须先经过已校准的 broker-specific mapper，输出
+`BrokerEvidenceV1`，才能推进 OMS。未知 raw status、身份或数量冲突进入 quarantine 或
+`MANUAL_REVIEW`，不能猜测或盲重试。
 
-## 8. 当前已实机验证
+## 5. Runtime 与 Risk
 
-国金 Big QMT：
+Risk 属于 Production Runtime，不属于冻结 Core。Runtime 在 broker side effect 前做
+fail-closed 风险判断，然后把已授权 `OrderIntent` 交给 Core。Core API 不依赖行情、策略、
+健康检查或 Risk object；配置也不能自动取得生产权限。
 
-- CPython 3.6.8；
-- QMT 2.1.19.0；
-- read-only query/callback；
-- 1 秒 command timer；
-- 300 秒 active reconcile；
-- Host restart replay；
-- durable spool；
-- simulation submit；
-- simulation cancel；
-- resting order；
-- full fill；
-- ORDER/DEAL token preservation；
-- Host outage recovery；
-- duplicate/conflict/stale-session/wrong-account/expiry 等 fail-closed 检查。
+## 6. Host 与 QMT Bridge
 
-Galaxy Big QMT：
+Bridge API v1 包含实例发现、Command Protocol 0.1、Event Protocol 0.2、File Transport 1、
+JSON Schema 和形式验证。每个 QMT 实例写入独立的
+`D:\BigQMTData\spool\<instance_id>`，由 `instance.json` 描述 build、mode、session、账户
+类型和 fingerprint。Host 可以发现候选，但必须逐项校验；目录名或 broker 名不产生授权。
 
-- QMT 2.1.26.1；
-- runtime account-type discovery；
-- STOCK / HUGANGTONG / SHENGANGTONG；
-- linked-account callback suppression；
-- instance isolation。
+QMT Bridge 只做 query/callback、snapshot、command consumption、broker token、受 Gate 限制
+的 mutation 和 durable spool。它不承载策略、Risk、OMS、ML 或通用远程调用。
 
-国金模拟账户新增了版本化 broker evidence mapper：
+## 7. 已验证的券商能力
 
-- profile：`qmt-guojin-sim-20260917-v1`；
-- 仅接受 `guojin_sim` 与固定账户指纹；
-- durable OMS 必须先登记 `client_order_id + symbol + quantity`；
-- exact `m_strRemark` 才能还原订单身份；
-- 已校准 status `50/54/56/57`，并支持 DEAL 累计成交与 active-query 证据；
-- 初始无 broker order ID 的 status `50`、未知状态、缺 token、身份/数量冲突全部检疫。
+国金 Big QMT 已验证 read-only query/callback、定时 reconcile、durable spool、Host
+restart/replay、模拟 submit/cancel/fill、ORDER/DEAL token、HGT/SGT route、重复/冲突/
+过期/错误账户/陈旧 session fail-close。国金模拟 mapper profile 为
+`qmt-guojin-sim-20260917-v1`。
 
-该 mapper 不适用于 `guojin` 实盘，也不会通过自动发现启用。`galaxy` 仍无 broker
-status mapper。
+银河 Big QMT 已验证 STOCK/HUGANGTONG/SHENGANGTONG 动态发现、linked-account callback
+抑制和实例隔离；尚无已授权 mapper 或 mutation surface。
 
-国金模拟 V5 build `p5-simulation-calibration-8` 已解除原先的 BUY-only / 必须 100
-份限制：现在要求显式 `BUY` 或 `SELL`，数量为 `1..100`，证券代码为六位
-`.SH/.SZ` 或五位 `.HK/.HGT/.SGT`。国金港股通复用清单固定的 `STOCK` 模拟账号，交易市场
-不再被错误建模为第二个账户。BUY/SELL 分别映射 passorder opType `23/24`。账户指纹、当前
-session、simulation-only、token、价格、次数和撤单身份 Gate 均保留；启动时会发布
-三种港股路由的证券主数据和精确 tick 证据。build-7 先通过大QMT板块接口发现，
-空或不完整时再从代表性港股清单补足，始终最多 6 个底层港股、20 条诊断 route；
-发现及回退结果不自动授权交易，生产文件不变。
+## 8. 行情边界
 
-build-7 已在国金模拟端实机启动：板块列表为空时按设计启用代表性清单回退，六只
-港股的 `.HK/.HGT/.SGT` 以及两只沪市证券共 20 条 route，证券主数据与精确行情
-回调均为 `20/20`。本次仅验证只读发现，没有发布下单或撤单。
+`market_data/` 已有 Host 侧模型、service 与 QMT adapter 测试，但 Execution Bridge 不会变成
+XtData 克隆。若部署独立 QMT 行情策略，必须使用独立权限和健康模型，不能继承 execution
+mutation authority。历史数据继续由专用数据层承担。
 
-## 9. 为什么 simulation 已经能下单，但 production 仍不能下单
+## 9. 文档与历史
 
-这是刻意设计的权限隔离。
+[文档索引](README.md) 将“当前权威说明”和“历史 Gate 证据”分开。日期化报告里的旧 build、
+候选状态和“下一阶段”是当时事实，为审计保留，不应据此操作当前系统。
 
-```text
-guojin_sim
-  execution_mode = SIMULATION_CALIBRATION
-  simulation_only = true
-  fingerprint pinned
-  finite mutation fuse
-```
+换机按[开发环境迁移手册](DEVELOPMENT_ENVIRONMENT_MIGRATION_ZH.md)执行；workflow 的唯一
+bootstrap 是 `workflow/control/WORKFLOW_STATE.yaml`。
 
-而通用 / Galaxy production 路径仍为：
+## 10. 后续方向
 
-```text
-galaxy / generic
-  execution_mode = SHADOW
-  trading_enabled = false
-  live_submit = false
-  live_cancel = false
-```
-
-国金生产实例只有 P6 明确固定的 LIVE_CANARY 例外：账户指纹、session、symbol、side、quantity、price 和每 session submit/cancel 次数均被限制（build-7 起每个 build/session 仅一次 submit、一次 cancel），instrument preflight 继续 fail closed。当前 build 唯一授权案例是 `00700.HGT BUY 100 @ 1.00 HKD`；GC001 校准已完成且不再授权，`511880.SH` 只是只读诊断候选。这不能解释为 general LIVE。
-
-所以“技术上已验证下单链路”和“生产账户获得实盘权限”是两件完全不同的事。
-
-## 10. 为什么重复撤单要特别处理
-
-盘后校准已经观察到：
-
-- QMT `cancel()` 可以返回成功；
-- broker/query surface 可能暂时仍显示原状态；
-- 此时再次 cancel 可能变成 broker-side repeated-cancel。
-
-因此 simulation publisher 已改成：
-
-> 对同一 account + client order ID + broker order ID，只允许发布一次 cancel command。
-
-query lag 不能触发自动重撤。必须等 broker evidence 收敛或人工处理。
-
-## 11. 行情数据架构方向
-
-执行和行情不应塞进同一个 Bridge。
-
-规划结构：
-
-```text
-                    Host
-             ┌───────┴────────┐
-             │                │
-     MarketDataService      OMS / Risk
-             │                │
-   ┌─────────┴───────┐        │
-   │                 │        │
-QMT Market        mktdata   Execution
-Data Bridge       history    Bridge
-   │                          │
-Big QMT Quote                Big QMT Broker
-```
-
-### Execution Bridge
-
-继续保持：
-
-- 小；
-- 可审计；
-- durable；
-- fail-closed；
-- 专门处理账户/订单/成交/submit/cancel。
-
-### Market Data Bridge（规划，尚未实现）
-
-未来单独 QMT 策略负责：
-
-- latest quote；
-- tick subscription；
-- 1m/5m bar；
-- instrument/reference data；
-- feed/session/latency health。
-
-它可以复用 Bridge API v1 的 versioning/discovery/envelope 原则，但不会继承 execution mutation authority。
-
-历史数据优先继续由 `mktdata` / 本地数据层承担，不把 Execution Bridge 做成 XtData 克隆。
-
-## 12. 下一阶段
-
-当前最重要的后续工作：
-
-1. Broker ORDER/DEAL/query → 标准 OMS evidence mapper；
-2. replay-safe OMS evidence convergence；
-3. partial fill / cancel race / reject / disconnect / restart soak；
-4. 保持 generic / `galaxy` production artifact mutation-free；`guojin` 仅保留 P6 固定例外；
-5. 国金 LIVE_CANARY 只按 P6 独立 Gate 部署；银河仍禁止 mutation；
-6. Market Data Bridge 另行立项，不与 execution safety surface 混合。
-
-详细状态见：
-
-- [`PROJECT_STATUS.md`](PROJECT_STATUS.md)
-- [`FORMAL_VERIFICATION.md`](FORMAL_VERIFICATION.md)
-- [`P5_GATE_RESULT_20260916.md`](P5_GATE_RESULT_20260916.md)
+后续工作默认进入 Extension：新券商 mapper、行情源、Risk/Strategy/Operations/Web。
+任何扩大 `guojin`、`galaxy` 或 generic mutation 权限的变更，都必须创建新的明确 Gate，
+不能借由换机、配置、实例发现或 Core patch 获得。

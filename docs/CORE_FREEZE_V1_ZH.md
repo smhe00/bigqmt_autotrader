@@ -1,6 +1,6 @@
 # Execution Core v1 Freeze Plan
 
-更新：2026-09-24
+更新：2026-09-25
 
 ## 1. 目标
 
@@ -25,7 +25,7 @@ Freeze 的目标不是禁止一切修改，而是冻结以下可观察契约：
 - 新 broker、QMT route、行情、Risk、Strategy、Operations、Web 等默认进入 Extension；
 - 改变上述契约需要 Core major version review。
 
-## 2. Frozen Core candidate
+## 2. Frozen Core v1
 
 Core v1 冻结边界由以下部分组成：
 

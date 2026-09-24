@@ -1,70 +1,78 @@
-# Security and Authority Boundary (P0)
+# Security and Authority Boundary
 
+Updated: 2026-09-25
 Status: **normative for all phases**
 
 ## Authority separation
 
-### Strategy Service
+### Strategy
 
-May:
+May read normalized state and emit `OrderIntent`. It may not receive broker credentials,
+call QMT submit/cancel, modify runtime authority or bypass Risk/OMS.
 
-- read normalized market/portfolio state;
-- emit `OrderIntent`.
+### Production Runtime
 
-May not:
+Owns strategy admission, production Risk, health, mode and operational policy. It must
+fail closed before handing an authorized intent to Core. Configuration cannot invent broker
+authority not present in the selected reviewed deployment artifact.
 
-- receive a QMT credential/token;
-- call QMT order/cancel APIs;
-- change live runtime mode.
+### Execution Core / OMS
 
-### Execution / OMS Service
+Owns durable identity, persist-before-side-effect, single writer/fencing, submit/cancel
+reservation, broker evidence, reconciliation, UNKNOWN and restart recovery. Only one valid
+leader may represent an account. Control-plane success cannot produce broker lifecycle state.
 
-Future unique external holder of trading authority. It owns:
+### QMT Bridge
 
-- durable order state;
-- pre-trade risk;
-- reconciliation;
-- leases and runtime mode;
-- audit trail.
+Runs in constrained Big QMT Python and exposes a fixed file-spool protocol, not generic RPC.
+It may perform broker mutation only when the exact deployment build, instance, execution
+mode, account fingerprint, current session and command all satisfy a reviewed Gate.
 
-Only one OMS leader may represent an account.
+Permanently forbidden:
 
-### QMT-side bridge
+- arbitrary method dispatch or external `eval`/`exec`;
+- externally supplied raw `opType`, `prType` or `quickTrade`;
+- transfer/account-configuration APIs;
+- cross-instance spool reuse;
+- identity/session bypass;
+- automatic permission expansion from discovery, broker name or account type;
+- blind retry after an unknown submit/cancel outcome.
 
-Runs in the constrained Big QMT Python environment. It will eventually expose a fixed whitelist, not a generic RPC/eval surface.
+### Operations
 
-Forbidden permanently:
+May request audited mode/control actions through Runtime/OMS. It may not call QMT directly or
+rewrite durable evidence to force a terminal state.
 
-- arbitrary method dispatch;
-- `eval` / `exec` from external input;
-- raw externally supplied `opType/prType/quickTrade`;
-- transfer/account-configuration methods;
-- hidden bypass around OMS/risk.
+## Transport and instance boundary
 
-P0 bridge capability is intentionally limited to `ping` and `capabilities`; submit/cancel entry points throw `E_TRADING_DISABLED`.
+The calibrated transport is a durable local file spool:
 
-### Operations Console
+```text
+D:\BigQMTData\spool\<instance_id>
+```
 
-May request mode changes, stop-new-order, audited cancel and later manual reconciliation actions. It may not call QMT directly.
+Each instance owns its manifest, session, sequence, event/command directories, archive and
+checkpoint. Host discovery treats directory names only as candidates and then validates the
+manifest/build/mode/account/session/fingerprint. Malformed, mismatched, uncommitted or
+integrity-invalid data fails closed.
 
-## Network boundary
+## Current mutation boundary
 
-The first implementation target is localhost-only (`127.0.0.1`) framed JSON. No Redis/ZMQ/network-wide listener is required for v1.
+- generic and `galaxy`: SHADOW, zero submit/cancel call surface;
+- `guojin_sim`: bounded `simulation_only=true` calibration for one pinned simulated account;
+- `guojin`: only the reviewed `p6-guojin-live-canary-7` single case and fuse, not general LIVE.
 
-Future messages must include protocol version, request ID, OMS instance ID, account fingerprint, method, deadline and authentication material; trading requests additionally carry `client_order_id`.
+No migration, environment variable, file copy, instance selection or account discovery may
+broaden these boundaries.
 
-## Secrets
+## Secrets and durable data
 
-Never commit:
+Never commit account numbers/raw identities, passwords, tokens, QMT userdata, broker config,
+production logs, databases or spool contents. `.gitignore` is only a baseline, not a secret
+manager. Backups must preserve database/WAL consistency and account/instance isolation.
 
-- account number or raw identity;
-- password, token or auth material;
-- QMT userdata path;
-- local broker configuration;
-- live logs/databases containing account data.
+## Restart default
 
-The repository `.gitignore` contains baseline exclusions but is not considered a secret-management system.
-
-## Runtime default
-
-Every restart defaults to non-trading (`DISABLED`/`OBSERVE`) until reconciliation and explicit later-phase unlock conditions succeed.
+Restart requires identity/session validation and reconciliation before new work. A new QMT
+session invalidates stale commands. Ambiguous mutation remains UNKNOWN/RECONCILING or
+MANUAL_REVIEW; restart is not permission to retry.

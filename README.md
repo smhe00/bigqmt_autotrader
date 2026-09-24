@@ -1,227 +1,115 @@
 # bigqmt_autotrader
 
-个人生产级 Big QMT 自动交易执行平台。项目把 **Big QMT 定位为券商执行终端**，策略、OMS、风险控制、数据库和恢复逻辑运行在外部 Host。
+面向个人账户的生产级 Big QMT 执行平台。Big QMT 只承担券商终端和薄 Bridge；订单身份、
+OMS、恢复、风险、审计与运行治理位于外部 Host。
 
-> 中文总览：[`docs/PROJECT_OVERVIEW_ZH.md`](docs/PROJECT_OVERVIEW_ZH.md)  
-> Host↔Bridge 正式契约：[`docs/BRIDGE_API_V1_ZH.md`](docs/BRIDGE_API_V1_ZH.md)  
-> Broker→OMS 证据正式契约：[`docs/BROKER_EVIDENCE_CONTRACT_V1_ZH.md`](docs/BROKER_EVIDENCE_CONTRACT_V1_ZH.md)
+> [文档索引](docs/README.md) · [中文总览](docs/PROJECT_OVERVIEW_ZH.md) ·
+> [项目状态](docs/PROJECT_STATUS.md) · [换开发环境](docs/DEVELOPMENT_ENVIRONMENT_MIGRATION_ZH.md)
 
-## 当前安全状态
+## 当前结论
 
-| 项目 | 状态 |
+| 能力 | 当前状态 |
 | --- | --- |
-| P0 / G0 订单领域模型 | **PASS** |
-| P1 Offline OMS | **PASS** |
-| P2 Deterministic Risk Engine | **PASS** |
-| P3 Big QMT read-only | **PASS** |
-| P4 SHADOW execution bridge | **DEPLOYMENT GATE PASS** |
-| P5 国金模拟账户 submit/cancel/fill 校准 | **BOUNDED CALIBRATION PASS** |
-| BigQMT Bridge API v1 | **正式契约 + 永久 CI Gate** |
-| Broker Evidence Contract v1 | **协议封版 + 永久形式验证 Gate** |
-| Guojin simulation raw status mapper | **PASS（仅 `guojin_sim`）** |
-| Production Guojin / Galaxy mapper | **尚未实现/未授权** |
-| Production live trading | **NO** |
-| 国金 LIVE_CANARY | **仅单一 fingerprint-pinned 案例 `00700.HGT BUY 100 @ 1.00`；p6-guojin-live-canary-7，submit/cancel fuse = 1/1，仍非通用 LIVE** |
+| Execution Core | **`core-v1.0.0` FROZEN**，Public API/schema/formal contract 有永久 CI Gate |
+| P0/P1/P2/P3 | **PASS** |
+| P4 SHADOW Bridge | **DEPLOYMENT GATE PASS** |
+| P5 国金模拟 submit/cancel/fill | **BOUNDED CALIBRATION PASS** |
+| P6 Host↔OMS/runtime/recovery | **已完成 T001–T015 的最终 PASS 链** |
+| BigQMT Bridge API v1 | **正式契约 + Schema/形式验证 Gate** |
+| Broker Evidence v1 | **正式契约 + Runtime conformance Gate** |
+| 国金模拟 mapper | **PASS，仅 `guojin_sim`** |
+| 通用生产实盘 | **NO** |
 
-当前部署基线：
+部署矩阵：
 
 ```text
-generic / galaxy = p4-shadow-command-spool-5       SHADOW, mutation-free
-guojin_sim      = p5-simulation-calibration-8      simulation-only calibration
-guojin          = p6-guojin-live-canary-7          one submit case only: 00700.HGT BUY 100 @ 1.00 HKD; submit/cancel fuse = 1/1
+galaxy     p4-shadow-command-spool-5    SHADOW; submit/cancel disabled
+guojin_sim p5-simulation-calibration-8  simulation_only=true; bounded calibration
+guojin     p6-guojin-live-canary-7       one fingerprint-pinned LIVE_CANARY case only
 ```
 
-静态审计保证 generic / `galaxy` 没有 broker mutation call surface；`guojin` 只允许
-P6 独立 Gate 固定的 LIVE_CANARY 单一案例调用面。GC001 是已完成的历史校准案例，不再具有 submit 授权；
-`511880.SH` 仅保留只读诊断身份，须经独立 Gate/build 才能重新获得 mutation 授权。任何扩权都必须经过新的明确 Gate。
+`galaxy` 和 generic 文件保持零 broker mutation surface。`guojin_sim` 的调用面只能作用于
+固定模拟账户。`guojin` 不是通用 LIVE：它仅保留独立 Gate 固定的
+`00700.HGT BUY 100 @ 1.00 HKD` 单案例、每 session submit/cancel fuse 1/1；GC001 与
+`511880.SH` 不具有当前 mutation 授权。
 
-`guojin_sim` 是 fingerprint-pinned 的 simulation calibration artifact。它能调用受限模拟账户 submit/cancel API，但**不构成生产实盘授权**。
-
-## 架构：Execution Core + Production Runtime
-
-系统现在明确拆成两层：
+## 架构
 
 ```text
-Production Runtime                         optional
-Risk / MarketData / Health / Operations
-Telemetry / Strategy / Calendar / Backup
-                  |
-                  v
-Execution Core                             minimal
-OrderIntent / OMS / durable dispatch
-exactly-once / evidence / recovery
-                  |
-                  v
-QMT Bridge / Broker
+Strategy / Risk / Operations / Market Data       Production Runtime (extension)
+                    |
+                    v
+ExecutionCore + OMS + durable recovery           Frozen Core v1
+                    |
+                    v
+QMT adapter + file spool + broker terminal       Extension / external system
 ```
 
-只需要可靠下单时，可直接使用 `bigqmt_autotrader.core`，不需要 Risk、行情、告警或策略运行时。
+冻结 Core 只包含 `core/`、`domain/`、`ports/`、指定的 broker-neutral OMS 文件和独立
+Core migration。QMT、driver、Risk、MarketData、Operations、Service 与 Runtime 均是
+adapter/extension，不属于 Core ABI。详细边界见
+[Core v1 Freeze](docs/CORE_FREEZE_V1_ZH.md) 与
+[Core / Runtime Boundary](docs/CORE_RUNTIME_BOUNDARY_ZH.md)。
 
-完整生产平台使用 `bigqmt_autotrader.runtime`，并在 Core 上层组合 Risk 与运维能力。
+最小 API：
 
-永久规则：
+```python
+from bigqmt_autotrader.core import ExecutionCore, OrderIntent
 
-```text
-Production Runtime -> Execution Core
-Execution Core -X-> Production Runtime
+core = ExecutionCore.open(database_path, driver)
+core.recover()
+result = core.submit(intent)
+result = core.cancel(account_fingerprint, client_order_id)
+core.close()
 ```
 
-详细边界见 [`docs/CORE_RUNTIME_BOUNDARY_ZH.md`](docs/CORE_RUNTIME_BOUNDARY_ZH.md)。
+## 安全不变量
 
-### OMS
+- 策略不能直接调用 QMT mutation API。
+- `SHADOW_ACCEPTED`、submit/cancel 返回值和 `command_result` 都不是 broker ACK。
+- 只有通过校准 mapper 的 ORDER/DEAL/query `BrokerEvidenceV1` 可以推进 OMS 生命周期。
+- identity、session、sequence、quantity 或 terminal facts 冲突时 fail closed；未知结果进入
+  `UNKNOWN/RECONCILING/MANUAL_REVIEW`，禁止盲重试。
+- persist-before-side-effect、single writer/fencing、durable identity 与重启 replay 是 Core 契约。
+- instance discovery 只发现候选，不产生交易授权。
 
-OMS（Order Management System）负责订单的 durable identity、生命周期、submit/cancel reservation、UNKNOWN/reconciliation、重启恢复、broker evidence 去重和审计。
+正式规范：
 
-### Risk Engine
+- [BigQMT Bridge API v1](docs/BRIDGE_API_V1_ZH.md)
+- [Broker Evidence Contract v1](docs/BROKER_EVIDENCE_CONTRACT_V1_ZH.md)
+- [Security Boundary](docs/SECURITY_BOUNDARY.md)
 
-Risk Engine 属于 **Production Runtime**，不再内嵌于 Core OMS。
+## 已验证能力
 
-Production Runtime 在 broker side effect 前执行 fail-closed 风险判断，再把已授权的 intent 交给 Execution Core。Core-only 使用不需要 Risk Engine。
+- 国金：read-only query/callback、1 秒 command timer、300 秒 reconcile、durable spool、
+  Host restart/replay、模拟 submit/cancel、resting/full fill、HGT/SGT 路由、token 保留、
+  duplicate/conflict/stale-session/wrong-account/expiry fail-close。
+- 银河：STOCK/HUGANGTONG/SHENGANGTONG 运行时发现、linked-account callback suppression、
+  terminal-instance spool 隔离；仍无 mutation 授权。
+- Host：durable dispatch、leader lease heartbeat、session rollover、archive integrity/readiness、
+  Windows backup fsync、BrokerEvidence reconciliation 与语义去重。
 
-## BigQMT Bridge API v1
+P6 的逐项任务、报告和审查保存在 `workflow/`；日期化 Gate 文档保存在 `docs/`，它们是
+历史审计证据，不等于当前授权。
 
-Host↔Bridge 正式分成三层：
+## 开发和验证
 
-1. **Wire Contract**：JSON Schema；
-2. **Semantic Contract**：session / sequence / duplicate / gap / UNKNOWN / resync / evidence boundary；
-3. **Safety Contract**：TLA+/TLC + Python conformance + static audit。
+Host 要求 Python 3.11+，CI 使用 Python 3.12；QMT-side 文件保持 Python 3.6 兼容。
 
-当前 umbrella API 保留已经实机校准的 wire version：
-
-```text
-Discovery Contract 1
-Command Protocol   0.1
-Event Protocol     0.2
-File Transport     1
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[test]"
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe tools\verify_core_v1_release.py
+.\.venv\Scripts\python.exe tools\verify_workflow_contract.py
 ```
 
-关键不变量：
+完整迁移与验证命令见[开发环境迁移手册](docs/DEVELOPMENT_ENVIRONMENT_MIGRATION_ZH.md)。
 
-```text
-SHADOW_ACCEPTED != broker ACK
-```
+## Workflow
 
-`command_result` 是 control-plane 结果，不能单独产生 `ACKNOWLEDGED / FILLED / CANCELLED` 等 OMS broker lifecycle 状态。
+唯一 bootstrap 入口是 `workflow/control/WORKFLOW_STATE.yaml`。Agent/Architect 必须按其中
+`bootstrap_*`、`state`、`owner`、`authorized_next` 和 active handoff 执行，不能用日期、
+最新文件或 git log 猜任务。协议见 [workflow/README.md](workflow/README.md)。
 
-详细规范见 [`docs/BRIDGE_API_V1_ZH.md`](docs/BRIDGE_API_V1_ZH.md)。
-
-## Broker Evidence Contract v1
-
-Broker raw ORDER/DEAL/query 不允许直接写 OMS state，而必须先经过已校准的 broker-specific mapper，输出 broker-neutral `BrokerEvidence v1`。
-
-核心规则：
-
-```text
-command_result / submit return / cancel return
-    !=
-BrokerEvidence
-```
-
-以及：
-
-```text
-identity mismatch / unknown raw status
-    -> quarantine
-    -> NO OMS MUTATION
-```
-
-标准 evidence 只包括：
-
-- `ORDER_ACCEPTED -> ACKNOWLEDGED`
-- `PARTIAL_FILL -> PARTIALLY_FILLED`
-- `FULL_FILL -> FILLED`
-- `ORDER_CANCELLED -> CANCELLED`
-- `ORDER_REJECTED -> REJECTED`
-
-聚合采用单调事实，不使用“最新时间戳覆盖旧事实”。不同 terminal facts 冲突时进入 `MANUAL_REVIEW`，而不是猜测优先级。
-
-详细规范见 [`docs/BROKER_EVIDENCE_CONTRACT_V1_ZH.md`](docs/BROKER_EVIDENCE_CONTRACT_V1_ZH.md)。
-
-## 已验证的 Big QMT 能力
-
-国金 Big QMT 已完成：
-
-- ACCOUNT / POSITION / ORDER / DEAL query + callback；
-- 1 秒 command timer；
-- 300 秒主动 reconcile；
-- durable file spool；
-- Host restart replay；
-- simulation submit；
-- simulation cancel；
-- resting order / full fill；
-- ORDER/DEAL broker token 保留；
-- duplicate / conflict / expiry / wrong-account / stale-session fail-close；
-- 重复撤单发布抑制；
-- Host 离线期间 QMT 事件持久化及重启恢复。
-
-Galaxy Big QMT 已完成：
-
-- STOCK / HUGANGTONG / SHENGANGTONG runtime discovery；
-- linked-account callback suppression；
-- terminal-instance spool 隔离。
-
-## 行情数据方向
-
-Execution Bridge 不会扩成 XtData 克隆。
-
-未来计划独立建设 **QMT Market Data Bridge**，专门处理 quote/tick/bar/reference data；Host 通过统一 `MarketDataService` 消费。Execution Bridge 继续保持小、可审计、只处理账户和交易执行。
-
-这部分目前是架构规划，**尚未实现**。
-
-## 形式验证
-
-永久 Gate 当前包括：
-
-- `OrderFSM`
-- `SubmitProtocol`
-- `LeaderLease`
-- `EvidenceReplay`
-- `PreSubmitRecovery`
-- `RiskPrecedence`
-- `BridgeCommandProtocol`
-- `BridgeEventProtocol`
-- `BrokerEvidenceBoundary`
-- `BrokerEvidenceContract`
-
-CI 同时执行：
-
-- Python tests；
-- FSM / Bridge protocol / Broker Evidence finite conformance；
-- JSON Schema contract drift checks；
-- broker side-effect static audit；
-- standalone QMT deployment consistency check；
-- 全部 TLC model checking。
-
-详细说明见 [`docs/FORMAL_VERIFICATION.md`](docs/FORMAL_VERIFICATION.md)。
-
-## 本地开发
-
-```bash
-python -m pip install -e ".[test]"
-pytest -q
-python tools/verify_fsm_exhaustive.py
-python tools/verify_bridge_protocol_exhaustive.py
-python tools/verify_bridge_schema_contract.py
-python tools/verify_broker_evidence_contract.py
-python tools/verify_core_dependency_boundary.py
-```
-
-项目状态见 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)。
-
-**任何阶段都不能通过配置直接跳到生产实盘。**
-
-
-## Agent workflow
-
-**Single bootstrap entrypoint:** `workflow/control/WORKFLOW_STATE.yaml`.
-
-任何 Agent/Architect 必须先读取该文件，并按其中 `bootstrap_*` 字段加载协议、长期项目上下文和当前 handoff。不要通过“最新文件”、日期或 git log 猜当前任务。
-
-Architect 任务、Agent 执行报告和 Architect 审计不放入 `docs/`。统一使用：
-
-- `workflow/tasks/`
-- `workflow/reports/`
-- `workflow/reviews/`
-- `workflow/control/WORKFLOW_STATE.yaml`
-
-命名、匹配和排序规则见 [`workflow/README.md`](workflow/README.md)。
+任何配置、换机或自动发现都不能直接把系统切到通用生产实盘。

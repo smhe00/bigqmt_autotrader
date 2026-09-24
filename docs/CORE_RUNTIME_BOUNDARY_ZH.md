@@ -1,172 +1,96 @@
 # Execution Core / Production Runtime 边界
 
-更新：2026-09-23
+更新：2026-09-25
 
-## 1. 两层产品
+## 1. 结论
 
-项目现在明确拆成两个层级：
-
-```text
-Production Runtime
-  Risk / MarketData / Health / Operations / Telemetry
-  Strategy heartbeat / Calendar / Deployment / Backup
-                 |
-                 | one-way dependency
-                 v
-Execution Core
-  OrderIntent / OMS / durable dispatch
-  broker evidence / exactly-once / recovery
-                 |
-                 v
-QMT Bridge / Broker
-```
-
-Execution Core 面向只需要可靠下单、撤单、恢复和订单生命周期管理的使用者；Production Runtime 是可选增强层。
-
-设计目标类似 MiniQMT + QMT：Core 小、稳定、低依赖；Runtime 在其上增加生产级治理。
-
-## 2. 永久依赖规则
-
-依赖只能向下：
+Execution Core v1 已以 `core-v1.0.0` 冻结。Core 只负责 broker-neutral 的可靠执行；
+QMT、Risk、行情和运维都是 adapter/extension。机器权威清单是
+`contracts/core/v1/inventory.json`，本文件只解释它。
 
 ```text
-Production Runtime -> Execution Core -> QMT / Broker
-Execution Core -X-> Production Runtime
+Production Runtime / adapters
+Risk, MarketData, QMT, Operations, Service, Strategy, Web
+                         |
+                         v
+Frozen Execution Core v1
+OrderIntent, OMS, evidence, exactly-once, recovery, fencing
+                         |
+                         v
+ExecutionDriver port -> broker adapter
 ```
 
-Core roots：
+## 2. Frozen Core v1
+
+目录：
 
 ```text
-core/
-domain/
-drivers/
-oms/
-qmt/
+src/bigqmt_autotrader/core/
+src/bigqmt_autotrader/domain/
+src/bigqmt_autotrader/ports/
 ```
 
-禁止 import Runtime roots：
+加上 `oms/` 内冻结清单指定的 authorization、BrokerEvidence、db、evidence、leader、
+repository、service，以及 `oms/core_migrations/0001_initial.sql`。
+
+Public API 从 `bigqmt_autotrader.core` 导出 `ExecutionCore`、`ExecutionDriver`、
+`OrderIntent`、`OrderStatus`、`Side`、unknown outcome types 和 Core schema helper。
+上层不应依赖 `oms.repository` 等内部模块。
+
+## 3. Adapter / Extension
+
+下列内容不属于 Core ABI：
 
 ```text
-risk/
-market_data/
-operations/
-service/
-strategy_api/
-runtime/
-web/
+qmt/              QMT protocol, discovery, spool and OMS glue
+drivers/          concrete reference/adapters
+risk/             production risk policy
+market_data/      market-data models and services
+operations/       health, control, backup, telemetry
+service/          composition and lifecycle
+strategy_api/     strategy-facing runtime
+runtime/          production assembly
+web/              presentation/API extension
 ```
 
-CI 永久执行：
+依赖方向只能是 Extension → Core。Core import QMT/driver/Runtime 会被
+`verify_core_dependency_boundary.py` 拒绝。
 
-```bash
-python tools/verify_core_dependency_boundary.py
+## 4. 数据库边界
+
+Core v1 使用独立 `core_schema_meta` 和 Core schema version 1。新 Core-only 数据库不创建
+QMT 表。QMT extension 使用独立 `qmt_schema_meta` 与 `qmt/migrations/0001_initial.sql`。
+
+旧的 `oms/migrations/0001..0011` 是 historical combined DB 兼容线。既有 combined schema
+7–11 可在验证 Core shape 后被 Core v1 采用；不会 downgrade，也不会删除 extension 表。
+新部署应优先使用独立 Core/QMT 数据库边界。
+
+## 5. Risk ownership
+
+Core 接收已经被调用方授权的 `OrderIntent`，负责执行正确性，不负责 Production Risk
+policy。Production Runtime 必须在 side effect 前 fail closed 地评估 Risk，再调用 Core。
+Core schema 中为兼容历史保留的 risk 命名不代表 Runtime Risk 被重新嵌入 Core。
+
+## 6. QMT ownership
+
+Core 依赖 broker-neutral `ExecutionDriver` port，不 import QMT。QMT command-result journal、
+durable token、instance/session discovery 和 mapper 均位于 `qmt/` extension。它们必须遵守
+Core identity/evidence contract，但不能改变 Core ABI 或自动扩大 authority。
+
+## 7. 变更规则
+
+Core 1.0.x 允许保持 frozen contract 的 bugfix、性能/测试/形式验证增强和 fail-close 加固。
+新的 broker、route、行情、Risk、Strategy、Operations、Service、Web 默认进入 Extension。
+
+改变 Public API、FSM/evidence、identity/exactly-once/recovery 或 Core schema，需要 Core major
+review。详细 policy 见 [CORE_FREEZE_V1_ZH.md](CORE_FREEZE_V1_ZH.md)。
+
+## 8. 永久 Gate
+
+```powershell
+python tools\verify_core_dependency_boundary.py
+python tools\verify_core_v1_release.py
+pytest -q tests\core
 ```
 
-任何反向依赖都会直接使 CI 失败。
-
-## 3. Core 最小入口
-
-最简使用入口：
-
-```python
-from bigqmt_autotrader.core import ExecutionCore
-```
-
-Core 只负责执行正确性：
-
-- OrderIntent 身份和参数；
-- durable order state；
-- single writer / fencing；
-- persist-before-side-effect；
-- exactly-once submit/cancel；
-- UNKNOWN / RECONCILING；
-- broker evidence；
-- restart recovery；
-- duplicate/conflict fail-close。
-
-Core 不要求 RiskPolicy、RiskSnapshot、MarketDataService、Strategy heartbeat、RuntimeMode、HealthRegistry、Telemetry、Calendar 或 Deployment Guard。
-
-## 4. Risk ownership 上移
-
-历史版本中 OfflineOms.submit_intent() 内部调用 Risk Engine。现在改为：
-
-```text
-Core mode:
-OrderIntent
-  -> OfflineOms.submit_intent()
-  -> deterministic execution authorization
-  -> durable execution
-
-Production Runtime:
-OrderIntent
-  -> RiskManagedOms
-  -> evaluate_risk()
-  -> RiskDecision
-  -> OfflineOms.submit_authorized_intent()
-  -> durable execution
-```
-
-因此 OMS 源码不再 import Risk Engine。
-
-数据库中的 risk_decisions / RISK_ACCEPTED 名称暂时保留，以兼容已有 durable schema 和历史数据；在 Core 模式中它表示 execution authorization，而不是 Production Risk policy evaluation。
-
-## 5. 数据库边界
-
-```text
-CORE_SCHEMA_VERSION      = 8
-SUPPORTED_SCHEMA_VERSION = 11
-```
-
-新建 Core 数据库使用 initialize_core_database(conn)，只执行 migration 1..8，因此不会创建 daily_risk_events、runtime_mode_transitions、operations_alert_events 等 Runtime 表。
-
-完整 Production Runtime 继续使用 initialize_database(conn)，迁移到 schema 11。
-
-已经升级到 schema 9..11 的历史 combined database 仍可以被 Core 打开；Core 不 downgrade、不删除 Runtime 表，也不重复执行 Runtime migration。
-
-新部署建议逻辑上区分：
-
-```text
-core_oms.sqlite3   Execution Core
-runtime.sqlite3    Production Runtime / operations
-```
-
-当前 schema 11 为历史兼容仍是 1..11 的 superset；关键保证是 Core-only 数据库不再依赖 Runtime migrations。
-
-## 6. guojin_sim 进入 Core 边界
-
-GuojinSimOmsRuntime.execute_intent() 现在只接受 OrderIntent：
-
-```python
-execute_intent(intent)
-```
-
-不再接受 RiskSnapshot / RiskPolicy。
-
-仍保留 exact guojin_sim terminal、SIMULATION_CALIBRATION、simulation_only、账户/build pinning、immutable dispatch、broker token、quantity/mutation fuse、no blind retry 和 broker-evidence lifecycle authority。
-
-本次隔离没有扩大 production Guojin / Galaxy / generic 的 mutation authority。
-
-## 7. Production Runtime
-
-完整生产能力通过 bigqmt_autotrader.runtime 或 service 层组合 Core。
-
-Runtime 可继续扩展 Risk、Market Data、Health、Operations、Telemetry、Alerting、Lifecycle、Deployment 和 Backup，但这些扩展不能再次成为 Core 的 import 前置条件。
-
-## 8. 验证 Gate
-
-Core/Runtime 隔离必须同时满足：
-
-1. Core-only database 停在 schema 8；
-2. Core submit 不需要任何 Runtime object；
-3. Core restart/recovery 独立工作；
-4. clean Python process import bigqmt_autotrader.core 时不得加载 Runtime modules；
-5. static AST dependency Gate；
-6. 原有 broker side-effect surface audit；
-7. 全量 pytest；
-8. 全部 formal/TLC。
-
-## 9. 设计结论
-
-以后 Execution Core 修改应非常谨慎，主要围绕执行正确性和 broker lifecycle；Production Runtime 可以快速迭代，但只能依赖 Core。
-
-目标是：即使上层 Runtime 继续增长，最小可靠下单系统仍保持小、稳定、可独立测试、可独立使用。
+CI 的 `core-v1-release` job 永久执行以上边界；主 formal job 还保证冻结模型持续被检查。
