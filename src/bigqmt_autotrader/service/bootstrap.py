@@ -8,9 +8,9 @@ from bigqmt_autotrader.market_data import (
     MarketDataService,
     QmtMarketDataAdapter,
 )
-from bigqmt_autotrader.oms import (
-    SUPPORTED_SCHEMA_VERSION,
-    current_schema_version,
+from bigqmt_autotrader.core import (
+    RUNTIME_SCHEMA_VERSION,
+    database_schema_version,
 )
 from bigqmt_autotrader.operations import (
     HealthRegistry,
@@ -60,12 +60,12 @@ def _deployment_preflight(
     observed: ObservedDeployment,
 ) -> None:
     errors: list[str] = []
-    if expected.schema_version != SUPPORTED_SCHEMA_VERSION:
+    if expected.schema_version != RUNTIME_SCHEMA_VERSION:
         errors.append("RELEASE_SCHEMA_DOES_NOT_MATCH_BINARY_CONSTANT")
-    actual_schema = current_schema_version(conn)
+    actual_schema = database_schema_version(conn)
     if actual_schema != observed.database_schema_version:
         errors.append("OBSERVED_DATABASE_SCHEMA_MISMATCH")
-    if actual_schema != SUPPORTED_SCHEMA_VERSION:
+    if actual_schema != RUNTIME_SCHEMA_VERSION:
         errors.append("DATABASE_SCHEMA_DOES_NOT_MATCH_BINARY_CONSTANT")
     if errors:
         raise DeploymentMismatch(tuple(errors))

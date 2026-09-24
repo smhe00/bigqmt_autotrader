@@ -9,8 +9,7 @@ from bigqmt_autotrader.operations import (
     HealthObservation,
     HealthRegistry,
 )
-from bigqmt_autotrader.qmt.protocol import IngressDisposition
-from bigqmt_autotrader.qmt.receiver import IngressResult
+from bigqmt_autotrader.core import IngressDisposition, IngressResult
 from bigqmt_autotrader.strategy_api import (
     StrategyRuntimeError,
     StrategyRuntimeService,

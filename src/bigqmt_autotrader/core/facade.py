@@ -5,12 +5,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from bigqmt_autotrader.domain import OrderIntent
+from bigqmt_autotrader.domain import OrderIntent, OrderStatus, RiskDecision
 from bigqmt_autotrader.oms import (
+    BrokerEvidenceV1,
     CancelResult,
     OfflineOms,
     OmsRepository,
     SubmitResult,
+    current_schema_version,
     connect_database,
     initialize_core_database,
 )
@@ -20,8 +22,8 @@ class ExecutionCore:
     """Minimal durable execution engine with no Production Runtime dependency."""
 
     def __init__(self, conn: sqlite3.Connection, oms: OfflineOms) -> None:
-        self.conn = conn
-        self.oms = oms
+        self._conn = conn
+        self._oms = oms
 
     @classmethod
     def open(
@@ -47,20 +49,54 @@ class ExecutionCore:
             conn.close()
             raise
 
+    @property
+    def reconciled(self) -> bool:
+        return self._oms.reconciled
+
+    @property
+    def database_schema_version(self) -> int:
+        return current_schema_version(self._conn)
+
     def recover(self) -> None:
-        self.oms.recover()
+        self._oms.recover()
 
     def submit(self, intent: OrderIntent) -> SubmitResult:
-        return self.oms.submit_intent(intent)
+        return self._oms.submit_intent(intent)
+
+    def submit_authorized(
+        self,
+        intent: OrderIntent,
+        decision: RiskDecision,
+        *,
+        evaluation: object | None = None,
+    ) -> SubmitResult:
+        return self._oms.submit_authorized_intent(
+            intent,
+            decision,
+            risk_evaluation=evaluation,
+        )
 
     def cancel(self, account_fingerprint: str, client_order_id: str) -> CancelResult:
-        return self.oms.cancel_order(account_fingerprint, client_order_id)
+        return self._oms.cancel_order(account_fingerprint, client_order_id)
+
+    def status(
+        self,
+        account_fingerprint: str,
+        client_order_id: str,
+    ) -> OrderStatus:
+        return self._oms.repository.get_status(
+            account_fingerprint,
+            client_order_id,
+        )
+
+    def ingest_evidence(self, evidence: BrokerEvidenceV1) -> OrderStatus:
+        return self._oms.ingest_broker_evidence(evidence)
 
     def close(self) -> None:
         try:
-            self.oms.close()
+            self._oms.close()
         finally:
-            self.conn.close()
+            self._conn.close()
 
     def __enter__(self) -> "ExecutionCore":
         return self

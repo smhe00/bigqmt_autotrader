@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from bigqmt_autotrader.core import CORE_SCHEMA_VERSION, ExecutionCore
+from bigqmt_autotrader.core import CORE_SCHEMA_VERSION, ExecutionCore, ExecutionPort
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus, Side
 from bigqmt_autotrader.drivers import SimulatedDriver
 from bigqmt_autotrader.oms import current_schema_version
@@ -29,6 +29,8 @@ def intent(client_order_id="core-1"):
 
 
 def test_execution_core_uses_only_core_schema_and_submits_without_runtime(tmp_path):
+    from bigqmt_autotrader.oms import connect_database
+
     driver = SimulatedDriver()
     core = ExecutionCore.open(
         tmp_path / "core.sqlite3",
@@ -36,19 +38,21 @@ def test_execution_core_uses_only_core_schema_and_submits_without_runtime(tmp_pa
         clock=lambda: NOW,
     )
     try:
-        assert current_schema_version(core.conn) == CORE_SCHEMA_VERSION == 8
+        assert core.database_schema_version == CORE_SCHEMA_VERSION == 8
         core.recover()
         result = core.submit(intent())
         assert result.status is OrderStatus.ACKNOWLEDGED
         assert result.risk_evaluation is None
         assert driver.submit_call_count(FP, "core-1") == 1
 
+        inspect_conn = connect_database(tmp_path / "core.sqlite3")
         tables = {
             row["name"]
-            for row in core.conn.execute(
+            for row in inspect_conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
+        inspect_conn.close()
         assert "daily_risk_events" not in tables
         assert "runtime_mode_transitions" not in tables
         assert "operations_alert_events" not in tables
@@ -71,7 +75,7 @@ def test_execution_core_restart_recovery_remains_available_without_runtime(tmp_p
     )
     try:
         second.recover()
-        assert current_schema_version(second.conn) == 8
+        assert second.database_schema_version == 8
     finally:
         second.close()
 
@@ -87,6 +91,21 @@ def test_core_can_open_existing_full_runtime_database_without_downgrade(tmp_path
 
     core = ExecutionCore.open(path, SimulatedDriver(), clock=lambda: NOW)
     try:
-        assert current_schema_version(core.conn) == 11
+        assert core.database_schema_version == 11
+    finally:
+        core.close()
+
+
+def test_execution_core_satisfies_public_execution_port(tmp_path):
+    core = ExecutionCore.open(
+        tmp_path / "port.sqlite3",
+        SimulatedDriver(),
+        clock=lambda: NOW,
+    )
+    try:
+        assert isinstance(core, ExecutionPort)
+        assert core.reconciled is False
+        core.recover()
+        assert core.reconciled is True
     finally:
         core.close()

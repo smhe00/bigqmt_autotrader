@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
-from bigqmt_autotrader.qmt.protocol import QmtEvent
+from bigqmt_autotrader.core import QmtEvent
 
 from .models import MarketQuote, QuoteUpdateResult
 from .service import MarketDataService

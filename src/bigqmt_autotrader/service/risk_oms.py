@@ -3,8 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Callable
 
-from bigqmt_autotrader.domain import OrderIntent
-from bigqmt_autotrader.oms import OfflineOms, SubmitResult
+from bigqmt_autotrader.core import ExecutionPort, OrderIntent, SubmitResult
 from bigqmt_autotrader.risk import RiskPolicy, RiskSnapshot, evaluate_risk
 
 
@@ -13,16 +12,16 @@ class RiskManagedOms:
 
     def __init__(
         self,
-        oms: OfflineOms,
+        execution: ExecutionPort,
         policy: RiskPolicy,
         *,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if not isinstance(oms, OfflineOms):
-            raise TypeError("oms must be OfflineOms")
+        if not isinstance(execution, ExecutionPort):
+            raise TypeError("execution must satisfy ExecutionPort")
         if not isinstance(policy, RiskPolicy):
             raise TypeError("policy must be RiskPolicy")
-        self._oms = oms
+        self._execution = execution
         self._policy = policy
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
@@ -31,8 +30,8 @@ class RiskManagedOms:
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("RiskManagedOms clock must be timezone-aware")
         evaluation = evaluate_risk(intent, snapshot, self._policy, now=now)
-        return self._oms.submit_authorized_intent(
+        return self._execution.submit_authorized(
             intent,
             evaluation.decision,
-            risk_evaluation=evaluation,
+            evaluation=evaluation,
         )

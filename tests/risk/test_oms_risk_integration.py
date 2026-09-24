@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from bigqmt_autotrader.core import ExecutionCore
 from bigqmt_autotrader.domain import OrderIntent, OrderStatus, RiskReasonCode, Side
 from bigqmt_autotrader.drivers import SimulatedDriver
 from bigqmt_autotrader.oms import OfflineOms, OmsRepository, connect_database, initialize_core_database
@@ -120,7 +121,8 @@ def _stack(tmp_path):
     driver = SimulatedDriver()
     core_oms = OfflineOms(repo, driver, clock=lambda: NOW)
     core_oms.recover()
-    oms = RiskManagedOms(core_oms, _policy(), clock=lambda: NOW)
+    execution = ExecutionCore(conn, core_oms)
+    oms = RiskManagedOms(execution, _policy(), clock=lambda: NOW)
     return repo, driver, oms
 
 
