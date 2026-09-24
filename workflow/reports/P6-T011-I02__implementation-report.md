@@ -5,7 +5,7 @@ task_id: P6-T011
 iteration: I02
 task_key: P6-T011-I02
 reply_to: workflow/tasks/P6-T011-I02__sgt-linked-fill-permissive-risk.md
-status: AWAITING_AGENT
+status: REVIEW_READY
 owner: agent
 review_target: workflow/reviews/P6-T011-I02__architect-review.md
 ---
@@ -13,27 +13,47 @@ review_target: workflow/reviews/P6-T011-I02__architect-review.md
 # P6-T011-I02 Implementation Report
 
 ## Result
-- Status: AWAITING_AGENT
-- Runtime time:
+- Status: REVIEW_READY
+- Implementation commit: NONE
+- Base commit: 5857fe24d71cecc429dba8acd21ddf34429619f6
+- Final commit: NONE
 
-## Preflight / Risk
-Agent: record exact build/session/fingerprint, fresh .SGT tick, SHENGANGTONG capability, and stored guojin-sim permissive Risk decision.
+## Implementation summary
 
-## Runtime evidence
-Agent: record symbol/side/qty/price, client ID, command/token/digest, ORDER/DEAL/query facts, linked-route metadata and OMS lifecycle.
+No Agent runtime execution was accepted for this iteration.
 
-## Idempotency
-Agent: prove fill exactly once, no duplicate submit/blind retry and no unresolved UNKNOWN.
+The task was invalidated by the P7 Core / Runtime boundary merge before runtime execution:
+`GuojinSimOmsRuntime.execute_intent()` no longer accepts `RiskSnapshot` or `RiskPolicy`.
+The runtime objective remains valid, but the invocation and evidence terminology changed.
 
-## Mutation accounting
-- guojin_sim submit =
-- guojin_sim cancel =
-- production Guojin = 0
-- Galaxy = 0
-- generic = 0
+## Verification results
 
-## Verification
-Agent: record workflow verification and relevant CI/runtime checks.
+Architect verified current `main` at:
 
-## Handoff
-Use standard Agent -> Architect handoff.
+`114ee09ebb7702cdad72ebb16308e44d4a197e5c`
+
+and confirmed the current API is:
+
+```python
+execute_intent(intent)
+```
+
+with Core execution authorization rule version:
+
+`guojin-sim-accept-all-v1`
+
+## Safety declaration
+
+- guojin_sim submit: 0
+- guojin_sim cancel: 0
+- production Guojin mutation: 0
+- Galaxy mutation: 0
+- generic mutation: 0
+
+## Deviations / unresolved items
+
+The SGT linked-route fill runtime Gate remains unexecuted and is moved to P6-T011-I03.
+
+## Handoff to Architect
+
+Architect-created supersession due to merged API architecture change.
