@@ -185,3 +185,15 @@ Core formal subset 由 `contracts/core/v1/formal_models.json` 锁定，并要求
 - Core formal model 从 CI 中消失。
 
 Core v1 的修改默认按补丁版本处理；只有保持上述 contract 完全兼容才允许进入 1.0.x。
+
+## 10. 当前状态
+
+**Execution Core v1 已冻结（FROZEN）。**
+
+冻结身份：`core-v1.0.0`
+
+Release Gate 已在 commit `068212da517d21603885af7e52f3abb6236dd2f4` 上验证通过，
+GitHub Actions run `36016234582` 的 `test`、`core-v1-release`、
+`formal-verification` 三个 job 均为 success。
+
+后续新增功能默认进入 Extension；Core 变更必须满足第 8 节 Change Policy。

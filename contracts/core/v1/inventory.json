@@ -46,8 +46,10 @@
   },
   "required_refactors": [],
   "core_schema_version": 1,
-  "status": "F005_RELEASE_CANDIDATE",
+  "status": "FROZEN",
   "public_api_contract": "contracts/core/v1/public_api.json",
   "schema_contract": "contracts/core/v1/schema.json",
-  "formal_contract": "contracts/core/v1/formal_models.json"
+  "formal_contract": "contracts/core/v1/formal_models.json",
+  "release": "core-v1.0.0",
+  "release_contract": "contracts/core/v1/release.json"
 }
