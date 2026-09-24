@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
 from bigqmt_autotrader.domain import OrderStatus
+from bigqmt_autotrader.oms.leader import OmsLeaderLost
 from bigqmt_autotrader.oms.repository import QmtDurableIdentityConflict
 from bigqmt_autotrader.qmt.commands import QmtCommandSpool
 from bigqmt_autotrader.qmt.guojin_sim_oms import (
@@ -15,7 +18,7 @@ from bigqmt_autotrader.qmt.guojin_sim_oms import (
 from bigqmt_autotrader.qmt.host import (
     QmtOmsSessionRollover,
     _build_ingestion,
-    _require_current_oms_session,
+    _maintain_current_oms_event,
 )
 from bigqmt_autotrader.qmt.instances import QmtInstance
 from bigqmt_autotrader.qmt.protocol import QmtEvent, encode_transport_frame
@@ -105,6 +108,44 @@ def order_payload(token: str, status: int, *, broker_id: str = "9001") -> dict:
         "filled_quantity": filled,
         "remaining_quantity": 0 if status == 56 else 100,
     }
+
+
+def write_spool_event(path: Path, item: QmtEvent) -> None:
+    path.write_bytes(encode_transport_frame(item))
+
+
+def clean_snapshot(sequence: int) -> QmtEvent:
+    return event(
+        sequence,
+        "snapshot",
+        {
+            "account_fingerprint": FP,
+            "account_type": "STOCK",
+            "account": [],
+            "positions": [],
+            "orders": [],
+            "deals": [],
+            "query_errors": [],
+        },
+        source="active_query",
+    )
+
+
+class BoundaryRuntime:
+    def __init__(self, *, maintain_error: Exception | None = None) -> None:
+        self.instance = SimpleNamespace(session_id=SESSION)
+        self.maintain_error = maintain_error
+        self.maintain_calls = 0
+        self.refresh_calls = 0
+
+    def maintain(self) -> None:
+        self.maintain_calls += 1
+        if self.maintain_error is not None:
+            raise self.maintain_error
+
+    def refresh_identities(self) -> int:
+        self.refresh_calls += 1
+        return 0
 
 
 @pytest.mark.parametrize(
@@ -199,7 +240,7 @@ def test_live_host_rollover_retains_new_session_event_for_clean_restart(tmp_path
                 expected_terminal_instance_id="guojin_sim",
             ),
             spool_root=tmp_path,
-            on_event=lambda result: _require_current_oms_session(
+            on_event=lambda result: _maintain_current_oms_event(
                 result.event.session_id, runtime
             ),
         )
@@ -220,6 +261,128 @@ def test_live_host_rollover_retains_new_session_event_for_clean_restart(tmp_path
         assert not list(receiver.conflicts.glob("*.json"))
     finally:
         runtime.close()
+
+
+def test_processed_replay_maintains_oms_at_every_event_boundary(tmp_path):
+    runtime = BoundaryRuntime()
+    receiver = FileSpoolReceiver(
+        QmtIngressBuffer(
+            expected_account_fingerprint=FP,
+            expected_terminal_instance_id="guojin_sim",
+        ),
+        spool_root=tmp_path,
+        on_event=lambda result: _maintain_current_oms_event(
+            result.event.session_id, runtime
+        ),
+    )
+    items = [
+        clean_snapshot(1),
+        event(2, "account", {"status": "ok"}),
+        event(3, "account", {"status": "ok"}),
+    ]
+    for item in items:
+        write_spool_event(receiver.processed / (str(item.sequence) + ".json"), item)
+
+    replay = receiver.replay_processed_from_latest_clean_snapshot()
+
+    assert replay.replayed == len(items)
+    assert runtime.maintain_calls == len(items)
+    assert runtime.refresh_calls == len(items)
+    assert not list((tmp_path / "commands").glob("**/*.json"))
+
+
+def test_long_processed_replay_renews_before_fixed_lease_expires(tmp_path, monkeypatch):
+    from bigqmt_autotrader.oms import leader as leader_module
+    from bigqmt_autotrader.qmt import guojin_sim_oms as runtime_module
+
+    clock = {
+        "monotonic": 0.0,
+        "now": datetime(2026, 9, 24, 1, 0, tzinfo=timezone.utc),
+    }
+    monkeypatch.setattr(runtime_module.time, "monotonic", lambda: clock["monotonic"])
+    monkeypatch.setattr(leader_module, "_utc_now", lambda: clock["now"])
+    runtime = GuojinSimOmsRuntime(instance(tmp_path))
+    receiver = FileSpoolReceiver(
+        QmtIngressBuffer(
+            expected_account_fingerprint=FP,
+            expected_terminal_instance_id="guojin_sim",
+        ),
+        spool_root=tmp_path,
+    )
+    items = [clean_snapshot(1)] + [
+        event(sequence, "account", {"status": "ok"})
+        for sequence in range(2, 8)
+    ]
+    for item in items:
+        write_spool_event(receiver.processed / (str(item.sequence) + ".json"), item)
+
+    def maintain_after_six_seconds(result) -> None:
+        clock["monotonic"] += 6.0
+        clock["now"] += timedelta(seconds=6)
+        _maintain_current_oms_event(result.event.session_id, runtime)
+
+    receiver.on_event = maintain_after_six_seconds
+    try:
+        replay = receiver.replay_processed_from_latest_clean_snapshot()
+        assert replay.replayed == len(items)
+        assert clock["monotonic"] == 42.0
+        runtime.assert_leader()
+        assert runtime._lease.expires_at > clock["now"]
+        assert not list((tmp_path / "commands").glob("**/*.json"))
+    finally:
+        runtime.close()
+
+
+def test_session_rollover_stops_before_oms_maintenance_or_refresh(tmp_path):
+    from dataclasses import replace
+
+    runtime = BoundaryRuntime()
+    receiver = FileSpoolReceiver(
+        QmtIngressBuffer(
+            expected_account_fingerprint=FP,
+            expected_terminal_instance_id="guojin_sim",
+        ),
+        spool_root=tmp_path,
+        on_event=lambda result: _maintain_current_oms_event(
+            result.event.session_id, runtime
+        ),
+    )
+    stale = replace(clean_snapshot(1), session_id="next-qmt-session")
+    path = receiver.inbox / "next-session.json"
+    write_spool_event(path, stale)
+
+    with pytest.raises(QmtOmsSessionRollover):
+        receiver.poll_once()
+
+    assert runtime.maintain_calls == 0
+    assert runtime.refresh_calls == 0
+    assert path.exists()
+    assert not list((tmp_path / "commands").glob("**/*.json"))
+
+
+def test_lost_lease_at_event_boundary_fails_closed_and_retains_event(tmp_path):
+    runtime = BoundaryRuntime(maintain_error=OmsLeaderLost("lost during replay"))
+    receiver = FileSpoolReceiver(
+        QmtIngressBuffer(
+            expected_account_fingerprint=FP,
+            expected_terminal_instance_id="guojin_sim",
+        ),
+        spool_root=tmp_path,
+        on_event=lambda result: _maintain_current_oms_event(
+            result.event.session_id, runtime
+        ),
+    )
+    path = receiver.inbox / "event.json"
+    write_spool_event(path, clean_snapshot(1))
+
+    with pytest.raises(OmsLeaderLost, match="lost during replay"):
+        receiver.poll_once()
+
+    assert runtime.maintain_calls == 1
+    assert runtime.refresh_calls == 0
+    assert path.exists()
+    assert not list(receiver.processed.glob("*.json"))
+    assert not list((tmp_path / "commands").glob("**/*.json"))
 
 
 def test_conflicting_durable_identity_fails_closed(tmp_path):

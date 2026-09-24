@@ -33,6 +33,23 @@ def _require_current_oms_session(
         raise QmtOmsSessionRollover(runtime.instance.session_id, incoming_session_id)
 
 
+def _maintain_current_oms_event(
+    incoming_session_id: str, runtime: GuojinSimOmsRuntime | None
+) -> None:
+    """Fence the session, then maintain the OMS lease at every event boundary.
+
+    The same callback handles startup replay and live polling.  Keeping the
+    heartbeat opportunity here prevents a large replay batch from starving the
+    lease before the normal Host loop regains control.  Session rollover is
+    checked first so a stale mapper is never maintained or refreshed for a new
+    QMT session.
+    """
+    _require_current_oms_session(incoming_session_id, runtime)
+    if runtime is not None:
+        runtime.maintain()
+        runtime.refresh_identities()
+
+
 def _safe_status(status: str, payload: dict[str, Any]) -> None:
     if _ACTIVE_INSTANCE_ID is not None and "instance_id" not in payload:
         payload = {"instance_id": _ACTIVE_INSTANCE_ID, **payload}
@@ -437,9 +454,7 @@ def main(argv: list[str] | None = None) -> int:
         # event in the spool and stop rather than processing it with stale
         # command identities.  A fresh Host startup validates the new manifest
         # and replays its coherent tail.
-        _require_current_oms_session(result.event.session_id, oms_runtime)
-        if oms_runtime is not None:
-            oms_runtime.refresh_identities()
+        _maintain_current_oms_event(result.event.session_id, oms_runtime)
         ingest_result = ingestion.handle(result)
         event_type = result.event.event_type
         stats["events_seen"] += 1
