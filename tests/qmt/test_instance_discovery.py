@@ -273,6 +273,69 @@ def test_current_session_bridge_ready_is_loaded_from_committed_archive(tmp_path:
     assert instance.session_id == "session-01"
 
 
+def test_same_timestamp_archived_higher_sequence_wins_over_loose_ready(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    ready_path = root / "inbox" / "ready.json"
+    event = dict(json.loads(ready_path.read_text(encoding="utf-8"))["event"])
+
+    archived = dict(event)
+    archived["sequence"] = 2
+    _archive_ready_event(root, raw_override=encode_transport_frame(archived))
+
+    loose = dict(event)
+    loose["session_id"] = "loose-session"
+    loose["sequence"] = 1
+    (root / "inbox" / "loose-ready.json").write_bytes(encode_transport_frame(loose))
+
+    instance = load_instance(tmp_path, "terminal_01")
+
+    assert instance.session_id == "session-01"
+
+
+def test_same_timestamp_loose_higher_sequence_wins_over_archived_ready(tmp_path: Path) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    ready_path = root / "inbox" / "ready.json"
+    event = dict(json.loads(ready_path.read_text(encoding="utf-8"))["event"])
+
+    archived = dict(event)
+    archived["session_id"] = "archived-session"
+    archived["sequence"] = 1
+    _archive_ready_event(root, raw_override=encode_transport_frame(archived))
+
+    loose = dict(event)
+    loose["sequence"] = 2
+    (root / "inbox" / "loose-ready.json").write_bytes(encode_transport_frame(loose))
+
+    instance = load_instance(tmp_path, "terminal_01")
+
+    assert instance.session_id == "session-01"
+
+
+def test_same_timestamp_and_sequence_uses_session_id_tiebreak_across_archive(
+    tmp_path: Path,
+) -> None:
+    root = _write_instance(tmp_path, "terminal_01")
+    ready_path = root / "inbox" / "ready.json"
+    event = dict(json.loads(ready_path.read_text(encoding="utf-8"))["event"])
+
+    manifest_path = root / "instance.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["session_id"] = "session-z"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    archived = dict(event)
+    archived["session_id"] = "session-z"
+    _archive_ready_event(root, raw_override=encode_transport_frame(archived))
+
+    loose = dict(event)
+    loose["session_id"] = "session-a"
+    (root / "inbox" / "loose-ready.json").write_bytes(encode_transport_frame(loose))
+
+    instance = load_instance(tmp_path, "terminal_01")
+
+    assert instance.session_id == "session-z"
+
+
 def test_newer_loose_bridge_ready_wins_over_archived_current_session(tmp_path: Path) -> None:
     root = _write_instance(tmp_path, "terminal_01")
     _archive_ready_event(root)
