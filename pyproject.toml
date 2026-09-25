@@ -10,7 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Proprietary / personal use until explicitly relicensed"}
 authors = [{name = "bigqmt_autotrader contributors"}]
-dependencies = []
+# tzdata: zoneinfo database for Windows / slim containers where the OS does
+# not ship one. The service calendar requires ZoneInfo('Asia/Shanghai').
+dependencies = ["tzdata>=2024.1"]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "jsonschema>=4.23"]

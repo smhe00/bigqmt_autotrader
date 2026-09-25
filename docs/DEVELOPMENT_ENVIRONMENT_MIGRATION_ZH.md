@@ -42,6 +42,15 @@ py -3.12 -m venv .venv
 TLC 与 CI 一致使用 `tla2tools.jar` v1.7.4，SHA-256 为
 `936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88`。
 
+Windows 注意事项（P6-T017 起已仓库级修复）：
+
+- `tzdata` 由 `pip install -e ".[test]"` 作为运行依赖自动安装（日历模块需要
+  `ZoneInfo('Asia/Shanghai')`，Windows/精简容器没有系统时区库）；
+- 换行符由 `.gitattributes` 强制 LF：Windows checkout 不再把 `qmt_side/*.py`
+  smudge 成 CRLF，`build_qmt_deployments.py --check` 的字节级比较才成立。
+  若 `--check` 仍失败，先查 `git ls-files --eol qmt_side`，工作树侧应为 `w/lf`；
+  异常时用 `git -c core.autocrlf=false checkout -- qmt_side` 恢复。
+
 ## 4. 哪些内容来自 Git
 
 必须从 Git 获取而不是从旧机器复制：

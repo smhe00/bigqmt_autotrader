@@ -1,0 +1,23 @@
+# Normalize line endings: the repository canonical form is LF. Windows
+# checkouts must keep LF because tools/build_qmt_deployments.py --check and
+# tests/qmt/test_live_canary_authority_contract.py compare generated QMT
+# artifacts byte-for-byte against the committed files.
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sql text eol=lf
+*.jsonl text eol=lf
+*.cfg text eol=lf
+*.txt text eol=lf
+*.tla text eol=lf
+
+# Binary evidence: never normalize.
+*.jar binary
+*.png binary
+*.pptx binary
+*.ico binary
+*.db binary
