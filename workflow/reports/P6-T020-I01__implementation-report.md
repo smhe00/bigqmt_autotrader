@@ -5,7 +5,7 @@ task_id: P6-T020
 iteration: I01
 task_key: P6-T020-I01
 reply_to: workflow/tasks/P6-T020-I01__align-live-canary-fuse-pin.md
-status: AWAITING_AGENT
+status: REVIEW_READY
 owner: agent
 review_target: workflow/reviews/P6-T020-I01__architect-review.md
 ---
@@ -14,12 +14,9 @@ review_target: workflow/reviews/P6-T020-I01__architect-review.md
 
 ## 1. Result
 
-- Status: AWAITING_AGENT
-- Implementation commit:
-- Base commit: f19a6af（任务 issuance；audit base 9ae9dc146f15c79db9a76e39b3d76261a3c86b45）
-- Final commit:
-
-## 2. Files changed
+- Status: `REVIEW_READY`
+- Implementation commit: e73e63add2b9c8d4d48be03c3951e44ae8b1562a
+- Final commit: e73e63add2b9c8d4d48be03c3951e44ae8b1562a
 
 - `src/bigqmt_autotrader/qmt/instances.py` — LIVE_CANARY 分支 `safety_required`：
   `max_submit_calls_per_session` 2 → 1、`max_cancel_calls_per_session` 2 → 1（仅这两行）。
