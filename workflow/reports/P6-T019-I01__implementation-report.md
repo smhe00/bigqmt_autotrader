@@ -5,7 +5,7 @@ task_id: P6-T019
 iteration: I01
 task_key: P6-T019-I01
 reply_to: workflow/tasks/P6-T019-I01__live-canary-runtime-preflight.md
-status: AWAITING_AGENT
+status: REVIEW_READY
 owner: agent
 review_target: workflow/reviews/P6-T019-I01__architect-review.md
 ---
@@ -14,12 +14,9 @@ review_target: workflow/reviews/P6-T019-I01__architect-review.md
 
 ## 1. Result
 
-- Status: AWAITING_AGENT
-- Implementation commit:
-- Base commit: 5cd1241（任务 issuance；audit base d8fc9510617aa4de4a460a8ee0d789e7418d6d30）
-- Final commit:
-
-## 2. Files changed
+- Status: `REVIEW_READY`
+- Implementation commit: f26f1712211e7572803dc4881721dde823d83d4d
+- Final commit: f26f1712211e7572803dc4881721dde823d83d4d
 
 - `tools/live_canary_runtime_preflight.py`（新增，约 330 行）：只读 GO/NO-GO 预检工具，
   10 项检查全部落地（generator 同步、artifact 常量 vs probe、Host/schema 熔断钉一致性、
