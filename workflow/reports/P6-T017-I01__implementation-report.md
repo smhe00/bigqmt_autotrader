@@ -5,7 +5,7 @@ task_id: P6-T017
 iteration: I01
 task_key: P6-T017-I01
 reply_to: workflow/tasks/P6-T017-I01__windows-acceptance-portability.md
-status: AWAITING_AGENT
+status: REVIEW_READY
 owner: agent
 review_target: workflow/reviews/P6-T017-I01__architect-review.md
 ---
@@ -14,12 +14,9 @@ review_target: workflow/reviews/P6-T017-I01__architect-review.md
 
 ## 1. Result
 
-- Status: AWAITING_AGENT
-- Implementation commit:
-- Base commit: aca9dd3d48f31b907e60aa4ba702f76b16c1bf62 (task issuance; audit base 000d09437f3f8fce75745eb04cad01185506d8ed)
-- Final commit:
-
-## 2. Files changed
+- Status: `REVIEW_READY`
+- Implementation commit: bd1029d95502f2db1d68e1389aad803cc31bd683
+- Final commit: bd1029d95502f2db1d68e1389aad803cc31bd683
 
 - `pyproject.toml` — `project.dependencies` 由 `[]` 改为 `["tzdata>=2024.1"]`，
   附注释说明日历模块需要 `ZoneInfo('Asia/Shanghai')`、Windows/精简容器无系统时区库。
