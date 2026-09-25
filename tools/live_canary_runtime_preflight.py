@@ -16,8 +16,12 @@ Checks
                        manifest, bridge_ready session/instance/account.
 5. build_fresh         manifest bridge_build equals the pinned build-7.
 6. manifest_pins       manifest fuse/quantity values equal the schema constants.
-7. fuse_unused         no SUBMIT_LIMIT/CANCEL_ORDER command exists for the
-                       current session in commands/{inbox,claimed,processed,unknown}.
+7. fuse_unused         decodes every durable command in
+                       commands/{inbox,claimed,processed,unknown} with the
+                       official decode_command_frame(); any SUBMIT_LIMIT or
+                       CANCEL_ORDER bound to the current session consumes the
+                       fuse, and malformed/oversized/contract-invalid frames
+                       fail closed.
 8. no_unknown          commands/unknown is empty (unreconciled UNKNOWN blocks).
 9. clean_evidence      events quarantine/ and conflicts/ are empty.
 10. window_open        HGT submit window is open (probe logic, same as bridge).
@@ -42,6 +46,12 @@ from decimal import Decimal
 from pathlib import Path
 
 from bigqmt_autotrader.qmt import live_canary_probe as probe
+from bigqmt_autotrader.qmt.commands import (
+    MAX_COMMAND_FRAME_BYTES,
+    QmtCommandError,
+    QmtCommandType,
+    decode_command_frame,
+)
 from bigqmt_autotrader.qmt.instances import QmtInstance, QmtInstanceError, load_instance
 from bigqmt_autotrader.qmt.protocol import encode_transport_frame
 
@@ -51,9 +61,10 @@ ARTIFACT_PATH = ROOT / "qmt_side" / "BIGQMT_EXECUTION_BRIDGE_V05_GUOJIN.py"
 GENERATOR_PATH = ROOT / "tools" / "build_qmt_deployments.py"
 DEFAULT_SPOOL_ROOT = r"D:\BigQMTData\spool"
 DEFAULT_INSTANCE = "guojin"
-MUTATION_COMMAND_TYPES = frozenset({"SUBMIT_LIMIT", "CANCEL_ORDER"})
+MUTATION_COMMAND_TYPES = frozenset({QmtCommandType.SUBMIT_LIMIT, QmtCommandType.CANCEL_ORDER})
+# rejected/ holds commands the bridge refused before executing any mutation, so
+# they never consume a fuse; every other durable state does.
 COMMAND_SCAN_DIRS = ("inbox", "claimed", "processed", "unknown")
-MAX_COMMAND_FILE_BYTES = 1 << 20
 PIN_KEYS = ("max_order_quantity", "max_submit_calls_per_session", "max_cancel_calls_per_session")
 
 
@@ -233,26 +244,52 @@ def fuse_unused_check(spool_root: Path, instance_id: str, instance: QmtInstance 
     if instance is None:
         return Check("fuse_unused", False, "skipped: instance_load failed")
     consumed: list[str] = []
+    blocking: list[str] = []
     commands_root = spool_root / instance_id / "commands"
     for subdir in COMMAND_SCAN_DIRS:
         directory = commands_root / subdir
         if not directory.is_dir():
             continue
-        for path in sorted(directory.glob("*.json")):
-            if path.stat().st_size > MAX_COMMAND_FILE_BYTES:
-                consumed.append(f"{subdir}/{path.name}: oversized, treat as consumed")
+        for path in sorted(directory.iterdir()):
+            if not path.is_file():
+                continue
+            label = f"{subdir}/{path.name}"
+            try:
+                size = path.stat().st_size
+            except OSError as exc:
+                blocking.append(f"{label}: unreadable ({exc})")
+                continue
+            if size > MAX_COMMAND_FRAME_BYTES:
+                blocking.append(f"{label}: oversized ({size} bytes)")
                 continue
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                consumed.append(f"{subdir}/{path.name}: unreadable ({exc})")
+                raw = path.read_bytes()
+            except OSError as exc:
+                blocking.append(f"{label}: unreadable ({exc})")
                 continue
-            if not isinstance(payload, dict):
+            try:
+                command = decode_command_frame(raw)
+            except QmtCommandError as exc:
+                blocking.append(f"{label}: contract-invalid command frame ({exc})")
                 continue
-            if payload.get("expected_qmt_session_id") != instance.session_id:
+            if command.command_type not in MUTATION_COMMAND_TYPES:
                 continue
-            if payload.get("command_type") in MUTATION_COMMAND_TYPES:
-                consumed.append(f"{subdir}/{path.name}: {payload.get('command_type')}")
+            expected_session = command.payload.get("expected_qmt_session_id")
+            if expected_session is None:
+                blocking.append(
+                    f"{label}: {command.command_type.value} without expected_qmt_session_id "
+                    "(unattributable mutation command)"
+                )
+            elif expected_session == instance.session_id:
+                consumed.append(f"{label}: {command.command_type.value}")
+            # else: foreign-session command — it belongs to another session and
+            # does not consume this session's fuse.
+    if blocking:
+        return Check(
+            "fuse_unused",
+            False,
+            "fail-closed: fuse state cannot be verified — " + "; ".join(blocking),
+        )
     if consumed:
         return Check(
             "fuse_unused",
