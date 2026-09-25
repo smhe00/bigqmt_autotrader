@@ -25,3 +25,8 @@ qmt_userdata/
 .*.un~
 .formal-tools/
 states/
+
+# local operator scratch (sandbox shims, pytest basetemp dirs, deck drafts)
+.runtime/
+.pytest-tmp-*/
+deck/
