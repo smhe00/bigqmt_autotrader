@@ -5,7 +5,7 @@ task_id: P6-T021
 iteration: I01
 task_key: P6-T021-I01
 reply_to: workflow/tasks/P6-T021-I01__fix-preflight-command-frame-fuse.md
-status: AWAITING_AGENT
+status: REVIEW_READY
 owner: agent
 review_target: workflow/reviews/P6-T021-I01__architect-review.md
 ---
@@ -14,12 +14,9 @@ review_target: workflow/reviews/P6-T021-I01__architect-review.md
 
 ## 1. Result
 
-- Status: AWAITING_AGENT
-- Implementation commit:
-- Base commit: 1a14842（任务 issuance；audit base cd030e6a2e02c5c7efef0a35fc03d4932c5c2ea0）
-- Final commit:
-
-## 2. Files changed
+- Status: `REVIEW_READY`
+- Implementation commit: 1ff02a9e071db2549a7e20777f98dbdf7e170273
+- Final commit: 1ff02a9e071db2549a7e20777f98dbdf7e170273
 
 - `tools/live_canary_runtime_preflight.py` — 仅 `fuse_unused_check()` 重写 + 常量/文档同步：
   - 弃用扁平 JSON 手解析，改用正式 `decode_command_frame()`（其内部含
