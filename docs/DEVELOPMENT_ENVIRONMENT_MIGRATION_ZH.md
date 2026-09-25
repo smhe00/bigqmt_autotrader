@@ -89,6 +89,17 @@ D:\BigQMTData\spool\guojin_sim
    build、mode、session 和 fingerprint。
 6. 先完成只读 snapshot/replay 健康检查，再依据新的明确 Gate 决定是否允许 mutation。
 
+在 QMT 终端加载 guojin build 之前运行只读预检（机器可查的 GO/NO-GO 全清单，
+工具自身绝不写入 spool）：
+
+```bash
+python tools/live_canary_runtime_preflight.py
+```
+
+任何 `NO-GO` 项（旧 build、熔断已消费、UNKNOWN/quarantine/conflicts 未清理、
+Host 与 schema 熔断钉不一致、窗口未开）都必须先解决，不得带着 NO-GO 进入实盘 gate；
+清单末尾的人工项（QMT 终端在跑、publisher 确认串、单一案例核对）由操作者逐条确认。
+
 当前部署矩阵：
 
 | instance | 文件 | build | 权限 |
