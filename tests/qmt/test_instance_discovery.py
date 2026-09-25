@@ -198,8 +198,8 @@ def _write_live_canary_instance(base: Path, instance_id: str = "guojin") -> Path
         "simulation_only": False,
         "authorized_account_fingerprint": FINGERPRINT,
         "max_order_quantity": 100,
-        "max_submit_calls_per_session": 2,
-        "max_cancel_calls_per_session": 2,
+        "max_submit_calls_per_session": 1,
+        "max_cancel_calls_per_session": 1,
     }
     manifest = {
         "manifest_version": "1",
@@ -470,10 +470,10 @@ def test_live_canary_requires_separate_explicit_host_authority(tmp_path: Path) -
     assert instance.account_fingerprint == FINGERPRINT
 
 
-def test_live_canary_rejects_more_than_two_submits_per_session(tmp_path: Path) -> None:
+def test_live_canary_rejects_submit_fuse_above_pin(tmp_path: Path) -> None:
     root = _write_live_canary_instance(tmp_path)
     manifest = json.loads((root / "instance.json").read_text(encoding="utf-8"))
-    manifest["max_submit_calls_per_session"] = 3
+    manifest["max_submit_calls_per_session"] = 2
     (root / "instance.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(QmtInstanceError, match="max_submit_calls_per_session"):
         load_instance(tmp_path, "guojin", allow_live_canary=True)

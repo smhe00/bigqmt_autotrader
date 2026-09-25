@@ -299,8 +299,8 @@ def load_instance(
             "live_cancel": True,
             "simulation_only": False,
             "max_order_quantity": 100,
-            "max_submit_calls_per_session": 2,
-            "max_cancel_calls_per_session": 2,
+            "max_submit_calls_per_session": 1,
+            "max_cancel_calls_per_session": 1,
         }
     else:
         raise QmtInstanceError("instance execution mode is not authorized")

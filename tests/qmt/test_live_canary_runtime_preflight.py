@@ -176,11 +176,10 @@ def test_authority_pin_consistency_check_is_truthful() -> None:
 # runtime checks against fabricated spools
 
 
-def test_go_on_clean_build7_instance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_go_on_clean_build7_instance(tmp_path: Path, patched_static: None) -> None:
     """Full GO requires the Host pin to match the schema pins (T020 alignment)."""
     if not preflight.authority_pin_consistency_check().passed:
         pytest.skip("Host LIVE_CANARY pin diverges from schema pins; GO blocked until aligned")
-    patched_static(monkeypatch)
     _write_instance(tmp_path, fuse=1)
     checks = preflight.runtime_checks(tmp_path, "guojin")
     failed = [check for check in checks if not check.passed]
