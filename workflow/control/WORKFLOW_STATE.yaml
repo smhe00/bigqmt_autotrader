@@ -22,26 +22,27 @@ bootstrap_refresh_main_before_work: true
 bootstrap_verify_head_before_write: true
 bootstrap_inspect_diff_from_audit_base: true
 
-handoff_seq: 56
-handoff_id: "P6-T016-I01-architect-verdict-0056"
+handoff_seq: 57
+handoff_id: "P6-T017-I01-architect-to-agent-0057"
 
 phase: "P6"
-task_id: "P6-T016"
+task_id: "P6-T017"
 iteration: "I01"
-task_key: "P6-T016-I01"
+task_key: "P6-T017-I01"
 
-state: "PASS"
-owner: "architect"
+state: "AGENT_READY"
+owner: "agent"
 
-audit_base_commit: "2199c1e25c9bde474a0636526ce8b9de4451ee95"
-task_file: "workflow/tasks/P6-T016-I01__development-environment-migration-docs.md"
-expected_report_file: "workflow/reports/P6-T016-I01__implementation-report.md"
-expected_review_file: "workflow/reviews/P6-T016-I01__architect-review.md"
+audit_base_commit: "000d09437f3f8fce75745eb04cad01185506d8ed"
+task_file: "workflow/tasks/P6-T017-I01__windows-acceptance-portability.md"
+expected_report_file: "workflow/reports/P6-T017-I01__implementation-report.md"
+expected_review_file: "workflow/reviews/P6-T017-I01__architect-review.md"
 
-report_status: "REVIEW_READY"
-review_status: "PASS"
+report_status: "AWAITING_AGENT"
+review_status: "AWAITING_REVIEW"
 
-authorized_next: []
+authorized_next:
+  - "P6-T017-I01"
 ordering:
   task_width: 3
   iteration_width: 2
